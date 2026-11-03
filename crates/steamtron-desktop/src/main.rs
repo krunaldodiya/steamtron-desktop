@@ -7,7 +7,7 @@ use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
-use steamtron_library::{add_bundle, bundle_from_zip, download_bundle, normalize_appid, search as steam_search, AddedGame, SearchResult};
+use steamtron_library::{add_bundle, bundle_from_zip, download_bundle, normalize_appid, remove_game as remove_library_game, search as steam_search, AddedGame, RemovedGame, SearchResult};
 
 #[derive(Serialize)]
 struct GameView {
@@ -73,7 +73,65 @@ fn unlock_backend() -> Result<impl UnlockBackend, String> {
 #[tauri::command]
 fn search_games(query: String) -> Result<Vec<SearchResult>, String> {
     require_auth()?;
-    steam_search(&query).map_err(|error| error.to_string())
+    let mut results = steam_search(&query).map_err(|error| error.to_string())?;
+    let installed: std::collections::BTreeSet<String> = steam::games()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|game| game.appid)
+        .chain(
+            steam::managed_appids()
+                .map_err(|error| error.to_string())?
+                .into_iter(),
+        )
+        .collect();
+    for result in &mut results {
+        result.installed = installed.contains(&result.appid);
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+fn remove_game(appid: String) -> Result<RemovedGame, String> {
+    require_auth()?;
+    let backend = platform_backend().map_err(|error| error.to_string())?;
+    remove_library_game(&appid, &backend).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn restart_steam() -> Result<String, String> {
+    require_auth()?;
+    restart_steam_impl()
+}
+
+#[cfg(target_os = "linux")]
+fn restart_steam_impl() -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    let output = Command::new("steam")
+        .arg("-shutdown")
+        .output()
+        .map_err(|error| format!("Steam executable not found: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Steam shutdown failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    Command::new("setsid")
+        .arg("steam")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start Steam: {error}"))?;
+    Ok("Steam restart requested.".into())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn restart_steam_impl() -> Result<String, String> {
+    Err("Steam restart is only implemented on Linux.".into())
 }
 
 #[tauri::command]
@@ -211,6 +269,8 @@ fn main() {
             search_games,
             add_game,
             import_game_zip,
+            remove_game,
+            restart_steam,
             profile_status,
             profile_login,
             profile_logout,

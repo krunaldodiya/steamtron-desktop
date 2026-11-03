@@ -81,3 +81,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .toast { position:fixed; right:20px; bottom:20px; max-width:min(460px, calc(100vw - 40px)); padding:10px 14px; border-radius:8px; background:#203447; border:1px solid #3d617e; color:#e8f0f7; font-size:13px; box-shadow:0 12px 40px #000a; opacity:0; transform:translateY(8px); pointer-events:none; transition:opacity .16s ease, transform .16s ease; z-index:210; }
 .toast.show { opacity:1; transform:translateY(0); }
 .toast.error { border-color:#a34d4d; color:#ffc2c2; }
+
+.search-result.installed { opacity:.55; cursor:not-allowed; }
+.search-result.installed small { color:#8fd3a8; }
+.in-library { color:#8fd3a8; font-size:11px; font-weight:600; margin-left:6px; }

@@ -12,6 +12,7 @@ use crate::{
 pub struct LinuxUnlock {
     steam_root: PathBuf,
     data_home: PathBuf,
+    config_home: PathBuf,
 }
 
 impl LinuxUnlock {
@@ -27,16 +28,29 @@ impl LinuxUnlock {
                         .join(".local/share")
                 }),
         );
+        let config_home = PathBuf::from(
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join(".config")
+                }),
+        );
         Ok(Self {
             steam_root,
             data_home,
+            config_home,
         })
     }
 
     pub fn with_paths(steam_root: impl Into<PathBuf>, data_home: impl Into<PathBuf>) -> Self {
+        let data_home = data_home.into();
         Self {
             steam_root: steam_root.into(),
-            data_home: data_home.into(),
+            config_home: data_home.clone(),
+            data_home,
         }
     }
 
@@ -53,7 +67,7 @@ impl LinuxUnlock {
     }
 
     fn manifest_store(&self) -> PathBuf {
-        self.data_home.join("SLSsteam/manifests")
+        self.config_home.join("SLSsteam/manifests")
     }
 
     fn depotcache(&self) -> PathBuf {

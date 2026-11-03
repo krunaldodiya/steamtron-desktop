@@ -1,6 +1,6 @@
 //! Add Steam library entries from a Lua/manifest ZIP or the public SteamML bundle.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -29,6 +29,8 @@ pub enum LibraryError {
     SteamNotFound,
     #[error("App {0} already has an appmanifest")]
     AlreadyInstalled(String),
+    #[error("backend error: {0}")]
+    Backend(String),
     #[error("I/O error at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -62,6 +64,13 @@ pub struct AddedGame {
     pub manifests: usize,
 }
 
+#[derive(Debug, Serialize)]
+pub struct RemovedGame {
+    pub appid: String,
+    pub removed: Vec<String>,
+    pub steam_restart_required: bool,
+}
+
 pub fn normalize_appid(value: &str) -> Option<String> {
     let value = value.trim();
     let value = value
@@ -81,6 +90,7 @@ pub struct SearchResult {
     pub name: String,
     pub kind: String,
     pub image: String,
+    pub installed: bool,
 }
 
 /// Resolve a Steam App ID/URL or search the public Steam store catalogue.
@@ -127,6 +137,7 @@ pub fn search(query: &str) -> Result<Vec<SearchResult>, LibraryError> {
                 name,
                 kind,
                 image,
+                installed: false,
             }]);
         }
     }
@@ -160,7 +171,7 @@ pub fn search(query: &str) -> Result<Vec<SearchResult>, LibraryError> {
                 .and_then(|value| value.as_str())
                 .unwrap_or("")
                 .to_owned();
-            Some(SearchResult { appid: id, name, kind, image })
+            Some(SearchResult { appid: id, name, kind, image, installed: false })
         })
         .collect())
 }
@@ -185,6 +196,119 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
         return Err(LibraryError::Archive("archive is too large".into()));
     }
     parse_bundle(&bytes)
+}
+
+pub fn remove_game(appid: &str, backend: &dyn UnlockBackend) -> Result<RemovedGame, LibraryError> {
+    if normalize_appid(appid).as_deref() != Some(appid) {
+        return Err(LibraryError::InvalidAppId);
+    }
+    let root = steam::steam_root().map_err(|_| LibraryError::SteamNotFound)?;
+    let libraries = steam::libraries().map_err(|_| LibraryError::SteamNotFound)?;
+    let mut manifest_names = BTreeSet::new();
+    let mut removed = Vec::new();
+
+    let lua_path = root.join("config/stplug-in").join(format!("{appid}.lua"));
+    if let Ok(text) = fs::read_to_string(&lua_path) {
+        let set_manifest = Regex::new(r#"setManifestid\s*\(\s*(\d+)\s*,\s*["'](\d+)["']"#).unwrap();
+        for captures in set_manifest.captures_iter(&text) {
+            manifest_names.insert(format!("{}_{}.manifest", &captures[1], &captures[2]));
+        }
+    }
+
+    let mut install_dir = String::new();
+    for library in &libraries {
+        let acf = library.join(format!("appmanifest_{appid}.acf"));
+        if !acf.is_file() {
+            continue;
+        }
+        if let Ok(text) = fs::read_to_string(&acf) {
+            let install = Regex::new(r#"(?m)^\s*"installdir"\s+"([^"]+)""#).unwrap();
+            if install_dir.is_empty() {
+                install_dir = install
+                    .captures(&text)
+                    .map(|captures| captures[1].to_owned())
+                    .unwrap_or_default();
+            }
+            let depots = Regex::new(r#"(?m)^\s*"(\d+)"\s*\{\s*"manifest"\s+"(\d+)""#).unwrap();
+            for captures in depots.captures_iter(&text) {
+                manifest_names.insert(format!("{}_{}.manifest", &captures[1], &captures[2]));
+            }
+        }
+        fs::remove_file(&acf).map_err(|error| LibraryError::io(&acf, error))?;
+        removed.push(acf.display().to_string());
+    }
+
+    if !install_dir.is_empty() {
+        for library in &libraries {
+            let common = library.join("common").join(&install_dir);
+            if common.symlink_metadata().map(|meta| meta.file_type().is_symlink()).unwrap_or(false)
+                || common.is_symlink()
+            {
+                fs::remove_file(&common).map_err(|error| LibraryError::io(&common, error))?;
+                removed.push(common.display().to_string());
+            }
+        }
+    }
+
+    if lua_path.exists() {
+        backend.remove_lua(appid).map_err(|error| LibraryError::Backend(error.to_string()))?;
+        removed.push(lua_path.display().to_string());
+    }
+
+    for library in &libraries {
+        remove_manifests(&library.join("depotcache"), &manifest_names, &mut removed);
+    }
+    for store in manifest_stores() {
+        remove_manifests(&store, &manifest_names, &mut removed);
+    }
+
+    Ok(RemovedGame {
+        appid: appid.to_owned(),
+        steam_restart_required: !removed.is_empty(),
+        removed,
+    })
+}
+
+fn remove_manifests(root: &Path, names: &BTreeSet<String>, removed: &mut Vec<String>) {
+    let mut depots = BTreeSet::new();
+    for name in names {
+        let path = root.join(name);
+        if path.is_file() {
+            if fs::remove_file(&path).is_ok() {
+                removed.push(path.display().to_string());
+            }
+        }
+        if let Some((depot, _)) = name.split_once('_') {
+            depots.insert(depot.to_owned());
+        }
+    }
+    for depot in depots {
+        let preferred = root.join(format!(".preferred_{depot}"));
+        if preferred.is_file() {
+            if fs::remove_file(&preferred).is_ok() {
+                removed.push(preferred.display().to_string());
+            }
+        }
+    }
+}
+
+fn manifest_stores() -> Vec<PathBuf> {
+    let mut stores = Vec::new();
+    if let Some(config) = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".config"))
+    }) {
+        stores.push(config.join("SLSsteam/manifests"));
+    }
+    if let Some(data) = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join(".local/share"))
+    }) {
+        stores.push(data.join("SLSsteam/manifests"));
+    }
+    stores
 }
 
 pub fn bundle_from_zip(path: &Path) -> Result<Bundle, LibraryError> {
@@ -394,6 +518,21 @@ mod tests {
             Some("3468650")
         );
         assert_eq!(normalize_appid("not-an-id"), None);
+    }
+
+    #[test]
+    fn removes_manifest_and_preferred_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = temp.path();
+        std::fs::write(store.join("43_7.manifest"), b"manifest").unwrap();
+        std::fs::write(store.join(".preferred_43"), b"7\n").unwrap();
+        let mut removed = Vec::new();
+        let mut names = BTreeSet::new();
+        names.insert("43_7.manifest".to_owned());
+        remove_manifests(store, &names, &mut removed);
+        assert!(!store.join("43_7.manifest").exists());
+        assert!(!store.join(".preferred_43").exists());
+        assert_eq!(removed.len(), 2);
     }
 
     #[test]

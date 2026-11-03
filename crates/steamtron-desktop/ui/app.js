@@ -92,7 +92,8 @@ function renderDetail(game) {
       <button class="primary" id="install">Install fixes ZIP</button>
       <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
       <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
-      <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove entry</button>
+      <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
+      <button class="danger" id="remove-library" ${game.managed ? "" : "disabled"}>Remove from library</button>
     </div>
     <div class="status">${current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
   detailEl.querySelector("#install").onclick = async () => {
@@ -110,6 +111,20 @@ function renderDetail(game) {
   detailEl.querySelector("#remove").onclick = async () => {
     try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); renderDetail(game); renderGames(); status("Fixes entry removed."); }
     catch (error) { status(String(error), true); }
+  };
+  const removeLibrary = detailEl.querySelector("#remove-library");
+  if (removeLibrary && game.managed) removeLibrary.onclick = async () => {
+    if (!window.confirm(`Remove ${game.name} from the Steam library?`)) return;
+    removeLibrary.disabled = true;
+    try {
+      const result = await invoke("remove_game", { appid: game.appid });
+      selected = null;
+      detailEl.innerHTML = `<div class="empty">Select a Steam game.</div>`;
+      await load();
+      showToast(result.steam_restart_required
+        ? `Removed ${game.name} · restart Steam to apply`
+        : `Removed ${game.name} · no library files were present`);
+    } catch (error) { removeLibrary.disabled = false; status(String(error), true); }
   };
 }
 
@@ -147,6 +162,15 @@ async function load() {
     detailEl.innerHTML = `<div class="status error">${escape(error)}</div>`;
     return false;
   }
+}
+
+async function restartSteam() {
+  const button = document.querySelector("#restart-steam");
+  button.disabled = true;
+  showToast("Restarting Steam…");
+  try { showToast(await invoke("restart_steam")); }
+  catch (error) { showToast(String(error), true); }
+  finally { setTimeout(() => { button.disabled = false; }, 1500); }
 }
 
 async function refreshLibrary() {
@@ -277,10 +301,11 @@ function showAddGame() {
       setStatus(`${results.length} result${results.length === 1 ? "" : "s"}. Select the correct game.`);
       for (const result of results) {
         const button = document.createElement("button");
-        button.className = "search-result";
+        button.className = `search-result${result.installed ? " installed" : ""}`;
         button.dataset.appid = result.appid;
-        button.innerHTML = `${result.image ? `<img src="${escape(result.image)}" alt="">` : ""}<span><strong>${escape(result.name)}</strong><small>App ${escape(result.appid)} · ${escape(result.kind)}</small></span>`;
-        button.onclick = () => choose(result);
+        button.disabled = result.installed;
+        button.innerHTML = `${result.image ? `<img src="${escape(result.image)}" alt="">` : ""}<span><strong>${escape(result.name)}${result.installed ? '<span class="in-library">In library</span>' : ""}</strong><small>App ${escape(result.appid)} · ${escape(result.kind)}</small></span>`;
+        if (!result.installed) button.onclick = () => choose(result);
         resultsNode.appendChild(button);
       }
     } catch (error) { setStatus(String(error), true); }
@@ -288,6 +313,8 @@ function showAddGame() {
   };
   const finish = async (result) => {
     if (!result) return;
+    submit.disabled = true;
+    importButton.disabled = true;
     setStatus(`Added ${result.title}. Restart Steam to see it in the library.`);
     await load();
     if (result.appmanifest) setStatus(`Added ${result.title}. Appmanifest: ${result.appmanifest}`);
@@ -319,6 +346,7 @@ function showAddGame() {
 
 document.querySelector("#add-game").onclick = showAddGame;
 document.querySelector("#settings").onclick = renderSettings;
+document.querySelector("#restart-steam").onclick = restartSteam;
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = renderGames;
 boot();
