@@ -283,6 +283,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn export_name_uses_sanitized_title() {
+        assert_eq!(export_name("Resident Evil Village", "1196590"), "Resident Evil Village.zip");
+        assert_eq!(export_name("Game: Deluxe/Test", "42"), "Game Deluxe Test.zip");
+    }
+
+    #[test]
     fn exports_marker_and_preserves_structure() {
         let temp = tempfile::tempdir().unwrap();
         let fixes = temp.path().join("fixes");

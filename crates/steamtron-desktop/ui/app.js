@@ -176,7 +176,7 @@ function renderFixesPanel(panel, game, current) {
   panel.querySelector("#export").onclick = async () => {
     const button = panel.querySelector("#export");
     const stop = busy(button, "Exporting…");
-    try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid }); status(result ? `Exported ${result}` : "Export cancelled."); }
+    try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid, title: game.name }); status(result ? `Exported ${result}` : "Export cancelled."); }
     catch (error) { status(String(error), true); }
     finally { stop(); }
   };

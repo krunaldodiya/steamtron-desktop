@@ -333,13 +333,21 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
 }
 
 #[tauri::command]
-fn export_fixes(appid: String) -> Result<Option<String>, String> {
+fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, String> {
     require_auth()?;
     let config = Config::load().map_err(|error| error.to_string())?;
     let Some(entry) = config.entry(&appid) else {
         return Err("No fixes configured for this game.".into());
     };
-    let name = export_name(&appid, &appid);
+    let game_title = title
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            steam::games()
+                .ok()
+                .and_then(|games| games.into_iter().find(|game| game.appid == appid).map(|game| game.name))
+        })
+        .unwrap_or_else(|| format!("Steam App {appid}"));
+    let name = export_name(&game_title, &appid);
     let Some(path) = rfd::FileDialog::new()
         .set_file_name(&name)
         .add_filter("ZIP", &["zip"])
