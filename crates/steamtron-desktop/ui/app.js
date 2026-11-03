@@ -86,6 +86,40 @@ async function load() {
   catch (error) { detailEl.innerHTML = `<div class="status error">${escape(error)}</div>`; }
 }
 
+async function loadDoctor() {
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><button id="doctor-refresh">Recheck</button></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
+  try {
+    const report = await invoke("doctor_report");
+    const list = detailEl.querySelector(".doctor-list");
+    list.replaceChildren();
+    for (const item of report.checks) {
+      const row = document.createElement("div");
+      row.className = `doctor-item ${item.status}`;
+      row.innerHTML = `<div class="doctor-title">${escape(item.title)}</div><div class="doctor-detail">${escape(item.detail)}</div>`;
+      if (item.repair) {
+        const actions = document.createElement("div");
+        actions.className = "doctor-actions";
+        const button = document.createElement("button");
+        button.textContent = item.repair === "install-unlock-backend" ? "Repair Steam library support" : "Repair";
+        button.onclick = async () => {
+          try { button.disabled = true; const result = await invoke("repair_backend"); status(result); await loadDoctor(); }
+          catch (error) { status(String(error), true); button.disabled = false; }
+        };
+        actions.appendChild(button);
+        row.appendChild(actions);
+      }
+      list.appendChild(row);
+    }
+    const summary = document.createElement("div");
+    summary.className = report.healthy ? "status" : "status error";
+    summary.textContent = report.healthy ? "All checks passed." : "Some checks need attention.";
+    list.prepend(summary);
+  } catch (error) {
+    detailEl.innerHTML = `<div class="status error">${escape(error)}</div>`;
+  }
+}
+
+document.querySelector("#doctor").onclick = loadDoctor;
 document.querySelector("#refresh").onclick = load;
 searchEl.oninput = renderGames;
 load();

@@ -13,4 +13,5 @@ rfd = "0.15"
 steamtron-core = { path = "../steamtron-core" }
 steamtron-overlay = { path = "../steamtron-overlay" }
 steamtron-unlock = { path = "../steamtron-unlock" }
+steamtron-doctor = { path = "../steamtron-doctor" }
 anyhow = "1"

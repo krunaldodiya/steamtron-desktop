@@ -33,3 +33,13 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .backend { color:#8fa3b8; font-size:12px; border:1px solid #2a3948; border-radius:99px; padding:5px 10px; }
 .backend.ready { color:#9ce0b3; border-color:#356849; }
 .backend.error { color:#ffb5b5; border-color:#8b3b3b; }
+
+.doctor-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+.doctor-list { display:flex; flex-direction:column; gap:8px; }
+.doctor-item { border:1px solid #2a3948; border-radius:8px; padding:12px; background:#141e28; }
+.doctor-item.error { border-color:#8b3b3b; }
+.doctor-item.warning { border-color:#806b35; }
+.doctor-item.ok { border-color:#356849; }
+.doctor-title { color:#f2f6fa; font-weight:600; font-size:13px; }
+.doctor-detail { color:#8fa3b8; font-size:12px; margin-top:4px; overflow-wrap:anywhere; }
+.doctor-actions { display:flex; gap:8px; margin-top:10px; }

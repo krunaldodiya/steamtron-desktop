@@ -170,7 +170,8 @@ merged path: read-only-looking game view with copy-up writes
 | Linux fuse-overlayfs engine | Implemented |
 | Desktop library/fixes UI | Implemented |
 | Unlock backend status | Implemented |
-| Automatic backend installation/repair | Pending |
+| Doctor checks and backend repair | Implemented |
+| Automatic backend installation/repair | Implemented via managed installer handoff; hardening pending |
 | Add game by App ID / Steam URL | Pending |
 | Local Lua/manifest ZIP import | Pending |
 | Account login/logout | Pending |

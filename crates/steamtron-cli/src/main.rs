@@ -8,6 +8,7 @@ use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
 use steamtron_overlay::{LinuxOverlay, OverlayGame};
 use steamtron_unlock::{platform_backend, UnlockBackend};
+use steamtron_doctor::run as run_doctor;
 
 #[derive(Debug, Parser)]
 #[command(name = "steamtron-overlay", version)]
@@ -42,6 +43,8 @@ enum CommandKind {
     },
     /// Report the platform Steam unlock backend status.
     Backend,
+    /// Validate Steam, helpers, fixes, and overlay requirements.
+    Doctor,
     /// List installed Steam games.
     Games,
     /// Manage per-game fixes mappings.
@@ -118,6 +121,10 @@ fn main() -> Result<()> {
             let status = process.status().context("could not launch command")?;
             overlay.unmount()?;
             std::process::exit(status.code().unwrap_or(1));
+        }
+        CommandKind::Doctor => {
+            let report = run_doctor();
+            println!("{}", serde_json::to_string_pretty(&report).unwrap_or_else(|_| format!("{report:#?}")));
         }
         CommandKind::Backend => {
             let backend = platform_backend()?;

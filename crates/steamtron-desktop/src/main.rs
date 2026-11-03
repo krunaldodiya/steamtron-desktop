@@ -5,6 +5,7 @@ use steamtron_core::config::Config;
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
+use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 
 #[derive(Serialize)]
 struct GameView {
@@ -21,6 +22,16 @@ struct FixView {
     appid: String,
     fixes: String,
     enabled: bool,
+}
+
+#[tauri::command]
+fn doctor_report() -> steamtron_doctor::DoctorReport {
+    run_doctor()
+}
+
+#[tauri::command]
+fn repair_backend() -> Result<String, String> {
+    launch_unlock_installer()
 }
 
 #[tauri::command]
@@ -122,6 +133,8 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_status,
+            doctor_report,
+            repair_backend,
             list_games,
             list_fixes,
             install_fixes,

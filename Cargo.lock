@@ -3449,10 +3449,21 @@ dependencies = [
  "rfd",
  "serde",
  "steamtron-core",
+ "steamtron-doctor",
  "steamtron-overlay",
  "steamtron-unlock",
  "tauri",
  "tauri-build",
+]
+
+[[package]]
+name = "steamtron-doctor"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "steamtron-core",
+ "steamtron-unlock",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3471,7 +3482,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "serde_json",
  "steamtron-core",
+ "steamtron-doctor",
  "steamtron-overlay",
  "steamtron-unlock",
  "thiserror 2.0.21",
