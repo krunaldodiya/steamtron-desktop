@@ -98,60 +98,28 @@ function renderGames() {
   }
 }
 
-function renderDetail(game) {
+function renderDetail(game, tab = "general") {
   const current = fixes.get(game.appid);
-  detailEl.innerHTML = `
-    <h2>${escape(game.name)}</h2>
-    <p class="muted">Steam App ${escape(game.appid)}</p>
+  const tabs = [
+    ["general", "General"],
+    ["fixes", "Fixes"],
+    ["updates", "Updates"],
+  ];
+  detailEl.innerHTML = `<h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === tab ? " active" : ""}" data-tab="${key}" ${key === "updates" && !game.managed ? "disabled" : ""}>${label}</button>`).join("")}</div><div class="game-panel"></div>`;
+  const panel = detailEl.querySelector(".game-panel");
+  for (const button of detailEl.querySelectorAll(".game-tab")) button.onclick = () => renderDetail(game, button.dataset.tab);
+  if (tab === "updates" && game.managed) { renderUpdatesPanel(panel, game); return; }
+  if (tab === "fixes") { renderFixesPanel(panel, game, current); return; }
+  renderGeneralPanel(panel, game);
+}
+
+function renderGeneralPanel(panel, game) {
+  panel.innerHTML = `
     <div class="row"><div class="label">Game directory</div><div class="value">${escape(game.common)}</div></div>
-    <div class="row"><div class="label">Fixes</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
-    <div class="actions">
-      <button class="primary" id="install">Install fixes ZIP</button>
-      <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
-      <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
-      <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
-      <button id="updates" ${game.managed ? "" : "disabled"}>Updates</button>
-      <button class="danger" id="remove-library" ${game.managed ? "" : "disabled"}>Remove from library</button>
-    </div>
-    <div class="status">${current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
-  detailEl.querySelector("#install").onclick = async () => {
-    const button = detailEl.querySelector("#install");
-    const stop = busy(button, "Installing…");
-    try {
-      status("Choose a fixes ZIP…");
-      const result = await invoke("install_fixes", { appid: game.appid });
-      if (result) {
-        fixes.set(game.appid, result);
-        await loadFixes();
-        stop();
-        renderDetail(game);
-        renderGames();
-        status("Fixes installed.");
-      } else { stop(); status("Install cancelled."); }
-    } catch (error) { stop(); status(String(error), true); }
-  };
-  detailEl.querySelector("#export").onclick = async () => {
-    const button = detailEl.querySelector("#export");
-    const stop = busy(button, "Exporting…");
-    try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid }); status(result ? `Exported ${result}` : "Export cancelled."); }
-    catch (error) { status(String(error), true); }
-    finally { stop(); }
-  };
-  detailEl.querySelector("#toggle").onclick = async () => {
-    const button = detailEl.querySelector("#toggle");
-    const stop = busy(button, current.enabled ? "Disabling…" : "Enabling…");
-    try { await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled }); await loadFixes(); stop(); renderDetail(game); status(current.enabled ? "Fixes disabled." : "Fixes enabled."); }
-    catch (error) { stop(); status(String(error), true); }
-  };
-  detailEl.querySelector("#remove").onclick = async () => {
-    const button = detailEl.querySelector("#remove");
-    const stop = busy(button, "Removing fixes…");
-    try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); stop(); renderDetail(game); renderGames(); status("Fixes entry removed."); }
-    catch (error) { stop(); status(String(error), true); }
-  };
-  const updatesButton = detailEl.querySelector("#updates");
-  if (updatesButton && game.managed) updatesButton.onclick = () => renderUpdates(game);
-  const removeLibrary = detailEl.querySelector("#remove-library");
+    <div class="row"><div class="label">Library status</div><div class="value">${game.managed ? "Managed through SteamTron" : "Managed by Steam"}</div></div>
+    <div class="actions"><button class="danger" id="remove-library" ${game.managed ? "" : "disabled"}>Remove from library</button></div>
+    <div class="status">${game.managed ? "Removing this entry deletes the Lua, appmanifest, manifests, and managed symlink. Game content is left intact." : "This game is not managed by SteamTron."}</div>`;
+  const removeLibrary = panel.querySelector("#remove-library");
   if (removeLibrary && game.managed) removeLibrary.onclick = async () => {
     if (!window.confirm(`Remove ${game.name} from the Steam library?`)) return;
     const stop = busy(removeLibrary, "Removing…");
@@ -161,30 +129,78 @@ function renderDetail(game) {
       detailEl.innerHTML = `<div class="empty">Select a Steam game.</div>`;
       await load();
       showToast(result.steam_restart_required
-        ? `Removed ${game.name} · restart Steam to apply`
+        ? `Removed ${game.name} · restart Steam from Settings to apply`
         : `Removed ${game.name} · no library files were present`);
     } catch (error) { stop(); status(String(error), true); }
   };
 }
 
-function renderUpdates(game) {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Updates</h2><p class="muted">Archived manifest builds for ${escape(game.name)}.</p></div><div class="update-actions"><button id="updates-back">Back</button><button id="updates-refresh">Refresh</button></div></div><div class="updates-panel"><div class="update-summary" id="updates-summary">Loading archived builds…</div><div class="update-list" id="updates-list"></div><div class="update-actions"><button id="updates-auto">Use automatic updates</button><button class="primary" id="updates-pin" disabled>Pin selected build</button></div></div>`;
-  const summary = detailEl.querySelector("#updates-summary");
-  const list = detailEl.querySelector("#updates-list");
-  const auto = detailEl.querySelector("#updates-auto");
-  const pin = detailEl.querySelector("#updates-pin");
+function renderFixesPanel(panel, game, current) {
+  panel.innerHTML = `
+    <div class="row"><div class="label">Fixes</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
+    <div class="actions">
+      <button class="primary" id="install">Install fixes ZIP</button>
+      <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
+      <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
+      <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
+    </div>
+    <div class="status">${current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
+  panel.querySelector("#install").onclick = async () => {
+    const button = panel.querySelector("#install");
+    const stop = busy(button, "Installing…");
+    try {
+      status("Choose a fixes ZIP…");
+      const result = await invoke("install_fixes", { appid: game.appid });
+      if (result) {
+        fixes.set(game.appid, result);
+        await loadFixes();
+        stop();
+        renderDetail(game, "fixes");
+        renderGames();
+        status("Fixes installed.");
+      } else { stop(); status("Install cancelled."); }
+    } catch (error) { stop(); status(String(error), true); }
+  };
+  panel.querySelector("#export").onclick = async () => {
+    const button = panel.querySelector("#export");
+    const stop = busy(button, "Exporting…");
+    try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid }); status(result ? `Exported ${result}` : "Export cancelled."); }
+    catch (error) { status(String(error), true); }
+    finally { stop(); }
+  };
+  panel.querySelector("#toggle").onclick = async () => {
+    const button = panel.querySelector("#toggle");
+    const stop = busy(button, current.enabled ? "Disabling…" : "Enabling…");
+    try { await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled }); await loadFixes(); stop(); renderDetail(game, "fixes"); status(current.enabled ? "Fixes disabled." : "Fixes enabled."); }
+    catch (error) { stop(); status(String(error), true); }
+  };
+  panel.querySelector("#remove").onclick = async () => {
+    const button = panel.querySelector("#remove");
+    const stop = busy(button, "Removing fixes…");
+    try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); stop(); renderDetail(game, "fixes"); renderGames(); status("Fixes entry removed."); }
+    catch (error) { stop(); status(String(error), true); }
+  };
+}
+
+function renderUpdatesPanel(host, game) {
+  host.innerHTML = `<div class="updates-panel"><div class="update-summary" id="updates-summary">Loading archived builds…</div><div class="update-list" id="updates-list"></div><div class="update-actions"><button id="updates-auto">Use automatic updates</button><button class="primary" id="updates-pin" disabled>Pin selected build</button><button id="updates-refresh">Refresh</button></div></div>`;
+  const summary = host.querySelector("#updates-summary");
+  const list = host.querySelector("#updates-list");
+  const auto = host.querySelector("#updates-auto");
+  const pin = host.querySelector("#updates-pin");
   let data = null;
   let selectedVersion = "";
   const load = async () => {
-    const button = detailEl.querySelector("#updates-refresh");
+    const button = host.querySelector("#updates-refresh");
     const stop = busy(button, "Checking…");
+    summary.classList.remove("error");
     summary.textContent = "Loading archived builds…";
     list.replaceChildren();
     try {
       data = await invoke("update_versions", { appid: game.appid });
       selectedVersion = data.pinned || data.installed || data.latest || "";
       render();
-    } catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
+    } catch (error) { summary.textContent = String(error); summary.classList.add("error"); }
     finally { stop(); }
   };
   const render = () => {
@@ -215,8 +231,7 @@ function renderUpdates(game) {
       list.appendChild(row);
     }
   };
-  detailEl.querySelector("#updates-back").onclick = () => renderDetail(game);
-  detailEl.querySelector("#updates-refresh").onclick = load;
+  host.querySelector("#updates-refresh").onclick = load;
   auto.onclick = async () => {
     const stop = busy(auto, "Clearing pin…");
     try { data = await invoke("clear_update_pin", { appid: game.appid }); selectedVersion = data.installed || data.latest || ""; stop(); render(); }
@@ -267,8 +282,8 @@ async function load() {
   }
 }
 
-async function restartSteam() {
-  const button = document.querySelector("#restart-steam");
+async function restartSteam(button) {
+  if (!button) return;
   const stop = busy(button, "Restarting…");
   showToast("Restarting Steam…");
   try { showToast(await invoke("restart_steam")); }
@@ -352,10 +367,12 @@ function renderSettingsMessage(message, isError = false) {
 }
 
 function renderSettings() {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
   const panel = detailEl.querySelector("#settings-panel");
   const profileTab = detailEl.querySelector("#tab-profile");
   const doctorTab = detailEl.querySelector("#tab-doctor");
+  const settingsRestart = detailEl.querySelector("#settings-restart");
+  settingsRestart.onclick = () => restartSteam(settingsRestart);
   const select = (active) => {
     profileTab.classList.toggle("active", active === "profile");
     doctorTab.classList.toggle("active", active === "doctor");
@@ -424,7 +441,7 @@ function showAddGame() {
     if (!result) return;
     submit.disabled = true;
     importButton.disabled = true;
-    setStatus(`Added ${result.title}. Restart Steam to see it in the library.`);
+    setStatus(`Added ${result.title}. Restart Steam from Settings to see it in the library.`);
     await load();
     if (result.appmanifest) setStatus(`Added ${result.title}. Appmanifest: ${result.appmanifest}`);
   };
@@ -460,7 +477,6 @@ function showAddGame() {
 
 document.querySelector("#add-game").onclick = showAddGame;
 document.querySelector("#settings").onclick = renderSettings;
-document.querySelector("#restart-steam").onclick = restartSteam;
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = renderGames;
 boot();
