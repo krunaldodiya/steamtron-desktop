@@ -7,6 +7,7 @@ use steamtron_core::config::Config;
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
 use steamtron_overlay::{LinuxOverlay, OverlayGame};
+use steamtron_unlock::{platform_backend, UnlockBackend};
 
 #[derive(Debug, Parser)]
 #[command(name = "steamtron-overlay", version)]
@@ -39,6 +40,8 @@ enum CommandKind {
         #[arg(long)]
         fixes: PathBuf,
     },
+    /// Report the platform Steam unlock backend status.
+    Backend,
     /// List installed Steam games.
     Games,
     /// Manage per-game fixes mappings.
@@ -115,6 +118,10 @@ fn main() -> Result<()> {
             let status = process.status().context("could not launch command")?;
             overlay.unmount()?;
             std::process::exit(status.code().unwrap_or(1));
+        }
+        CommandKind::Backend => {
+            let backend = platform_backend()?;
+            println!("{:#?}", backend.status()?);
         }
         CommandKind::Games => {
             let managed = steam::managed_appids()?;

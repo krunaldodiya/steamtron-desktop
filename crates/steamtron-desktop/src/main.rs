@@ -4,6 +4,7 @@ use serde::Serialize;
 use steamtron_core::config::Config;
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
+use steamtron_unlock::{platform_backend, UnlockBackend};
 
 #[derive(Serialize)]
 struct GameView {
@@ -20,6 +21,13 @@ struct FixView {
     appid: String,
     fixes: String,
     enabled: bool,
+}
+
+#[tauri::command]
+fn backend_status() -> Result<steamtron_unlock::BackendStatus, String> {
+    platform_backend()
+        .and_then(|backend| backend.status())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -113,6 +121,7 @@ fn remove_fixes(appid: String) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            backend_status,
             list_games,
             list_fixes,
             install_fixes,

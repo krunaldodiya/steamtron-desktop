@@ -3450,6 +3450,7 @@ dependencies = [
  "serde",
  "steamtron-core",
  "steamtron-overlay",
+ "steamtron-unlock",
  "tauri",
  "tauri-build",
 ]
@@ -3472,6 +3473,17 @@ dependencies = [
  "clap",
  "steamtron-core",
  "steamtron-overlay",
+ "steamtron-unlock",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "steamtron-unlock"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "steamtron-core",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 

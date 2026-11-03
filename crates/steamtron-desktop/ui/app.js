@@ -61,11 +61,27 @@ function renderDetail(game) {
   };
 }
 
+async function loadBackend() {
+  const node = document.querySelector("#backend");
+  try {
+    const status = await invoke("backend_status");
+    node.textContent = `${status.backend}: ${status.ready ? "ready" : "not ready"}`;
+    node.title = `${status.details}\nSteam: ${status.steam_root}\nLua: ${status.lua_dir}`;
+    node.classList.toggle("ready", status.ready);
+    node.classList.toggle("error", !status.ready);
+  } catch (error) {
+    node.textContent = "Library backend unavailable";
+    node.title = String(error);
+    node.classList.add("error");
+  }
+}
+
 async function loadFixes() {
   fixes = new Map((await invoke("list_fixes")).map((item) => [item.appid, item]));
 }
 
 async function load() {
+  loadBackend();
   try { games = await invoke("list_games"); await loadFixes(); renderGames(); if (selected) { const game = games.find((item) => item.appid === selected); if (game) renderDetail(game); } }
   catch (error) { detailEl.innerHTML = `<div class="status error">${escape(error)}</div>`; }
 }

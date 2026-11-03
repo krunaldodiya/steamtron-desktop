@@ -1,0 +1,12 @@
+[package]
+name = "steamtron-unlock"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+steamtron-core = { path = "../steamtron-core" }
+
+[dev-dependencies]
+tempfile = "3"

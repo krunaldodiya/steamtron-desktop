@@ -28,3 +28,8 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .status { margin-top:16px; color:#8fa3b8; font-size:13px; }
 .status.error { color:#ff9b9b; }
 .secondary { background:#1b2a38; }
+
+.top-actions { display:flex; align-items:center; gap:12px; }
+.backend { color:#8fa3b8; font-size:12px; border:1px solid #2a3948; border-radius:99px; padding:5px 10px; }
+.backend.ready { color:#9ce0b3; border-color:#356849; }
+.backend.error { color:#ffb5b5; border-color:#8b3b3b; }

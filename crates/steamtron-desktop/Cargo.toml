@@ -12,4 +12,5 @@ serde = { version = "1", features = ["derive"] }
 rfd = "0.15"
 steamtron-core = { path = "../steamtron-core" }
 steamtron-overlay = { path = "../steamtron-overlay" }
+steamtron-unlock = { path = "../steamtron-unlock" }
 anyhow = "1"

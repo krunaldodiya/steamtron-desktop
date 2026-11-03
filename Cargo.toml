@@ -2,6 +2,7 @@
 members = [
     "crates/steamtron-overlay",
     "crates/steamtron-core",
+    "crates/steamtron-unlock",
     "crates/steamtron-cli",
     "crates/steamtron-desktop",
 ]
