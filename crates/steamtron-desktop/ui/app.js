@@ -154,7 +154,7 @@ function renderFixesPanel(panel, game, current) {
       <button id="launch-option" ${current ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
       <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
     </div>
-    <div class="status">${current?.launch_option_error ? escape(current.launch_option_error) : current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
+    <div class="status${current && current.enabled && !current.launch_option_set ? " error" : ""}">${current?.launch_option_error ? escape(current.launch_option_error) : current ? (current.enabled && !current.launch_option_set ? "Fixes are enabled, but the Steam launch option is not set. Click Set launch option, then fully restart Steam." : current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
   panel.querySelector("#install").onclick = async () => {
     const button = panel.querySelector("#install");
     const stop = busy(button, "Installing…");
