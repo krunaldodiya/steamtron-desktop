@@ -169,7 +169,38 @@ fn lua_depots(appid: &str) -> BTreeMap<String, String> {
     depots
 }
 
+fn appmanifest_status(appid: &str) -> (bool, String) {
+    let Ok(libraries) = steam::libraries() else {
+        return (false, String::new());
+    };
+    for library in libraries {
+        let path = library.join(format!("appmanifest_{appid}.acf"));
+        let Ok(text) = fs::read_to_string(path) else {
+            continue;
+        };
+        let field = |key: &str| {
+            Regex::new(&format!(r#"(?m)^\s*"{key}"\s+"([^"]+)""#))
+                .ok()
+                .and_then(|regex| regex.captures(&text))
+                .map(|captures| captures[1].to_owned())
+        };
+        let state = field("StateFlags")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        let size = field("SizeOnDisk")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        let buildid = field("buildid").unwrap_or_default();
+        let installed = state & 4 != 0 && size > 0 && buildid != "0";
+        return (installed, buildid);
+    }
+    (false, String::new())
+}
+
 fn installed_gids(appid: &str) -> BTreeMap<String, Option<String>> {
+    if !appmanifest_status(appid).0 {
+        return BTreeMap::new();
+    }
     let mut result = BTreeMap::new();
     let Ok(libraries) = steam::libraries() else {
         return result;
@@ -188,22 +219,8 @@ fn installed_gids(appid: &str) -> BTreeMap<String, Option<String>> {
 }
 
 fn installed_buildid(appid: &str) -> String {
-    let Ok(libraries) = steam::libraries() else {
-        return String::new();
-    };
-    for library in libraries {
-        let path = library.join(format!("appmanifest_{appid}.acf"));
-        let Ok(text) = fs::read_to_string(path) else {
-            continue;
-        };
-        if let Some(captures) = Regex::new(r#"(?m)^\s*"buildid"\s+"(\d+)""#)
-            .unwrap()
-            .captures(&text)
-        {
-            return captures[1].to_owned();
-        }
-    }
-    String::new()
+    let (installed, buildid) = appmanifest_status(appid);
+    if installed { buildid } else { String::new() }
 }
 
 fn preferred_gids(depots: &BTreeMap<String, String>) -> BTreeMap<String, String> {

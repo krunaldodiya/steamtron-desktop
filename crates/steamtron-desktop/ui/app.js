@@ -99,7 +99,8 @@ function renderGames() {
     const build = game.build_id && game.build_id !== "0"
       ? `build ${escape(game.build_id)}`
       : game.version ? `version ${escape(game.version)}` : "version unknown";
-    button.innerHTML = `<span><strong>${escape(game.name)}</strong><span>${escape(game.appid)} · ${build}</span></span>${game.managed ? '<span class="badge">Managed</span>' : ""}`;
+    const state = game.installed ? "" : '<span class="badge warn">Not installed</span>';
+    button.innerHTML = `<span><strong>${escape(game.name)}</strong><span>${escape(game.appid)} · ${build}</span></span>${state}${game.managed ? '<span class="badge">Managed</span>' : ""}`;
     button.addEventListener("click", () => { selected = game.appid; renderGames(); renderDetail(game); });
     gamesEl.appendChild(button);
   }
@@ -123,7 +124,7 @@ function renderDetail(game, tab = "general") {
 function renderGeneralPanel(panel, game) {
   panel.innerHTML = `
     <div class="row"><div class="label">Game directory</div><div class="value">${escape(game.common)}</div></div>
-    <div class="row"><div class="label">Library status</div><div class="value">${game.managed ? "Managed through SteamTron" : "Managed by Steam"}</div></div>
+    <div class="row"><div class="label">Library status</div><div class="value">${game.managed ? "Managed through SteamTron" : "Managed by Steam"} · ${game.installed ? "content installed" : "content not installed"}</div></div>
     <div class="actions"><button class="danger" id="remove-library" ${game.managed ? "" : "disabled"}>Remove from library</button></div>
     <div class="status">${game.managed ? "Removing this entry deletes the Lua, appmanifest, manifests, and managed symlink. Game content is left intact." : "This game is not managed by SteamTron."}</div>`;
   const removeLibrary = panel.querySelector("#remove-library");
@@ -239,9 +240,9 @@ function renderUpdatesPanel(host, game) {
       pin.disabled = true;
       return;
     }
-    const installed = data.installed || "not installed";
+    const installed = data.installed_present ? `installed ${data.installed}${data.installed_buildid ? ` · build ${data.installed_buildid}` : ""}` : "not installed";
     const pinned = data.pinned || "automatic";
-    summary.textContent = `Installed: ${installed}${data.installed_buildid ? ` · build ${data.installed_buildid}` : ""}\nLatest archived: ${data.latest || "unknown"} · Pinned: ${pinned}${data.pinned && data.installed && data.pinned !== data.installed ? " (uninstall and reinstall to apply)" : ""}`;
+    summary.textContent = `Content: ${installed}\nLatest archived: ${data.latest || "unknown"} · Pinned: ${pinned}${data.pinned && data.installed_present && data.pinned !== data.installed ? " (uninstall and reinstall to apply)" : ""}`;
     auto.disabled = false;
     pin.disabled = !selectedVersion;
     list.replaceChildren();

@@ -495,7 +495,7 @@ fn acf_text(appid: &str, title: &str, depots: &BTreeMap<String, (String, u64)>) 
         format!("\t\"appid\"\t\t\"{appid}\""),
         "\t\"Universe\"\t\t\"1\"".to_owned(),
         format!("\t\"name\"\t\t\"{title}\""),
-        "\t\"StateFlags\"\t\t\"4\"".to_owned(),
+        "\t\"StateFlags\"\t\t\"2\"".to_owned(),
         format!("\t\"installdir\"\t\t\"{title}\""),
         format!("\t\"LastUpdated\"\t\t\"{now}\""),
         "\t\"SizeOnDisk\"\t\t\"0\"".to_owned(),

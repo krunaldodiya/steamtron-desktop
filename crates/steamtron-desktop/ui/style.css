@@ -114,3 +114,4 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .update-version { display:flex; flex-direction:column; gap:4px; min-width:0; }
 .update-version .date { line-height:1.2; }
 .update-version small { color:#8fa3b8; line-height:1.2; }
+.badge.warn { color:#ffd479; border-color:#7a6130; background:#2b2514; }
