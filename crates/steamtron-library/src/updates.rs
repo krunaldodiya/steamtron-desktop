@@ -223,6 +223,10 @@ fn installed_buildid(appid: &str) -> String {
     if installed { buildid } else { String::new() }
 }
 
+pub fn has_existing_pin(appid: &str) -> bool {
+    configured_pin_gids(appid).is_some() || !preferred_gids(&lua_depots(appid)).is_empty()
+}
+
 fn preferred_gids(depots: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let Some(store) = manifest_store() else {
         return BTreeMap::new();

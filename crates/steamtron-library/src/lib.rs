@@ -420,6 +420,7 @@ pub fn add_bundle(
     if acf.exists() {
         return Err(LibraryError::AlreadyInstalled(appid.to_owned()));
     }
+    let existing_pin = updates::has_existing_pin(appid);
     let installed = backend
         .install_lua(appid, &bundle.lua, &bundle.manifests)
         .map_err(|error| LibraryError::Archive(error.to_string()))?;
@@ -432,11 +433,13 @@ pub fn add_bundle(
 
     let mut pinned = None;
     let mut pin_error = None;
-    if let Ok(updates) = updates::available_updates(appid) {
-        if !updates.latest.is_empty() {
-            match updates::pin_update(appid, &updates.latest) {
-                Ok(_) => pinned = Some(updates.latest),
-                Err(error) => pin_error = Some(error.to_string()),
+    if !existing_pin {
+        if let Ok(updates) = updates::available_updates(appid) {
+            if !updates.latest.is_empty() {
+                match updates::pin_update(appid, &updates.latest) {
+                    Ok(_) => pinned = Some(updates.latest),
+                    Err(error) => pin_error = Some(error.to_string()),
+                }
             }
         }
     }

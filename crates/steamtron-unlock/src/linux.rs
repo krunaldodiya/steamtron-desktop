@@ -132,7 +132,9 @@ impl UnlockBackend for LinuxUnlock {
                 .and_then(|value| value.split_once('_'))
             {
                 let preferred = store.join(format!(".preferred_{depot}"));
-                write_atomic(&preferred, format!("{gid}\n").as_bytes(), 0o600)?;
+                if !preferred.exists() {
+                    write_atomic(&preferred, format!("{gid}\n").as_bytes(), 0o600)?;
+                }
             }
             written.push(target);
         }
