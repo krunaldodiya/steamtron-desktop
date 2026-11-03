@@ -155,6 +155,33 @@ pub fn discover_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
     result
 }
 
+/// Every App ID that currently has an appmanifest in any Steam library.
+/// This intentionally includes entries filtered out of the visible game list.
+pub fn installed_appids() -> Result<BTreeSet<String>, SteamError> {
+    let mut result = BTreeSet::new();
+    for library in libraries()? {
+        let Ok(entries) = fs::read_dir(library) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some(appid) = name
+                .strip_prefix("appmanifest_")
+                .and_then(|value| value.strip_suffix(".acf"))
+            else {
+                continue;
+            };
+            if !appid.is_empty() && appid.bytes().all(|byte| byte.is_ascii_digit()) {
+                result.insert(appid.to_owned());
+            }
+        }
+    }
+    Ok(result)
+}
+
 pub fn managed_appids() -> Result<BTreeSet<String>, SteamError> {
     let root = steam_root()?.join("config/stplug-in");
     let mut result = BTreeSet::new();

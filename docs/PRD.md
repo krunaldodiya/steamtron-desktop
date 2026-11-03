@@ -113,7 +113,7 @@ docs/                   PRD and engineering documentation
 - Required: SLSsteam (`SLSsteam.so` + wrapper)
 - Lumen: optional legacy CEF/UI sidecar; the desktop app does not require or install it
 - Lua directory: `<Steam>/config/stplug-in`
-- Manifest store: `$XDG_DATA_HOME/SLSsteam/manifests`
+- Manifest store: `$XDG_CONFIG_HOME/SLSsteam/manifests` (legacy `$XDG_DATA_HOME/SLSsteam/manifests` entries are also cleaned on removal)
 - Depot manifests: `<Steam>/steamapps/depotcache`
 - Detection: SLSsteam `.so` present; Lumen is optional
 - Fixes-only operation must work without SLSsteam.

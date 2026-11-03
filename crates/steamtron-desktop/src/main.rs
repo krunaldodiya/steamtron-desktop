@@ -74,10 +74,9 @@ fn unlock_backend() -> Result<impl UnlockBackend, String> {
 fn search_games(query: String) -> Result<Vec<SearchResult>, String> {
     require_auth()?;
     let mut results = steam_search(&query).map_err(|error| error.to_string())?;
-    let installed: std::collections::BTreeSet<String> = steam::games()
+    let installed: std::collections::BTreeSet<String> = steam::installed_appids()
         .map_err(|error| error.to_string())?
         .into_iter()
-        .map(|game| game.appid)
         .chain(
             steam::managed_appids()
                 .map_err(|error| error.to_string())?

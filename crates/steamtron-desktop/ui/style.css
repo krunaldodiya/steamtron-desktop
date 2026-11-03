@@ -85,3 +85,8 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .search-result.installed { opacity:.55; cursor:not-allowed; }
 .search-result.installed small { color:#8fd3a8; }
 .in-library { color:#8fd3a8; font-size:11px; font-weight:600; margin-left:6px; }
+
+.modal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.modal-close { background:transparent; border:0; color:#8fa3b8; font-size:24px; line-height:1; padding:0 4px; }
+.modal-close:hover { color:#fff; }
+.modal-actions[hidden] { display:none !important; }

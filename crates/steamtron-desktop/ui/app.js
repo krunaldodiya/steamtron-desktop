@@ -263,7 +263,7 @@ function renderSettings() {
 function showAddGame() {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal"><h2>Add game</h2><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="modal-actions"><button id="add-cancel">Cancel</button><button id="add-import" disabled>Import ZIP for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-cancel">Cancel</button><button id="add-import" disabled>Import ZIP for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
   document.body.appendChild(backdrop);
   const queryInput = backdrop.querySelector("#add-search");
   const searchButton = backdrop.querySelector("#add-search-button");
@@ -272,12 +272,14 @@ function showAddGame() {
   const statusNode = backdrop.querySelector(".modal-status");
   const submit = backdrop.querySelector("#add-submit");
   const importButton = backdrop.querySelector("#add-import");
+  const actionRow = backdrop.querySelector("#add-actions");
   let selected = null;
   const close = () => backdrop.remove();
   const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
   const clearSelected = () => {
     selected = null;
     selectedNode.style.display = "none";
+    actionRow.hidden = true;
     submit.disabled = true;
     importButton.disabled = true;
   };
@@ -285,6 +287,7 @@ function showAddGame() {
     selected = result;
     selectedNode.style.display = "";
     selectedNode.innerHTML = `<div class="name">${escape(result.name)}</div><div class="muted">Steam App ${escape(result.appid)} · ${escape(result.kind)}</div>`;
+    actionRow.hidden = false;
     submit.disabled = false;
     importButton.disabled = false;
     for (const node of resultsNode.querySelectorAll(".search-result")) node.classList.toggle("selected", node.dataset.appid === result.appid);
@@ -319,6 +322,7 @@ function showAddGame() {
     await load();
     if (result.appmanifest) setStatus(`Added ${result.title}. Appmanifest: ${result.appmanifest}`);
   };
+  backdrop.querySelector("#add-close").onclick = close;
   backdrop.querySelector("#add-cancel").onclick = close;
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   searchButton.onclick = runSearch;
@@ -341,6 +345,7 @@ function showAddGame() {
     }
     catch (error) { setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
+  setStatus("Search to find a game, then select a result.");
   queryInput.focus();
 }
 
