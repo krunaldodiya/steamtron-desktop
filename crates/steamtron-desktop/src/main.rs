@@ -144,6 +144,47 @@ fn clear_update_pin(appid: String) -> Result<Updates, String> {
     clear_pin(&appid).map_err(|error| error.to_string())
 }
 
+#[cfg(target_os = "linux")]
+#[tauri::command]
+fn install_desktop_entry() -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    require_auth()?;
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from).map(|home| home.join(".local/share")))
+        .ok_or_else(|| "Could not resolve the user data directory.".to_string())?;
+    let applications = data_home.join("applications");
+    let icons = data_home.join("icons/hicolor/256x256/apps");
+    std::fs::create_dir_all(&applications).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&icons).map_err(|error| error.to_string())?;
+    let icon = icons.join("steamtron.png");
+    std::fs::write(&icon, include_bytes!("../icons/256x256.png")).map_err(|error| error.to_string())?;
+    let exe = std::env::var_os("APPIMAGE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_exe().ok())
+        .ok_or_else(|| "Could not resolve the SteamTron executable.".to_string())?;
+    let quote = |value: &str| format!("\"{}\"", value.replace('\\', "\\\\").replace('\"', "\\\""));
+    let desktop = format!(
+        "[Desktop Entry]\nType=Application\nName=SteamTron\nComment=Steam library, fixes, and updates manager\nExec={}\nIcon={}\nTerminal=false\nCategories=Utility;\nStartupNotify=true\nStartupWMClass=steamtron-desktop\n",
+        quote(&exe.display().to_string()),
+        icon.display()
+    );
+    let path = applications.join("steamtron.desktop");
+    let temporary = applications.join("steamtron.desktop.steamtron.tmp");
+    std::fs::write(&temporary, desktop).map_err(|error| error.to_string())?;
+    std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644)).map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+    let _ = std::process::Command::new("update-desktop-database").arg(&applications).status();
+    Ok(path.display().to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn install_desktop_entry() -> Result<String, String> {
+    Err("Desktop entries are only implemented on Linux.".into())
+}
+
 #[tauri::command]
 fn restart_steam() -> Result<String, String> {
     require_auth()?;
@@ -412,6 +453,7 @@ fn main() {
             update_versions,
             update_pin,
             clear_update_pin,
+            install_desktop_entry,
             restart_steam,
             profile_status,
             profile_login,

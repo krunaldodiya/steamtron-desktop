@@ -395,12 +395,18 @@ function renderSettingsMessage(message, isError = false) {
 }
 
 function renderSettings() {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
   const panel = detailEl.querySelector("#settings-panel");
   const profileTab = detailEl.querySelector("#tab-profile");
   const doctorTab = detailEl.querySelector("#tab-doctor");
   const settingsRestart = detailEl.querySelector("#settings-restart");
   settingsRestart.onclick = () => restartSteam(settingsRestart);
+  const settingsShortcut = detailEl.querySelector("#settings-shortcut");
+  settingsShortcut.onclick = async () => {
+    const stop = busy(settingsShortcut, "Installing…");
+    try { const path = await invoke("install_desktop_entry"); stop(); renderSettingsMessage(`Desktop shortcut installed: ${path}. Pin SteamTron from the application menu.`); }
+    catch (error) { stop(); renderSettingsMessage(String(error), true); }
+  };
   const select = (active) => {
     profileTab.classList.toggle("active", active === "profile");
     doctorTab.classList.toggle("active", active === "doctor");
