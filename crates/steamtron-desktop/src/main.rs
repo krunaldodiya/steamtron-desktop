@@ -16,6 +16,7 @@ struct GameView {
     appid: String,
     name: String,
     build_id: String,
+    version: Option<String>,
     common: String,
     manifest: String,
     managed: bool,
@@ -226,13 +227,24 @@ fn list_games() -> Result<Vec<GameView>, String> {
     let games = steam::games().map_err(|error| error.to_string())?;
     Ok(games
         .into_iter()
-        .map(|game| GameView {
-            managed: managed.contains(&game.appid),
-            appid: game.appid,
-            name: game.name,
-            build_id: game.build_id,
-            common: game.common.display().to_string(),
-            manifest: game.manifest.display().to_string(),
+        .map(|game| {
+            let version = if game.build_id == "0" {
+                available_updates(&game.appid)
+                    .ok()
+                    .map(|updates| updates.latest)
+                    .filter(|latest| !latest.is_empty())
+            } else {
+                None
+            };
+            GameView {
+                managed: managed.contains(&game.appid),
+                appid: game.appid,
+                name: game.name,
+                build_id: game.build_id,
+                version,
+                common: game.common.display().to_string(),
+                manifest: game.manifest.display().to_string(),
+            }
         })
         .collect())
 }

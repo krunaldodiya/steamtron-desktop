@@ -110,3 +110,7 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .game-tab.active { color:#fff; border-bottom-color:#2f86c9; }
 .game-tab:disabled { opacity:.4; cursor:not-allowed; }
 .game-panel { min-height:200px; }
+
+.update-version { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.update-version .date { line-height:1.2; }
+.update-version small { color:#8fa3b8; line-height:1.2; }

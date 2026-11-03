@@ -96,7 +96,10 @@ function renderGames() {
   for (const game of games.filter((item) => !query || `${item.name} ${item.appid}`.toLowerCase().includes(query))) {
     const button = document.createElement("button");
     button.className = `game${selected === game.appid ? " active" : ""}`;
-    button.innerHTML = `<span><strong>${escape(game.name)}</strong><span>${escape(game.appid)} · build ${escape(game.build_id || "unknown")}</span></span>${game.managed ? '<span class="badge">Managed</span>' : ""}`;
+    const build = game.build_id && game.build_id !== "0"
+      ? `build ${escape(game.build_id)}`
+      : game.version ? `version ${escape(game.version)}` : "version unknown";
+    button.innerHTML = `<span><strong>${escape(game.name)}</strong><span>${escape(game.appid)} · ${build}</span></span>${game.managed ? '<span class="badge">Managed</span>' : ""}`;
     button.addEventListener("click", () => { selected = game.appid; renderGames(); renderDetail(game); });
     gamesEl.appendChild(button);
   }
@@ -250,7 +253,8 @@ function renderUpdatesPanel(host, game) {
         version.installed ? "Installed" : "",
         version.pinned ? "Pinned" : "",
       ].filter(Boolean);
-      row.innerHTML = `<span><span class="date">${escape(version.date)}</span><small>${version.depots} depot${version.depots === 1 ? "" : "s"}${version.buildid ? ` · build ${escape(version.buildid)}` : ""}</small></span><span class="update-badges">${badges.map((badge) => `<span class="${badge.toLowerCase()}">${badge}</span>`).join("")}</span>`;
+      const build = version.buildid ? `build ${escape(version.buildid)}` : "build not archived";
+      row.innerHTML = `<span class="update-version"><span class="date">${escape(version.date)}</span><small>${version.depots} depot${version.depots === 1 ? "" : "s"} · ${build}</small></span><span class="update-badges">${badges.map((badge) => `<span class="${badge.toLowerCase()}">${badge}</span>`).join("")}</span>`;
       row.onclick = () => { selectedVersion = version.date; render(); };
       list.appendChild(row);
     }
