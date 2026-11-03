@@ -60,7 +60,7 @@ fix-overlay tooling.
 | UI | Tauri WebView; HTML/CSS/JS initially |
 | Linux fixes overlay | `fuse-overlayfs` |
 | Windows fixes overlay | Custom WinFsp union filesystem |
-| Linux unlock backend | SLSsteam, with Lumen as its companion/UI stack |
+| Linux unlock backend | SLSsteam; Lumen is optional and not required |
 | Windows unlock backend | BetterSteamTools primary; OpenSteamTool fallback |
 | Lua/manifest format | Shared Lua + `.manifest` files |
 | Shared app model | One Rust core; platform adapters behind traits |
@@ -88,7 +88,7 @@ flowchart LR
   Core --> Fixes[Fixes ZIP engine]
   Core --> Unlock[Unlock backend trait]
   Core --> Overlay[Overlay backend trait]
-  Unlock --> LinuxUnlock[Linux: SLSsteam/Lumen]
+  Unlock --> LinuxUnlock[Linux: SLSsteam]
   Unlock --> WinUnlock[Windows: BetterSteamTools/OpenSteamTool]
   Overlay --> LinuxOverlay[Linux: fuse-overlayfs]
   Overlay --> WinOverlay[Windows: WinFsp union]
@@ -110,12 +110,12 @@ docs/                   PRD and engineering documentation
 
 ### Linux unlock
 
-- Primary: SLSsteam
-- Companion: Lumen where installed
+- Required: SLSsteam (`SLSsteam.so` + wrapper)
+- Lumen: optional legacy CEF/UI sidecar; the desktop app does not require or install it
 - Lua directory: `<Steam>/config/stplug-in`
 - Manifest store: `$XDG_DATA_HOME/SLSsteam/manifests`
 - Depot manifests: `<Steam>/steamapps/depotcache`
-- Detection: SLSsteam `.so` or Lumen runtime present
+- Detection: SLSsteam `.so` present; Lumen is optional
 - Fixes-only operation must work without SLSsteam.
 
 ### Windows unlock
@@ -251,6 +251,6 @@ The launch wrapper/overlay backend remains even after plugin removal.
 | 2026-11-03 | Use Tauri 2 and Rust for the desktop app |
 | 2026-11-03 | Linux overlay: fuse-overlayfs |
 | 2026-11-03 | Windows overlay: WinFsp union filesystem |
-| 2026-11-03 | Linux unlock: SLSsteam/Lumen |
+| 2026-11-03 | Linux unlock: SLSsteam (Lumen optional) |
 | 2026-11-03 | Windows unlock: BetterSteamTools primary, OpenSteamTool fallback |
 | 2026-11-03 | Do not use LuaTools, SteamTools-only, rclone, or ProjFS as the exact unified solution |

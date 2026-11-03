@@ -66,19 +66,24 @@ impl UnlockBackend for LinuxUnlock {
         let sls = self.sls_root().join("SLSsteam.so");
         let lumen = self.lumen_root().join("lumen");
         let lua_dir = self.lua_dir();
-        let installed = sls.is_file() || lumen.exists();
+        let installed = sls.is_file();
         let ready = installed && lua_dir.parent().is_some_and(Path::exists);
+        let lumen_note = if lumen.exists() {
+            "Lumen is present but is not required by the desktop app."
+        } else {
+            "Lumen is not installed, which is supported."
+        };
         Ok(BackendStatus {
             platform: "linux",
-            backend: "SLSsteam/Lumen",
+            backend: "SLSsteam",
             installed,
             ready,
             steam_root: self.steam_root.display().to_string(),
             lua_dir: lua_dir.display().to_string(),
             details: if installed {
-                "Linux Steam hook detected.".into()
+                format!("SLSsteam hook detected. {lumen_note}")
             } else {
-                "SLSsteam/Lumen not installed; fixes will work, library unlocking will not.".into()
+                format!("SLSsteam is not installed; fixes will work, library unlocking will not. {lumen_note}")
             },
         })
     }

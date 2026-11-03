@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::collections::BTreeSet;
 use std::fs;
 use std::process::Command;
@@ -201,6 +202,10 @@ fn which(name: &str) -> Option<std::path::PathBuf> {
 
 /// Launch the platform helper installer. The caller must present this as a
 /// user-consented repair, never as an automatic background action.
+fn shell_quote(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+}
+
 pub fn launch_unlock_installer() -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
@@ -223,14 +228,24 @@ pub fn launch_unlock_installer() -> Result<String, String> {
             if which(terminal).is_none() {
                 continue;
             }
+            let lumen = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".local/share/Lumen/lumen");
+            let command = format!(
+                "bash {} --noplugin; pkill -f {} 2>/dev/null || true; rm -rf {}",
+                shell_quote(&script),
+                shell_quote(&lumen),
+                shell_quote(&lumen.parent().unwrap_or_else(|| std::path::Path::new(".")))
+            );
             Command::new(terminal)
                 .args(arguments)
                 .arg("bash")
-                .arg(&script)
-                .arg("--noplugin")
+                .arg("-c")
+                .arg(command)
                 .spawn()
                 .map_err(|error| error.to_string())?;
-            return Ok("SLSsteam installer opened in a terminal.".into());
+            return Ok("SLSsteam installer opened; Lumen is removed after installation.".into());
         }
         Err("No terminal emulator was found to run the SLSsteam installer.".into())
     }
