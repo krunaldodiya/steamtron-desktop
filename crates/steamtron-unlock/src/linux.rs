@@ -113,6 +113,13 @@ impl UnlockBackend for LinuxUnlock {
             write_atomic(&target, data, 0o600)?;
             let cache = depotcache.join(name);
             write_atomic(&cache, data, 0o600)?;
+            if let Some((depot, gid)) = name
+                .strip_suffix(".manifest")
+                .and_then(|value| value.split_once('_'))
+            {
+                let preferred = store.join(format!(".preferred_{depot}"));
+                write_atomic(&preferred, format!("{gid}\n").as_bytes(), 0o600)?;
+            }
             written.push(target);
         }
         Ok(InstalledLua {

@@ -164,6 +164,40 @@ function renderSettings() {
   renderProfile(panel);
 }
 
+function showAddGame() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal"><h2>Add game</h2><p class="muted">Add a Steam library entry from the manifest API or a local ZIP.</p><label for="add-id">App ID or Steam store URL</label><input id="add-id" placeholder="3468650 or https://store.steampowered.com/app/3468650"><label for="add-title">Title (optional)</label><input id="add-title" placeholder="Game title"><div class="modal-status"></div><div class="modal-actions"><button id="add-cancel">Cancel</button><button id="add-import">Import ZIP</button><button id="add-submit" class="primary">Add from SteamTron</button></div></div>`;
+  document.body.appendChild(backdrop);
+  const idInput = backdrop.querySelector("#add-id");
+  const titleInput = backdrop.querySelector("#add-title");
+  const statusNode = backdrop.querySelector(".modal-status");
+  const submit = backdrop.querySelector("#add-submit");
+  const importButton = backdrop.querySelector("#add-import");
+  const close = () => backdrop.remove();
+  const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
+  backdrop.querySelector("#add-cancel").onclick = close;
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  idInput.focus();
+  const finish = async (result) => {
+    if (!result) return;
+    setStatus(`Added ${result.title}. Restart Steam to see it in the library.`);
+    await load();
+    if (result.appmanifest) setStatus(`Added ${result.title}. Appmanifest: ${result.appmanifest}`);
+  };
+  submit.onclick = async () => {
+    submit.disabled = true; importButton.disabled = true; setStatus("Downloading manifest bundle…");
+    try { await finish(await invoke("add_game", { appidOrUrl: idInput.value, title: titleInput.value })); }
+    catch (error) { setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
+  };
+  importButton.onclick = async () => {
+    submit.disabled = true; importButton.disabled = true; setStatus("Choose a Lua manifest ZIP…");
+    try { await finish(await invoke("import_game_zip", { appidOrUrl: idInput.value, title: titleInput.value })); }
+    catch (error) { setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
+  };
+}
+
+document.querySelector("#add-game").onclick = showAddGame;
 document.querySelector("#settings").onclick = renderSettings;
 document.querySelector("#refresh").onclick = load;
 searchEl.oninput = renderGames;

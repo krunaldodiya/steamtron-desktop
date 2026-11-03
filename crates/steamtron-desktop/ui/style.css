@@ -49,3 +49,12 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .settings-tab.active { color:#fff; border-bottom-color:#2f86c9; }
 .profile-email { color:#fff; font-size:16px; margin:8px 0 4px; }
 .profile-actions { display:flex; gap:8px; margin-top:18px; }
+
+.modal-backdrop { position:fixed; inset:0; background:#000b; display:flex; align-items:center; justify-content:center; z-index:100; }
+.modal { width:min(460px, calc(100vw - 32px)); background:#17212c; border:1px solid #3b5166; border-radius:12px; padding:20px; box-shadow:0 20px 70px #000c; }
+.modal h2 { margin-bottom:6px; }
+.modal label { display:block; color:#8fa3b8; font-size:12px; margin:14px 0 6px; }
+.modal input { width:100%; padding:10px 12px; border:1px solid #3b5166; border-radius:7px; background:#101922; color:#e8f0f7; outline:none; }
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+.modal-status { margin-top:14px; color:#8fa3b8; font-size:13px; overflow-wrap:anywhere; }
+.modal-status.error { color:#ff9b9b; }

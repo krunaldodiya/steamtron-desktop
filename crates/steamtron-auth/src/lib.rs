@@ -90,7 +90,7 @@ fn token_path() -> PathBuf {
     data_home().join("steamtron/api-token.json")
 }
 
-fn api_base() -> String {
+pub fn api_base() -> String {
     if let Ok(value) = std::env::var("STEAMTRON_API_BASE") {
         if !value.trim().is_empty() {
             return value.trim().trim_end_matches('/').to_owned();
@@ -155,6 +155,15 @@ fn now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+pub fn access_token() -> String {
+    let base = api_base();
+    load_tokens()
+        .remove(&key(&base))
+        .filter(valid)
+        .map(|entry| entry.access_token)
+        .unwrap_or_default()
 }
 
 pub fn status() -> AuthState {

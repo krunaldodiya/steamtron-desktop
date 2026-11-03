@@ -3835,6 +3835,7 @@ dependencies = [
  "steamtron-auth",
  "steamtron-core",
  "steamtron-doctor",
+ "steamtron-library",
  "steamtron-overlay",
  "steamtron-unlock",
  "tauri",
@@ -3849,6 +3850,21 @@ dependencies = [
  "steamtron-core",
  "steamtron-unlock",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "steamtron-library"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "steamtron-auth",
+ "steamtron-core",
+ "steamtron-unlock",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zip",
 ]
 
 [[package]]

@@ -5,6 +5,7 @@ members = [
     "crates/steamtron-unlock",
     "crates/steamtron-doctor",
     "crates/steamtron-auth",
+    "crates/steamtron-library",
     "crates/steamtron-cli",
     "crates/steamtron-desktop",
 ]

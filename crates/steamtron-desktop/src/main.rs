@@ -7,6 +7,7 @@ use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
+use steamtron_library::{add_bundle, bundle_from_zip, download_bundle, normalize_appid, AddedGame};
 
 #[derive(Serialize)]
 struct GameView {
@@ -48,6 +49,39 @@ fn doctor_report() -> steamtron_doctor::DoctorReport {
 #[tauri::command]
 fn repair_backend() -> Result<String, String> {
     launch_unlock_installer()
+}
+
+fn unlock_backend() -> Result<impl UnlockBackend, String> {
+    let backend = platform_backend().map_err(|error| error.to_string())?;
+    let status = backend.status().map_err(|error| error.to_string())?;
+    if !status.ready {
+        return Err("Steam library support is not ready. Open Settings → Doctor.".into());
+    }
+    Ok(backend)
+}
+
+#[tauri::command]
+fn add_game(appid_or_url: String, title: String) -> Result<AddedGame, String> {
+    let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
+    let backend = unlock_backend()?;
+    let bundle = download_bundle(&appid).map_err(|error| error.to_string())?;
+    add_bundle(&appid, &title, bundle, &backend).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn import_game_zip(appid_or_url: String, title: String) -> Result<Option<AddedGame>, String> {
+    let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("Lua manifest ZIP", &["zip"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let backend = unlock_backend()?;
+    let bundle = bundle_from_zip(&path).map_err(|error| error.to_string())?;
+    add_bundle(&appid, &title, bundle, &backend)
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -149,6 +183,8 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_status,
+            add_game,
+            import_game_zip,
             profile_status,
             profile_login,
             profile_logout,

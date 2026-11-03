@@ -1,0 +1,17 @@
+[package]
+name = "steamtron-library"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+regex = "1"
+reqwest = { version = "0.12", features = ["blocking"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+steamtron-auth = { path = "../steamtron-auth" }
+steamtron-core = { path = "../steamtron-core" }
+steamtron-unlock = { path = "../steamtron-unlock" }
+
+[dev-dependencies]
+tempfile = "3"
