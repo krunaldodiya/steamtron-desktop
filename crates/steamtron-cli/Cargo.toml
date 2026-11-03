@@ -1,0 +1,14 @@
+[package]
+name = "steamtron-overlay-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "steamtron-overlay"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+steamtron-overlay = { path = "../steamtron-overlay" }
+thiserror = "2"
+anyhow = "1"
