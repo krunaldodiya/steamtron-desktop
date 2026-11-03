@@ -292,6 +292,14 @@ async function loadBackend() {
 
 async function loadFixes() {
   fixes = new Map((await invoke("list_fixes")).map((item) => [item.appid, item]));
+  try {
+    const repaired = await invoke("repair_launch_options");
+    if (repaired.length) {
+      fixes = new Map((await invoke("list_fixes")).map((item) => [item.appid, item]));
+    }
+  } catch (_error) {
+    // The Fixes tab surfaces any launch-option problem for the selected game.
+  }
 }
 
 async function load() {

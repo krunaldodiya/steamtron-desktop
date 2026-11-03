@@ -187,6 +187,28 @@ fn install_desktop_entry() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn repair_launch_options() -> Result<Vec<String>, String> {
+    require_auth()?;
+    let config = Config::load().map_err(|error| error.to_string())?;
+    let mut repaired = Vec::new();
+    let mut errors = Vec::new();
+    for entry in config.entries().filter(|entry| entry.enabled) {
+        if has_launch_option(&entry.appid) {
+            continue;
+        }
+        match configure_launch_option(&entry.appid, true) {
+            Ok(true) => repaired.push(entry.appid.clone()),
+            Ok(false) => {}
+            Err(error) => errors.push(format!("{}: {error}", entry.appid)),
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors.join("; "));
+    }
+    Ok(repaired)
+}
+
+#[tauri::command]
 fn repair_library_entries() -> Result<Vec<RepairedGame>, String> {
     require_auth()?;
     repair_missing_appmanifests().map_err(|error| error.to_string())
@@ -470,6 +492,7 @@ fn main() {
             update_pin,
             clear_update_pin,
             install_desktop_entry,
+            repair_launch_options,
             repair_library_entries,
             restart_steam,
             profile_status,
