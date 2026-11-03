@@ -397,7 +397,6 @@ pub fn add_bundle(
     title: &str,
     bundle: Bundle,
     backend: &dyn UnlockBackend,
-    library: Option<&Path>,
 ) -> Result<AddedGame, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
@@ -414,19 +413,7 @@ pub fn add_bundle(
     };
     let title = sanitize_title(&raw_title);
     let libraries = steam::libraries().map_err(|_| LibraryError::SteamNotFound)?;
-    let steamapps = if let Some(selected) = library {
-        let selected = selected
-            .canonicalize()
-            .map_err(|error| LibraryError::io(selected, error))?;
-        if !libraries.contains(&selected) {
-            return Err(LibraryError::Update(
-                "selected directory is not a Steam library".into(),
-            ));
-        }
-        selected
-    } else {
-        libraries.into_iter().next().ok_or(LibraryError::SteamNotFound)?
-    };
+    let steamapps = libraries.into_iter().next().ok_or(LibraryError::SteamNotFound)?;
     let acf = steamapps.join(format!("appmanifest_{appid}.acf"));
     if acf.exists() {
         return Err(LibraryError::AlreadyInstalled(appid.to_owned()));

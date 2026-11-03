@@ -406,7 +406,7 @@ function renderSettings() {
 function showAddGame() {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><label for="add-library">Install library</label><select id="add-library"></select><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
   document.body.appendChild(backdrop);
   const queryInput = backdrop.querySelector("#add-search");
   const searchButton = backdrop.querySelector("#add-search-button");
@@ -416,7 +416,6 @@ function showAddGame() {
   const submit = backdrop.querySelector("#add-submit");
   const importButton = backdrop.querySelector("#add-import");
   const actionRow = backdrop.querySelector("#add-actions");
-  const librarySelect = backdrop.querySelector("#add-library");
   let selected = null;
   const close = () => backdrop.remove();
   const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
@@ -475,7 +474,7 @@ function showAddGame() {
     const stop = busy(submit, "Adding…");
     importButton.disabled = true;
     setStatus(`Downloading manifest bundle for ${selected.name}…`);
-    try { const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name, library: librarySelect.value || null }); stop(); await finish(result); }
+    try { const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name }); stop(); await finish(result); }
     catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
   importButton.onclick = async () => {
@@ -484,23 +483,13 @@ function showAddGame() {
     submit.disabled = true;
     setStatus(`Choose the Lua manifest or ZIP for ${selected.name}…`);
     try {
-      const result = await invoke("import_game_file", { appidOrUrl: selected.appid, title: selected.name, library: librarySelect.value || null });
+      const result = await invoke("import_game_file", { appidOrUrl: selected.appid, title: selected.name });
       stop();
       if (!result) { setStatus("Import cancelled."); submit.disabled = false; importButton.disabled = false; return; }
       await finish(result);
     }
     catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
-  invoke("list_libraries").then((libraries) => {
-    librarySelect.replaceChildren();
-    for (const library of libraries) {
-      const option = document.createElement("option");
-      option.value = library;
-      option.textContent = library;
-      librarySelect.appendChild(option);
-    }
-    if (!libraries.length) setStatus("No Steam libraries were found.", true);
-  }).catch((error) => setStatus(String(error), true));
   setStatus("Search to find a game, then select a result.");
   queryInput.focus();
 }

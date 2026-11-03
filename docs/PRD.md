@@ -180,7 +180,6 @@ merged path: read-only-looking game view with copy-up writes
 | Steam restart | Implemented from Settings |
 | Steam launch-option setup | Implemented through `localconfig.vdf` and the dual-mode overlay wrapper |
 | Managed library removal | Implemented with appmanifest/Lua/manifest/symlink cleanup |
-| Add-game Steam library selection | Implemented |
 | Linux deb/AppImage packaging | Implemented; deb and AppImage built |
 | Windows WinFsp overlay | Pending |
 | Plugin retirement | Pending |

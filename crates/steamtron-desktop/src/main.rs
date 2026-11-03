@@ -177,24 +177,16 @@ fn restart_steam_impl() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_libraries() -> Result<Vec<String>, String> {
-    require_auth()?;
-    steam::libraries()
-        .map(|libraries| libraries.into_iter().map(|path| path.display().to_string()).collect())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn add_game(appid_or_url: String, title: String, library: Option<String>) -> Result<AddedGame, String> {
+fn add_game(appid_or_url: String, title: String) -> Result<AddedGame, String> {
     require_auth()?;
     let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
     let backend = unlock_backend()?;
     let bundle = download_bundle(&appid).map_err(|error| error.to_string())?;
-    add_bundle(&appid, &title, bundle, &backend, library.as_deref().map(std::path::Path::new)).map_err(|error| error.to_string())
+    add_bundle(&appid, &title, bundle, &backend).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn import_game_file(appid_or_url: String, title: String, library: Option<String>) -> Result<Option<AddedGame>, String> {
+fn import_game_file(appid_or_url: String, title: String) -> Result<Option<AddedGame>, String> {
     require_auth()?;
     let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
     let Some(path) = rfd::FileDialog::new()
@@ -205,7 +197,7 @@ fn import_game_file(appid_or_url: String, title: String, library: Option<String>
     };
     let backend = unlock_backend()?;
     let bundle = bundle_from_file(&path).map_err(|error| error.to_string())?;
-    add_bundle(&appid, &title, bundle, &backend, library.as_deref().map(std::path::Path::new))
+    add_bundle(&appid, &title, bundle, &backend)
         .map(Some)
         .map_err(|error| error.to_string())
 }
@@ -392,7 +384,6 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_status,
-            list_libraries,
             search_games,
             add_game,
             import_game_file,
