@@ -1,0 +1,30 @@
+:root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#111820; color:#dbe4ed; }
+* { box-sizing: border-box; }
+body { margin:0; min-height:100vh; background:radial-gradient(1200px 600px at 20% -10%, #1d3144, #111820 55%); }
+.topbar { display:flex; justify-content:space-between; align-items:center; padding:24px 32px; border-bottom:1px solid #2a3948; }
+h1 { margin:0; color:#fff; font-size:26px; letter-spacing:.3px; }
+h2 { margin:0 0 4px; color:#fff; font-size:20px; }
+.muted { color:#8fa3b8; margin:4px 0 0; font-size:13px; }
+.layout { display:grid; grid-template-columns:360px 1fr; gap:18px; padding:20px 32px 32px; height:calc(100vh - 100px); }
+.panel { background:#17212c; border:1px solid #2a3948; border-radius:12px; overflow:hidden; }
+.search { width:100%; padding:12px 14px; border:0; border-bottom:1px solid #2a3948; background:#111a23; color:#dbe4ed; outline:none; font-size:14px; }
+.games { height:calc(100% - 43px); overflow:auto; }
+.game { width:100%; border:0; border-bottom:1px solid #22303e; background:transparent; color:#dbe4ed; padding:12px 14px; text-align:left; cursor:pointer; display:flex; justify-content:space-between; gap:10px; }
+.game:hover, .game.active { background:#203041; }
+.game strong { display:block; font-size:14px; color:#f2f6fa; }
+.game span { display:block; color:#8fa3b8; font-size:12px; margin-top:3px; }
+.badge { border:1px solid #3c5a74; color:#8fc7ff; border-radius:99px; padding:2px 8px; font-size:11px; height:fit-content; }
+.detail { padding:24px; overflow:auto; }
+.empty { color:#8fa3b8; display:grid; place-items:center; height:100%; }
+.actions { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0; }
+button { border:1px solid #3b5166; border-radius:7px; background:#223447; color:#e9f2fa; padding:9px 13px; cursor:pointer; font-size:13px; }
+button:hover { background:#2b455e; }
+button.primary { background:#2f86c9; border-color:#2f86c9; color:#fff; }
+button.danger { border-color:#8b3b3b; color:#ffb5b5; }
+button:disabled { opacity:.45; cursor:not-allowed; }
+.row { border-top:1px solid #263645; padding:14px 0; }
+.label { color:#8fa3b8; font-size:12px; margin-bottom:4px; }
+.value { color:#e8f0f7; overflow-wrap:anywhere; }
+.status { margin-top:16px; color:#8fa3b8; font-size:13px; }
+.status.error { color:#ff9b9b; }
+.secondary { background:#1b2a38; }

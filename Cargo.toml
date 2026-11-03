@@ -1,7 +1,9 @@
 [workspace]
 members = [
     "crates/steamtron-overlay",
+    "crates/steamtron-core",
     "crates/steamtron-cli",
+    "crates/steamtron-desktop",
 ]
 resolver = "2"
 

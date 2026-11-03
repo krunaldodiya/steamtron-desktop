@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SteamTron</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>SteamTron</h1>
+      <p class="muted">Steam fixes and overlay manager</p>
+    </div>
+    <button id="refresh" class="secondary">Refresh</button>
+  </header>
+  <main class="layout">
+    <aside class="panel">
+      <input id="search" class="search" placeholder="Search installed games">
+      <div id="games" class="games"></div>
+    </aside>
+    <section id="detail" class="panel detail">
+      <div class="empty">Select a Steam game.</div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

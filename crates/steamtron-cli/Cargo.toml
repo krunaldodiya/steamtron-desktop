@@ -10,5 +10,6 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 steamtron-overlay = { path = "../steamtron-overlay" }
+steamtron-core = { path = "../steamtron-core" }
 thiserror = "2"
 anyhow = "1"

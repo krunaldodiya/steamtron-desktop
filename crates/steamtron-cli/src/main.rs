@@ -3,6 +3,9 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use steamtron_core::config::Config;
+use steamtron_core::fixes::{export_name, export_zip, install_zip};
+use steamtron_core::steam;
 use steamtron_overlay::{LinuxOverlay, OverlayGame};
 
 #[derive(Debug, Parser)]
@@ -36,6 +39,37 @@ enum CommandKind {
         #[arg(long)]
         fixes: PathBuf,
     },
+    /// List installed Steam games.
+    Games,
+    /// Manage per-game fixes mappings.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+    /// Install, export, or inspect fixes ZIPs.
+    Fixes {
+        #[command(subcommand)]
+        command: FixesCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    List,
+    Set {
+        appid: String,
+        fixes: PathBuf,
+        #[arg(long)]
+        disabled: bool,
+    },
+    Remove { appid: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum FixesCommand {
+    Install { appid: String, zip: PathBuf },
+    Export { appid: String, destination: PathBuf },
+    List,
 }
 
 fn main() -> Result<()> {
@@ -72,11 +106,7 @@ fn main() -> Result<()> {
                 .as_deref()
                 .map(|path| overlay.game().rewrite_cwd(path, &merged))
                 .unwrap_or_else(|| merged.clone());
-            let mut process = Command::new(
-                rewritten
-                    .first()
-                    .context("missing command after --")?,
-            );
+            let mut process = Command::new(rewritten.first().context("missing command after --")?);
             process.args(&rewritten[1..]).current_dir(workdir);
             if let Some(appid) = overlay.game().appid() {
                 process.env("SteamAppId", appid);
@@ -85,6 +115,78 @@ fn main() -> Result<()> {
             let status = process.status().context("could not launch command")?;
             overlay.unmount()?;
             std::process::exit(status.code().unwrap_or(1));
+        }
+        CommandKind::Games => {
+            let managed = steam::managed_appids()?;
+            for game in steam::games()? {
+                let marker = if managed.contains(&game.appid) { "*" } else { " " };
+                println!(
+                    "{marker} {:<10} {:<40} build={} common={}",
+                    game.appid,
+                    game.name,
+                    game.build_id,
+                    game.common.display()
+                );
+            }
+        }
+        CommandKind::Config { command } => {
+            let mut config = Config::load()?;
+            match command {
+                ConfigCommand::List => {
+                    for entry in config.entries() {
+                        println!(
+                            "{} enabled={} fixes={}",
+                            entry.appid,
+                            entry.enabled,
+                            entry.fixes.display()
+                        );
+                    }
+                }
+                ConfigCommand::Set {
+                    appid,
+                    fixes,
+                    disabled,
+                } => {
+                    let entry = config.upsert(appid, fixes, !disabled)?;
+                    println!(
+                        "{} enabled={} fixes={}",
+                        entry.appid,
+                        entry.enabled,
+                        entry.fixes.display()
+                    );
+                }
+                ConfigCommand::Remove { appid } => {
+                    println!("{}", if config.remove(&appid)? { "removed" } else { "not found" });
+                }
+            }
+        }
+        CommandKind::Fixes { command } => {
+            let mut config = Config::load()?;
+            match command {
+                FixesCommand::Install { appid, zip } => {
+                    let target = install_zip(&appid, &zip)?;
+                    let entry = config.upsert(&appid, target.clone(), true)?;
+                    println!(
+                        "{} enabled={} fixes={}",
+                        entry.appid,
+                        entry.enabled,
+                        entry.fixes.display()
+                    );
+                }
+                FixesCommand::Export { appid, destination } => {
+                    let entry = config
+                        .entry(&appid)
+                        .with_context(|| format!("no fixes configured for {appid}"))?;
+                    export_zip(&entry.fixes, &destination, &appid)?;
+                    println!("{}", destination.display());
+                    println!("name={}", export_name(&appid, &appid));
+                }
+                FixesCommand::List => {
+                    for entry in config.entries() {
+                        println!("{} {}", entry.appid, entry.fixes.display());
+                    }
+                }
+            }
         }
     }
     Ok(())
