@@ -215,15 +215,36 @@ fn repair_library_entries() -> Result<Vec<RepairedGame>, String> {
 }
 
 #[tauri::command]
-fn restart_steam() -> Result<String, String> {
+async fn restart_steam() -> Result<String, String> {
     require_auth()?;
-    restart_steam_impl()
+    tauri::async_runtime::spawn_blocking(restart_steam_impl)
+        .await
+        .map_err(|error| format!("Steam restart task failed: {error}"))?
+}
+
+#[cfg(target_os = "linux")]
+fn steam_process_running() -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else {
+            continue;
+        };
+        if cmdline
+            .split(|byte| *byte == 0)
+            .any(|arg| arg == b"steam" || arg.ends_with(b"/steam"))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(target_os = "linux")]
 fn restart_steam_impl() -> Result<String, String> {
     use std::process::{Command, Stdio};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     let output = Command::new("steam")
         .arg("-shutdown")
@@ -235,7 +256,15 @@ fn restart_steam_impl() -> Result<String, String> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    std::thread::sleep(Duration::from_secs(3));
+
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while steam_process_running() {
+        if Instant::now() >= deadline {
+            return Err("Steam did not exit within 60 seconds; restart aborted.".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+
     Command::new("setsid")
         .arg("steam")
         .stdin(Stdio::null())
@@ -243,7 +272,14 @@ fn restart_steam_impl() -> Result<String, String> {
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("Could not start Steam: {error}"))?;
-    Ok("Steam restart requested.".into())
+    let startup_deadline = Instant::now() + Duration::from_secs(10);
+    while !steam_process_running() {
+        if Instant::now() >= startup_deadline {
+            return Err("Steam did not start within 10 seconds.".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Ok("Steam restarted.".into())
 }
 
 #[cfg(not(target_os = "linux"))]
