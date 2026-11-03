@@ -11,8 +11,10 @@ h2 { margin:0 0 4px; color:#fff; font-size:20px; }
 .games { height:calc(100% - 43px); overflow:auto; }
 .game { width:100%; border:0; border-bottom:1px solid #22303e; background:transparent; color:#dbe4ed; padding:12px 14px; text-align:left; cursor:pointer; display:flex; justify-content:space-between; gap:10px; }
 .game:hover, .game.active { background:#203041; }
-.game strong { display:block; font-size:14px; color:#f2f6fa; }
-.game span { display:block; color:#8fa3b8; font-size:12px; margin-top:3px; }
+.game > span:first-child { min-width:0; flex:1; }
+.game strong { display:block; font-size:14px; color:#f2f6fa; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.game > span:first-child > span { display:block; color:#8fa3b8; font-size:12px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.game .badge { display:inline-flex; align-items:center; white-space:nowrap; flex-shrink:0; align-self:flex-start; margin-top:0; }
 .badge { border:1px solid #3c5a74; color:#8fc7ff; border-radius:99px; padding:2px 8px; font-size:11px; height:fit-content; }
 .detail { padding:24px; overflow:auto; }
 .empty { color:#8fa3b8; display:grid; place-items:center; height:100%; }
