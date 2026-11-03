@@ -66,6 +66,8 @@ pub struct AddedGame {
     pub appmanifest: String,
     pub lua: String,
     pub manifests: usize,
+    pub pinned: Option<String>,
+    pub pin_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -428,6 +430,17 @@ pub fn add_bundle(
     fs::write(&temporary, text).map_err(|error| LibraryError::io(&temporary, error))?;
     fs::rename(&temporary, &acf).map_err(|error| LibraryError::io(&acf, error))?;
 
+    let mut pinned = None;
+    let mut pin_error = None;
+    if let Ok(updates) = updates::available_updates(appid) {
+        if !updates.latest.is_empty() {
+            match updates::pin_update(appid, &updates.latest) {
+                Ok(_) => pinned = Some(updates.latest),
+                Err(error) => pin_error = Some(error.to_string()),
+            }
+        }
+    }
+
     Ok(AddedGame {
         appid: appid.to_owned(),
         title,
@@ -435,6 +448,8 @@ pub fn add_bundle(
         appmanifest: acf.display().to_string(),
         lua: installed.lua_path.display().to_string(),
         manifests: installed.manifests.len(),
+        pinned,
+        pin_error,
     })
 }
 

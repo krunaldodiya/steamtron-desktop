@@ -477,9 +477,10 @@ function showAddGame() {
     if (!result) return;
     submit.disabled = true;
     importButton.disabled = true;
-    setStatus(`Added ${result.title}. Restart Steam from Settings to see it in the library.`);
+    const pinned = result.pinned ? ` · pinned latest ${result.pinned}` : result.pin_error ? ` · latest pin failed: ${result.pin_error}` : "";
+    setStatus(`Added ${result.title}${pinned}. Restart Steam from Settings to see it in the library.`, !!result.pin_error);
     await load();
-    if (result.appmanifest) setStatus(`Added ${result.title}. Appmanifest: ${result.appmanifest}`);
+    if (result.appmanifest) setStatus(`Added ${result.title}${pinned}. Appmanifest: ${result.appmanifest}`, !!result.pin_error);
   };
   backdrop.querySelector("#add-close").onclick = close;
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
