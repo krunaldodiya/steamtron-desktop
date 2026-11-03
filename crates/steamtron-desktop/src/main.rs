@@ -96,22 +96,26 @@ fn unlock_backend() -> Result<impl UnlockBackend, String> {
 }
 
 #[tauri::command]
-fn search_games(query: String) -> Result<Vec<SearchResult>, String> {
+async fn search_games(query: String) -> Result<Vec<SearchResult>, String> {
     require_auth()?;
-    let mut results = steam_search(&query).map_err(|error| error.to_string())?;
-    let installed: std::collections::BTreeSet<String> = steam::installed_appids()
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .chain(
-            steam::managed_appids()
-                .map_err(|error| error.to_string())?
-                .into_iter(),
-        )
-        .collect();
-    for result in &mut results {
-        result.installed = installed.contains(&result.appid);
-    }
-    Ok(results)
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut results = steam_search(&query).map_err(|error| error.to_string())?;
+        let installed: std::collections::BTreeSet<String> = steam::installed_appids()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .chain(
+                steam::managed_appids()
+                    .map_err(|error| error.to_string())?
+                    .into_iter(),
+            )
+            .collect();
+        for result in &mut results {
+            result.installed = installed.contains(&result.appid);
+        }
+        Ok(results)
+    })
+    .await
+    .map_err(|error| format!("Search task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -177,12 +181,17 @@ fn restart_steam_impl() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn add_game(appid_or_url: String, title: String) -> Result<AddedGame, String> {
+async fn add_game(appid_or_url: String, title: String) -> Result<AddedGame, String> {
     require_auth()?;
-    let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
-    let backend = unlock_backend()?;
-    let bundle = download_bundle(&appid).map_err(|error| error.to_string())?;
-    add_bundle(&appid, &title, bundle, &backend).map_err(|error| error.to_string())
+    let appid = normalize_appid(&appid_or_url)
+        .ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let backend = unlock_backend()?;
+        let bundle = download_bundle(&appid).map_err(|error| error.to_string())?;
+        add_bundle(&appid, &title, bundle, &backend).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Add task failed: {error}"))?
 }
 
 #[tauri::command]

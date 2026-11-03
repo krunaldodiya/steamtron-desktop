@@ -10,6 +10,10 @@ const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[char]));
 
+function nextPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
 function busy(button, label) {
   if (!button) return () => {};
   const original = button.textContent;
@@ -441,6 +445,7 @@ function showAddGame() {
     resultsNode.replaceChildren();
     const stop = busy(searchButton, "Searching…");
     setStatus("Searching Steam…");
+    await nextPaint();
     try {
       const results = await invoke("search_games", { query: queryInput.value });
       if (!results.length) { setStatus("No matching Steam results.", true); return; }
@@ -474,6 +479,7 @@ function showAddGame() {
     const stop = busy(submit, "Adding…");
     importButton.disabled = true;
     setStatus(`Downloading manifest bundle for ${selected.name}…`);
+    await nextPaint();
     try { const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name }); stop(); await finish(result); }
     catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
@@ -482,6 +488,7 @@ function showAddGame() {
     const stop = busy(importButton, "Choose file…");
     submit.disabled = true;
     setStatus(`Choose the Lua manifest or ZIP for ${selected.name}…`);
+    await nextPaint();
     try {
       const result = await invoke("import_game_file", { appidOrUrl: selected.appid, title: selected.name });
       stop();
