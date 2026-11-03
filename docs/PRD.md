@@ -173,9 +173,9 @@ merged path: read-only-looking game view with copy-up writes
 | Unlock backend status | Implemented |
 | Doctor checks and backend repair | Implemented in Settings > Doctor |
 | Automatic backend installation/repair | Implemented via managed installer handoff; hardening pending |
-| Add game by App ID / Steam URL | Implemented via authenticated API |
-| Local Lua/manifest ZIP import | Implemented |
-| Account login/logout | Implemented in Settings > Profile |
+| Search and add by game name, App ID, or Steam URL | Implemented with select-before-add results |
+| Local Lua/manifest ZIP import for the selected game | Implemented; Lua App ID is validated |
+| Account login/logout | Implemented; all app actions are gated behind sign-in |
 | Update/build listing and pinning | Pending |
 | Steam launch-option setup | Pending |
 | Managed library removal | Pending |
@@ -188,16 +188,21 @@ The desktop app replaces the in-Steam button with a global flow:
 
 ```text
 Library -> Add Game
-  -> App ID or Steam URL
-  -> resolve title
-  -> choose Steam library
-  -> fetch Lua/manifest bundle
+  -> search by game name, App ID, or Steam URL
+  -> show every matching Steam result
+  -> select the exact game
+  -> Add selected game / Import ZIP for selected game
+  -> fetch public Lua/manifest bundle
+  -> validate the Lua addappid matches the selection
   -> write backend data
   -> restart Steam if required
 ```
 
-Offline fallback: import a Lua/manifest ZIP. No user-visible helper installation
-is allowed.
+The online bundle comes from the public SteamML archive, not from a running
+SteamTron plugin or local helper. Offline fallback: import a Lua/manifest ZIP
+only after selecting the game; a ZIP whose Lua declares another App ID is
+rejected. The desktop shell is locked behind account sign-in. No user-visible
+helper installation is allowed.
 
 ## 11. Development rules
 

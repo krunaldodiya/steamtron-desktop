@@ -7,6 +7,14 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div id="auth-gate" class="auth-gate">
+    <div class="auth-card">
+      <h1>SteamTron</h1>
+      <p class="muted">Sign in before using the desktop app. Adding games and Steam library actions stay locked until your session is active.</p>
+      <button id="gate-signin" class="primary">Sign in</button>
+      <div id="gate-status" class="status"></div>
+    </div>
+  </div>
   <header class="topbar">
     <div>
       <h1>SteamTron</h1>
@@ -19,6 +27,7 @@
       <button id="refresh" class="secondary">Refresh</button>
     </div>
   </header>
+  <div id="toast" class="toast"></div>
   <main class="layout">
     <aside class="panel">
       <input id="search" class="search" placeholder="Search installed games">

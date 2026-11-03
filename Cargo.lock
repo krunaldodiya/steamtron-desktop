@@ -3859,7 +3859,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "serde",
- "steamtron-auth",
+ "serde_json",
  "steamtron-core",
  "steamtron-unlock",
  "tempfile",

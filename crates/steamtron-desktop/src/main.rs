@@ -7,7 +7,7 @@ use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
-use steamtron_library::{add_bundle, bundle_from_zip, download_bundle, normalize_appid, AddedGame};
+use steamtron_library::{add_bundle, bundle_from_zip, download_bundle, normalize_appid, search as steam_search, AddedGame, SearchResult};
 
 #[derive(Serialize)]
 struct GameView {
@@ -26,6 +26,14 @@ struct FixView {
     enabled: bool,
 }
 
+fn require_auth() -> Result<(), String> {
+    if auth_status().authenticated {
+        Ok(())
+    } else {
+        Err("Sign in to SteamTron before using the desktop app.".into())
+    }
+}
+
 #[tauri::command]
 fn profile_status() -> AuthState {
     auth_status()
@@ -42,12 +50,14 @@ fn profile_logout() -> AuthState {
 }
 
 #[tauri::command]
-fn doctor_report() -> steamtron_doctor::DoctorReport {
-    run_doctor()
+fn doctor_report() -> Result<steamtron_doctor::DoctorReport, String> {
+    require_auth()?;
+    Ok(run_doctor())
 }
 
 #[tauri::command]
 fn repair_backend() -> Result<String, String> {
+    require_auth()?;
     launch_unlock_installer()
 }
 
@@ -61,7 +71,14 @@ fn unlock_backend() -> Result<impl UnlockBackend, String> {
 }
 
 #[tauri::command]
+fn search_games(query: String) -> Result<Vec<SearchResult>, String> {
+    require_auth()?;
+    steam_search(&query).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn add_game(appid_or_url: String, title: String) -> Result<AddedGame, String> {
+    require_auth()?;
     let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
     let backend = unlock_backend()?;
     let bundle = download_bundle(&appid).map_err(|error| error.to_string())?;
@@ -70,6 +87,7 @@ fn add_game(appid_or_url: String, title: String) -> Result<AddedGame, String> {
 
 #[tauri::command]
 fn import_game_zip(appid_or_url: String, title: String) -> Result<Option<AddedGame>, String> {
+    require_auth()?;
     let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Lua manifest ZIP", &["zip"])
@@ -86,6 +104,7 @@ fn import_game_zip(appid_or_url: String, title: String) -> Result<Option<AddedGa
 
 #[tauri::command]
 fn backend_status() -> Result<steamtron_unlock::BackendStatus, String> {
+    require_auth()?;
     platform_backend()
         .and_then(|backend| backend.status())
         .map_err(|error| error.to_string())
@@ -93,6 +112,7 @@ fn backend_status() -> Result<steamtron_unlock::BackendStatus, String> {
 
 #[tauri::command]
 fn list_games() -> Result<Vec<GameView>, String> {
+    require_auth()?;
     let managed = steam::managed_appids().map_err(|error| error.to_string())?;
     let games = steam::games().map_err(|error| error.to_string())?;
     Ok(games
@@ -110,6 +130,7 @@ fn list_games() -> Result<Vec<GameView>, String> {
 
 #[tauri::command]
 fn list_fixes() -> Result<Vec<FixView>, String> {
+    require_auth()?;
     let config = Config::load().map_err(|error| error.to_string())?;
     Ok(config
         .entries()
@@ -123,6 +144,7 @@ fn list_fixes() -> Result<Vec<FixView>, String> {
 
 #[tauri::command]
 fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
+    require_auth()?;
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Fixes ZIP", &["zip"])
         .pick_file()
@@ -143,6 +165,7 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
 
 #[tauri::command]
 fn export_fixes(appid: String) -> Result<Option<String>, String> {
+    require_auth()?;
     let config = Config::load().map_err(|error| error.to_string())?;
     let Some(entry) = config.entry(&appid) else {
         return Err("No fixes configured for this game.".into());
@@ -161,6 +184,7 @@ fn export_fixes(appid: String) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn set_enabled(appid: String, enabled: bool) -> Result<(), String> {
+    require_auth()?;
     let mut config = Config::load().map_err(|error| error.to_string())?;
     let Some(entry) = config.entry(&appid) else {
         return Err("No fixes configured for this game.".into());
@@ -174,6 +198,7 @@ fn set_enabled(appid: String, enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn remove_fixes(appid: String) -> Result<(), String> {
+    require_auth()?;
     let mut config = Config::load().map_err(|error| error.to_string())?;
     config.remove(&appid).map_err(|error| error.to_string())?;
     Ok(())
@@ -183,6 +208,7 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_status,
+            search_games,
             add_game,
             import_game_zip,
             profile_status,

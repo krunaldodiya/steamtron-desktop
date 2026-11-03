@@ -5,11 +5,11 @@ edition.workspace = true
 
 [dependencies]
 regex = "1"
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-steamtron-auth = { path = "../steamtron-auth" }
 steamtron-core = { path = "../steamtron-core" }
 steamtron-unlock = { path = "../steamtron-unlock" }
 

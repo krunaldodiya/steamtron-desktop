@@ -1,4 +1,4 @@
-//! Add Steam library entries from a Lua/manifest ZIP or the authenticated API.
+//! Add Steam library entries from a Lua/manifest ZIP or the public SteamML bundle.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -15,13 +15,12 @@ use steamtron_core::steam;
 use steamtron_unlock::UnlockBackend;
 
 const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;
+const STEAMML_URL: &str = "https://pub-5b6d3b7c03fd4ac1afb5bd3017850e20.r2.dev/{appid}.zip";
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
     #[error("invalid App ID")]
     InvalidAppId,
-    #[error("sign in to SteamTron first")]
-    AuthRequired,
     #[error("manifest download failed: {0}")]
     Download(String),
     #[error("manifest archive is invalid: {0}")]
@@ -67,7 +66,7 @@ pub fn normalize_appid(value: &str) -> Option<String> {
     let value = value.trim();
     let value = value
         .split_once("/app/")
-        .map(|(_, rest)| rest.split('/').next().unwrap_or(rest))
+        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or(rest))
         .unwrap_or(value);
     if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
         Some(value.to_owned())
@@ -76,18 +75,102 @@ pub fn normalize_appid(value: &str) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchResult {
+    pub appid: String,
+    pub name: String,
+    pub kind: String,
+    pub image: String,
+}
+
+/// Resolve a Steam App ID/URL or search the public Steam store catalogue.
+pub fn search(query: &str) -> Result<Vec<SearchResult>, LibraryError> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Some(appid) = normalize_appid(query) {
+        let client = reqwest::blocking::Client::new();
+        let response = client
+            .get("https://store.steampowered.com/api/appdetails")
+            .query(&[("appids", appid.as_str()), ("l", "english"), ("cc", "US")])
+            .header("User-Agent", "steamtron-desktop")
+            .send()
+            .map_err(|error| LibraryError::Download(error.to_string()))?;
+        let payload: serde_json::Value = response
+            .json()
+            .map_err(|error| LibraryError::Download(error.to_string()))?;
+        let data = payload.get(&appid).and_then(|value| value.get("data"));
+        if let Some(data) = data {
+            let name = data
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let kind = data
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("app")
+                .to_owned();
+            let image = data
+                .get("header_image")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let name = if name.is_empty() {
+                format!("Steam App {appid}")
+            } else {
+                name
+            };
+            return Ok(vec![SearchResult {
+                appid,
+                name,
+                kind,
+                image,
+            }]);
+        }
+    }
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .get("https://store.steampowered.com/api/storesearch/")
+        .query(&[("term", query), ("l", "english"), ("cc", "US")])
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .map_err(|error| LibraryError::Download(error.to_string()))?;
+    let payload: serde_json::Value = response
+        .json()
+        .map_err(|error| LibraryError::Download(error.to_string()))?;
+    let items = payload
+        .get("items")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(items
+        .into_iter()
+        .filter_map(|item| {
+            let id = item.get("id")?.as_u64()?.to_string();
+            let name = item.get("name")?.as_str()?.to_owned();
+            let kind = item
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or("app")
+                .to_owned();
+            let image = item
+                .get("tiny_image")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_owned();
+            Some(SearchResult { appid: id, name, kind, image })
+        })
+        .collect())
+}
+
 pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
     }
-    let token = steamtron_auth::access_token();
-    if token.is_empty() {
-        return Err(LibraryError::AuthRequired);
-    }
-    let base = steamtron_auth::api_base();
     let response = reqwest::blocking::Client::new()
-        .get(format!("{base}/api/download/{appid}?file_type=manifest"))
-        .header("Authorization", format!("Bearer {token}"))
+        .get(STEAMML_URL.replace("{appid}", appid))
         .header("Accept", "application/zip")
         .header("User-Agent", "steamtron-desktop")
         .send()
@@ -159,6 +242,11 @@ pub fn add_bundle(
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
     }
+    if !lua_declares_appid(&bundle.lua, appid) {
+        return Err(LibraryError::Archive(format!(
+            "Lua manifest is for a different App ID (expected {appid})"
+        )));
+    }
     let raw_title = if title.trim().is_empty() {
         format!("Steam App {appid}")
     } else {
@@ -213,6 +301,13 @@ fn parse_depots(lua: &str) -> Result<BTreeMap<String, (String, u64)>, LibraryErr
         ));
     }
     Ok(depots)
+}
+
+fn lua_declares_appid(lua: &str, appid: &str) -> bool {
+    Regex::new(r"addappid\s*\(\s*(\d+)")
+        .unwrap()
+        .captures_iter(lua)
+        .any(|captures| &captures[1] == appid)
 }
 
 fn sanitize_title(title: &str) -> String {
@@ -299,6 +394,12 @@ mod tests {
             Some("3468650")
         );
         assert_eq!(normalize_appid("not-an-id"), None);
+    }
+
+    #[test]
+    fn rejects_zip_for_another_appid() {
+        assert!(lua_declares_appid("addappid(42)", "42"));
+        assert!(!lua_declares_appid("addappid(42)", "43"));
     }
 
     #[test]
