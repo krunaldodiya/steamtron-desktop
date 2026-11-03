@@ -7,7 +7,7 @@ use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
-use steamtron_library::{add_bundle, bundle_from_zip, download_bundle, normalize_appid, remove_game as remove_library_game, search as steam_search, AddedGame, RemovedGame, SearchResult};
+use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, search as steam_search, AddedGame, RemovedGame, SearchResult};
 
 #[derive(Serialize)]
 struct GameView {
@@ -143,17 +143,17 @@ fn add_game(appid_or_url: String, title: String) -> Result<AddedGame, String> {
 }
 
 #[tauri::command]
-fn import_game_zip(appid_or_url: String, title: String) -> Result<Option<AddedGame>, String> {
+fn import_game_file(appid_or_url: String, title: String) -> Result<Option<AddedGame>, String> {
     require_auth()?;
     let appid = normalize_appid(&appid_or_url).ok_or_else(|| "Enter a numeric App ID or Steam store URL.".to_string())?;
     let Some(path) = rfd::FileDialog::new()
-        .add_filter("Lua manifest ZIP", &["zip"])
+        .add_filter("Lua manifest or ZIP", &["lua", "zip"])
         .pick_file()
     else {
         return Ok(None);
     };
     let backend = unlock_backend()?;
-    let bundle = bundle_from_zip(&path).map_err(|error| error.to_string())?;
+    let bundle = bundle_from_file(&path).map_err(|error| error.to_string())?;
     add_bundle(&appid, &title, bundle, &backend)
         .map(Some)
         .map_err(|error| error.to_string())
@@ -267,7 +267,7 @@ fn main() {
             backend_status,
             search_games,
             add_game,
-            import_game_zip,
+            import_game_file,
             remove_game,
             restart_steam,
             profile_status,

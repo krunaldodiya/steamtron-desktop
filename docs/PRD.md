@@ -174,7 +174,7 @@ merged path: read-only-looking game view with copy-up writes
 | Doctor checks and backend repair | Implemented in Settings > Doctor |
 | Automatic backend installation/repair | Implemented via managed installer handoff; hardening pending |
 | Search and add by game name, App ID, or Steam URL | Implemented with select-before-add results |
-| Local Lua/manifest ZIP import for the selected game | Implemented; Lua App ID is validated |
+| Local Lua or Lua/manifest ZIP import for the selected game | Implemented; Lua App ID is validated |
 | Account login/logout | Implemented; all app actions are gated behind sign-in |
 | Update/build listing and pinning | Pending |
 | Steam restart | Implemented from the desktop topbar |

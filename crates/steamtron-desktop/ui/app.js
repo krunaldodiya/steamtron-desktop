@@ -10,6 +10,21 @@ const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[char]));
 
+function busy(button, label) {
+  if (!button) return () => {};
+  const original = button.textContent;
+  button.classList.add("loading");
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  if (label) button.textContent = label;
+  return () => {
+    button.classList.remove("loading");
+    button.removeAttribute("aria-busy");
+    button.textContent = original;
+    button.disabled = false;
+  };
+}
+
 function status(message, error = false) {
   const node = detailEl.querySelector(".status");
   if (!node) return;
@@ -47,14 +62,16 @@ async function boot() {
 }
 
 gateSignin.onclick = async () => {
-  gateSignin.disabled = true;
+  const stop = busy(gateSignin, "Signing in…");
   gateStatus.textContent = "Complete sign-in in your browser…";
   try {
     const auth = await invoke("profile_login");
+    stop();
     if (!auth.authenticated) { showAuthGate("Sign-in did not complete."); return; }
     hideAuthGate();
     await load();
   } catch (error) {
+    stop();
     showAuthGate(`Sign-in failed: ${error}`);
   }
 };
@@ -97,25 +114,44 @@ function renderDetail(game) {
     </div>
     <div class="status">${current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
   detailEl.querySelector("#install").onclick = async () => {
-    try { status("Choose a fixes ZIP…"); const result = await invoke("install_fixes", { appid: game.appid }); if (result) { fixes.set(game.appid, result); await loadFixes(); renderDetail(game); renderGames(); status("Fixes installed."); } else status("Install cancelled."); }
-    catch (error) { status(String(error), true); }
+    const button = detailEl.querySelector("#install");
+    const stop = busy(button, "Installing…");
+    try {
+      status("Choose a fixes ZIP…");
+      const result = await invoke("install_fixes", { appid: game.appid });
+      if (result) {
+        fixes.set(game.appid, result);
+        await loadFixes();
+        stop();
+        renderDetail(game);
+        renderGames();
+        status("Fixes installed.");
+      } else { stop(); status("Install cancelled."); }
+    } catch (error) { stop(); status(String(error), true); }
   };
   detailEl.querySelector("#export").onclick = async () => {
+    const button = detailEl.querySelector("#export");
+    const stop = busy(button, "Exporting…");
     try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid }); status(result ? `Exported ${result}` : "Export cancelled."); }
     catch (error) { status(String(error), true); }
+    finally { stop(); }
   };
   detailEl.querySelector("#toggle").onclick = async () => {
-    try { await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled }); await loadFixes(); renderDetail(game); status(current.enabled ? "Fixes disabled." : "Fixes enabled."); }
-    catch (error) { status(String(error), true); }
+    const button = detailEl.querySelector("#toggle");
+    const stop = busy(button, current.enabled ? "Disabling…" : "Enabling…");
+    try { await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled }); await loadFixes(); stop(); renderDetail(game); status(current.enabled ? "Fixes disabled." : "Fixes enabled."); }
+    catch (error) { stop(); status(String(error), true); }
   };
   detailEl.querySelector("#remove").onclick = async () => {
-    try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); renderDetail(game); renderGames(); status("Fixes entry removed."); }
-    catch (error) { status(String(error), true); }
+    const button = detailEl.querySelector("#remove");
+    const stop = busy(button, "Removing fixes…");
+    try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); stop(); renderDetail(game); renderGames(); status("Fixes entry removed."); }
+    catch (error) { stop(); status(String(error), true); }
   };
   const removeLibrary = detailEl.querySelector("#remove-library");
   if (removeLibrary && game.managed) removeLibrary.onclick = async () => {
     if (!window.confirm(`Remove ${game.name} from the Steam library?`)) return;
-    removeLibrary.disabled = true;
+    const stop = busy(removeLibrary, "Removing…");
     try {
       const result = await invoke("remove_game", { appid: game.appid });
       selected = null;
@@ -124,7 +160,7 @@ function renderDetail(game) {
       showToast(result.steam_restart_required
         ? `Removed ${game.name} · restart Steam to apply`
         : `Removed ${game.name} · no library files were present`);
-    } catch (error) { removeLibrary.disabled = false; status(String(error), true); }
+    } catch (error) { stop(); status(String(error), true); }
   };
 }
 
@@ -166,18 +202,18 @@ async function load() {
 
 async function restartSteam() {
   const button = document.querySelector("#restart-steam");
-  button.disabled = true;
+  const stop = busy(button, "Restarting…");
   showToast("Restarting Steam…");
   try { showToast(await invoke("restart_steam")); }
   catch (error) { showToast(String(error), true); }
-  finally { setTimeout(() => { button.disabled = false; }, 1500); }
+  finally { setTimeout(stop, 1500); }
 }
 
 async function refreshLibrary() {
   const button = document.querySelector("#refresh");
-  button.disabled = true;
+  const stop = busy(button, "Refreshing…");
   const ok = await load();
-  button.disabled = false;
+  stop();
   if (ok) showToast(`Library refreshed · ${games.length} game${games.length === 1 ? "" : "s"}`);
   else showToast("Refresh failed. Check Settings → Doctor.", true);
 }
@@ -185,6 +221,7 @@ async function refreshLibrary() {
 async function loadDoctor(target = null) {
   const host = target || detailEl;
   host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><button id="doctor-refresh">Recheck</button></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
+  host.querySelector("#doctor-refresh").onclick = () => loadDoctor(host);
   try {
     const report = await invoke("doctor_report");
     const list = host.querySelector(".doctor-list");
@@ -199,8 +236,9 @@ async function loadDoctor(target = null) {
         const button = document.createElement("button");
         button.textContent = item.repair === "install-unlock-backend" ? "Repair Steam library support" : "Repair";
         button.onclick = async () => {
-          try { button.disabled = true; const result = await invoke("repair_backend"); renderSettingsMessage(result); await loadDoctor(host); }
-          catch (error) { button.disabled = false; renderSettingsMessage(String(error), true); }
+          const stop = busy(button, "Repairing…");
+          try { const result = await invoke("repair_backend"); stop(); renderSettingsMessage(result); await loadDoctor(host); }
+          catch (error) { stop(); renderSettingsMessage(String(error), true); }
         };
         actions.appendChild(button);
         row.appendChild(actions);
@@ -232,8 +270,9 @@ async function renderProfile(host) {
       catch (error) { host.innerHTML = `<div class="status error">${escape(error)}</div>`; }
     };
     if (signout) signout.onclick = async () => {
-      try { await invoke("profile_logout"); showAuthGate("Signed out. Sign in to continue."); }
-      catch (error) { host.innerHTML = `<div class="status error">${escape(error)}</div>`; }
+      const stop = busy(signout, "Signing out…");
+      try { await invoke("profile_logout"); stop(); showAuthGate("Signed out. Sign in to continue."); }
+      catch (error) { stop(); host.innerHTML = `<div class="status error">${escape(error)}</div>`; }
     };
   } catch (error) {
     host.innerHTML = `<div class="status error">${escape(error)}</div>`;
@@ -263,7 +302,7 @@ function renderSettings() {
 function showAddGame() {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-cancel">Cancel</button><button id="add-import" disabled>Import ZIP for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-cancel">Cancel</button><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
   document.body.appendChild(backdrop);
   const queryInput = backdrop.querySelector("#add-search");
   const searchButton = backdrop.querySelector("#add-search-button");
@@ -296,7 +335,7 @@ function showAddGame() {
   const runSearch = async () => {
     clearSelected();
     resultsNode.replaceChildren();
-    searchButton.disabled = true;
+    const stop = busy(searchButton, "Searching…");
     setStatus("Searching Steam…");
     try {
       const results = await invoke("search_games", { query: queryInput.value });
@@ -312,7 +351,7 @@ function showAddGame() {
         resultsNode.appendChild(button);
       }
     } catch (error) { setStatus(String(error), true); }
-    finally { searchButton.disabled = false; }
+    finally { stop(); }
   };
   const finish = async (result) => {
     if (!result) return;
@@ -329,21 +368,24 @@ function showAddGame() {
   queryInput.addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
   submit.onclick = async () => {
     if (!selected) return;
-    submit.disabled = true; importButton.disabled = true;
+    const stop = busy(submit, "Adding…");
+    importButton.disabled = true;
     setStatus(`Downloading manifest bundle for ${selected.name}…`);
-    try { await finish(await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name })); }
-    catch (error) { setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
+    try { const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name }); stop(); await finish(result); }
+    catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
   importButton.onclick = async () => {
     if (!selected) return;
-    submit.disabled = true; importButton.disabled = true;
-    setStatus(`Choose the Lua manifest ZIP for ${selected.name}…`);
+    const stop = busy(importButton, "Choose file…");
+    submit.disabled = true;
+    setStatus(`Choose the Lua manifest or ZIP for ${selected.name}…`);
     try {
-      const result = await invoke("import_game_zip", { appidOrUrl: selected.appid, title: selected.name });
+      const result = await invoke("import_game_file", { appidOrUrl: selected.appid, title: selected.name });
+      stop();
       if (!result) { setStatus("Import cancelled."); submit.disabled = false; importButton.disabled = false; return; }
       await finish(result);
     }
-    catch (error) { setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
+    catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
   setStatus("Search to find a game, then select a result.");
   queryInput.focus();

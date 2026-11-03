@@ -311,6 +311,37 @@ fn manifest_stores() -> Vec<PathBuf> {
     stores
 }
 
+pub fn bundle_from_file(path: &Path) -> Result<Bundle, LibraryError> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if extension == "lua" {
+        let bytes = fs::read(path).map_err(|error| LibraryError::io(path, error))?;
+        if bytes.len() as u64 > MAX_ARCHIVE {
+            return Err(LibraryError::Archive("Lua file is too large".into()));
+        }
+        let lua = String::from_utf8(bytes)
+            .map_err(|error| LibraryError::Archive(format!("Lua file is not UTF-8: {error}")))?
+            .trim_start_matches('\u{feff}')
+            .to_owned();
+        if lua.trim().is_empty() {
+            return Err(LibraryError::Archive("Lua file is empty".into()));
+        }
+        return Ok(Bundle {
+            lua,
+            manifests: BTreeMap::new(),
+        });
+    }
+    if extension == "zip" {
+        return bundle_from_zip(path);
+    }
+    Err(LibraryError::Archive(
+        "Choose a .lua file or a ZIP containing Lua and manifest files".into(),
+    ))
+}
+
 pub fn bundle_from_zip(path: &Path) -> Result<Bundle, LibraryError> {
     let bytes = fs::read(path).map_err(|error| LibraryError::io(path, error))?;
     if bytes.len() as u64 > MAX_ARCHIVE {
@@ -518,6 +549,16 @@ mod tests {
             Some("3468650")
         );
         assert_eq!(normalize_appid("not-an-id"), None);
+    }
+
+    #[test]
+    fn imports_a_raw_lua_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("42.lua");
+        std::fs::write(&path, "addappid(42)\nsetManifestid(43, \"7\")\n").unwrap();
+        let bundle = bundle_from_file(&path).unwrap();
+        assert!(bundle.lua.contains("addappid(42)"));
+        assert!(bundle.manifests.is_empty());
     }
 
     #[test]

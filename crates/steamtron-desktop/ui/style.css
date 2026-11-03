@@ -90,3 +90,6 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .modal-close { background:transparent; border:0; color:#8fa3b8; font-size:24px; line-height:1; padding:0 4px; }
 .modal-close:hover { color:#fff; }
 .modal-actions[hidden] { display:none !important; }
+@keyframes spin { to { transform: rotate(360deg); } }
+button.loading { cursor:progress; opacity:.85; }
+button.loading::before { content:""; display:inline-block; width:12px; height:12px; margin-right:7px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; vertical-align:-2px; animation:spin .7s linear infinite; }
