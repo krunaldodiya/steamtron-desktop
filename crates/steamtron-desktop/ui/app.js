@@ -110,6 +110,7 @@ function renderDetail(game) {
       <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
       <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
       <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
+      <button id="updates" ${game.managed ? "" : "disabled"}>Updates</button>
       <button class="danger" id="remove-library" ${game.managed ? "" : "disabled"}>Remove from library</button>
     </div>
     <div class="status">${current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
@@ -148,6 +149,8 @@ function renderDetail(game) {
     try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); stop(); renderDetail(game); renderGames(); status("Fixes entry removed."); }
     catch (error) { stop(); status(String(error), true); }
   };
+  const updatesButton = detailEl.querySelector("#updates");
+  if (updatesButton && game.managed) updatesButton.onclick = () => renderUpdates(game);
   const removeLibrary = detailEl.querySelector("#remove-library");
   if (removeLibrary && game.managed) removeLibrary.onclick = async () => {
     if (!window.confirm(`Remove ${game.name} from the Steam library?`)) return;
@@ -162,6 +165,70 @@ function renderDetail(game) {
         : `Removed ${game.name} · no library files were present`);
     } catch (error) { stop(); status(String(error), true); }
   };
+}
+
+function renderUpdates(game) {
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Updates</h2><p class="muted">Archived manifest builds for ${escape(game.name)}.</p></div><div class="update-actions"><button id="updates-back">Back</button><button id="updates-refresh">Refresh</button></div></div><div class="updates-panel"><div class="update-summary" id="updates-summary">Loading archived builds…</div><div class="update-list" id="updates-list"></div><div class="update-actions"><button id="updates-auto">Use automatic updates</button><button class="primary" id="updates-pin" disabled>Pin selected build</button></div></div>`;
+  const summary = detailEl.querySelector("#updates-summary");
+  const list = detailEl.querySelector("#updates-list");
+  const auto = detailEl.querySelector("#updates-auto");
+  const pin = detailEl.querySelector("#updates-pin");
+  let data = null;
+  let selectedVersion = "";
+  const load = async () => {
+    const button = detailEl.querySelector("#updates-refresh");
+    const stop = busy(button, "Checking…");
+    summary.textContent = "Loading archived builds…";
+    list.replaceChildren();
+    try {
+      data = await invoke("update_versions", { appid: game.appid });
+      selectedVersion = data.pinned || data.installed || data.latest || "";
+      render();
+    } catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
+    finally { stop(); }
+  };
+  const render = () => {
+    if (!data) return;
+    summary.classList.remove("error");
+    if (!data.versions.length) {
+      summary.textContent = "No archived builds were found in the SLSsteam or depotcache stores.";
+      auto.disabled = false;
+      pin.disabled = true;
+      return;
+    }
+    const installed = data.installed || "not installed";
+    const pinned = data.pinned || "automatic";
+    summary.textContent = `Installed: ${installed}${data.installed_buildid ? ` · build ${data.installed_buildid}` : ""}\nLatest archived: ${data.latest || "unknown"} · Pinned: ${pinned}${data.pinned && data.installed && data.pinned !== data.installed ? " (uninstall and reinstall to apply)" : ""}`;
+    auto.disabled = false;
+    pin.disabled = !selectedVersion;
+    list.replaceChildren();
+    for (const version of data.versions) {
+      const row = document.createElement("button");
+      row.className = `update-row${version.date === selectedVersion ? " selected" : ""}`;
+      const badges = [
+        version.latest ? "Latest" : "",
+        version.installed ? "Installed" : "",
+        version.pinned ? "Pinned" : "",
+      ].filter(Boolean);
+      row.innerHTML = `<span><span class="date">${escape(version.date)}</span><small>${version.depots} depot${version.depots === 1 ? "" : "s"}${version.buildid ? ` · build ${escape(version.buildid)}` : ""}</small></span><span class="update-badges">${badges.map((badge) => `<span class="${badge.toLowerCase()}">${badge}</span>`).join("")}</span>`;
+      row.onclick = () => { selectedVersion = version.date; render(); };
+      list.appendChild(row);
+    }
+  };
+  detailEl.querySelector("#updates-back").onclick = () => renderDetail(game);
+  detailEl.querySelector("#updates-refresh").onclick = load;
+  auto.onclick = async () => {
+    const stop = busy(auto, "Clearing pin…");
+    try { data = await invoke("clear_update_pin", { appid: game.appid }); selectedVersion = data.installed || data.latest || ""; stop(); render(); }
+    catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
+  };
+  pin.onclick = async () => {
+    if (!selectedVersion) return;
+    const stop = busy(pin, "Pinning…");
+    try { data = await invoke("update_pin", { appid: game.appid, date: selectedVersion }); stop(); render(); }
+    catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
+  };
+  load();
 }
 
 async function loadBackend() {

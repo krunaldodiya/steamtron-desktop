@@ -14,6 +14,8 @@ use zip::ZipArchive;
 use steamtron_core::steam;
 use steamtron_unlock::UnlockBackend;
 
+pub mod updates;
+
 const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;
 const STEAMML_URL: &str = "https://pub-5b6d3b7c03fd4ac1afb5bd3017850e20.r2.dev/{appid}.zip";
 
@@ -31,6 +33,8 @@ pub enum LibraryError {
     AlreadyInstalled(String),
     #[error("backend error: {0}")]
     Backend(String),
+    #[error("update error: {0}")]
+    Update(String),
     #[error("I/O error at {path}: {source}")]
     Io {
         path: PathBuf,

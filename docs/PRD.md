@@ -176,7 +176,7 @@ merged path: read-only-looking game view with copy-up writes
 | Search and add by game name, App ID, or Steam URL | Implemented with select-before-add results |
 | Local Lua or Lua/manifest ZIP import for the selected game | Implemented; Lua App ID is validated |
 | Account login/logout | Implemented; all app actions are gated behind sign-in |
-| Update/build listing and pinning | Pending |
+| Update/build listing and pinning | Implemented from archived SLSsteam/depotcache manifests |
 | Steam restart | Implemented from the desktop topbar |
 | Steam launch-option setup | Pending |
 | Managed library removal | Implemented with appmanifest/Lua/manifest/symlink cleanup |
@@ -206,8 +206,11 @@ Lua/manifest ZIP only after selecting the game; a ZIP whose Lua declares
 another App ID is rejected. The desktop shell is locked behind account sign-in.
 `Remove from library` deletes the Lua file, appmanifest, SLSsteam manifests,
 preferred pins, and any managed common-directory symlink; real game directories
-are left intact. `Restart Steam` is available from the topbar. No user-visible
-helper installation is allowed.
+are left intact. `Restart Steam` is available from the topbar. Managed games
+also expose an Updates view backed by archived manifests; pinning writes the
+selected depot GIDs and SLSsteam `ManifestPins`, while automatic mode clears
+both. Pin changes apply after uninstall/reinstall. No user-visible helper
+installation is allowed.
 
 ## 11. Development rules
 

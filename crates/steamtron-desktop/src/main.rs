@@ -7,6 +7,7 @@ use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
+use steamtron_library::updates::{available_updates, clear_pin, pin_update, Updates};
 use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, search as steam_search, AddedGame, RemovedGame, SearchResult};
 
 #[derive(Serialize)]
@@ -94,6 +95,24 @@ fn remove_game(appid: String) -> Result<RemovedGame, String> {
     require_auth()?;
     let backend = platform_backend().map_err(|error| error.to_string())?;
     remove_library_game(&appid, &backend).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn update_versions(appid: String) -> Result<Updates, String> {
+    require_auth()?;
+    available_updates(&appid).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn update_pin(appid: String, date: String) -> Result<Updates, String> {
+    require_auth()?;
+    pin_update(&appid, &date).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_update_pin(appid: String) -> Result<Updates, String> {
+    require_auth()?;
+    clear_pin(&appid).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -269,6 +288,9 @@ fn main() {
             add_game,
             import_game_file,
             remove_game,
+            update_versions,
+            update_pin,
+            clear_update_pin,
             restart_steam,
             profile_status,
             profile_login,
