@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -151,6 +151,23 @@ pub fn discover_games(libraries: &[PathBuf]) -> Vec<SteamGame> {
             });
         }
     }
+    let mut unique: BTreeMap<String, SteamGame> = BTreeMap::new();
+    for game in result {
+        let installed = game.state_flags & 4 != 0 && game.size_on_disk > 0;
+        match unique.get(&game.appid) {
+            Some(existing)
+                if installed
+                    && (existing.state_flags & 4 == 0 || existing.size_on_disk == 0) =>
+            {
+                unique.insert(game.appid.clone(), game);
+            }
+            Some(_) => {}
+            None => {
+                unique.insert(game.appid.clone(), game);
+            }
+        }
+    }
+    let mut result: Vec<SteamGame> = unique.into_values().collect();
     result.sort_by(|left, right| left.name.to_ascii_lowercase().cmp(&right.name.to_ascii_lowercase()));
     result
 }
@@ -215,6 +232,23 @@ fn field(text: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deduplicates_appids_across_libraries() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        let manifest = |name: &str, flags: &str| {
+            format!("\"AppState\"\n{{\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"{flags}\"\n\t\"SizeOnDisk\"\t\t\"0\"\n}}\n")
+        };
+        fs::write(first.join("appmanifest_42.acf"), manifest("Game", "4")).unwrap();
+        fs::write(second.join("appmanifest_42.acf"), manifest("Game duplicate", "2")).unwrap();
+        let games = discover_games(&[first, second]);
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].appid, "42");
+    }
 
     #[test]
     fn parses_manifest_fields() {
