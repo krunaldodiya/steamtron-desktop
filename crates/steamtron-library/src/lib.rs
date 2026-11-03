@@ -211,10 +211,43 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     parse_bundle(&bytes)
 }
 
+fn choose_library(libraries: &[PathBuf]) -> Result<PathBuf, LibraryError> {
+    if let Some(override_path) = std::env::var_os("STEAMTRON_LIBRARY").map(PathBuf::from) {
+        let path = if override_path.file_name().and_then(|name| name.to_str()) == Some("steamapps") {
+            override_path
+        } else {
+            override_path.join("steamapps")
+        };
+        let path = path.canonicalize().map_err(|error| LibraryError::io(&path, error))?;
+        if libraries.contains(&path) {
+            return Ok(path);
+        }
+        return Err(LibraryError::Update(
+            "STEAMTRON_LIBRARY is not a configured Steam library".into(),
+        ));
+    }
+    if libraries.is_empty() {
+        return Err(LibraryError::SteamNotFound);
+    }
+    // Steam installs the game into the library that owns the most visible games.
+    // This keeps the Steam root library for runtimes when the user's games live
+    // in a separate library, while still falling back to the root for new users.
+    let mut best = libraries[0].clone();
+    let mut best_count = 0usize;
+    for library in libraries {
+        let count = steam::discover_games(std::slice::from_ref(library)).len();
+        if count > best_count {
+            best = library.clone();
+            best_count = count;
+        }
+    }
+    Ok(best)
+}
+
 pub fn repair_missing_appmanifests() -> Result<Vec<RepairedGame>, LibraryError> {
     let root = steam::steam_root().map_err(|_| LibraryError::SteamNotFound)?;
     let libraries = steam::libraries().map_err(|_| LibraryError::SteamNotFound)?;
-    let library = libraries.first().ok_or(LibraryError::SteamNotFound)?;
+    let library = choose_library(&libraries)?;
     let installed = steam::installed_appids().map_err(|_| LibraryError::SteamNotFound)?;
     let managed = steam::managed_appids().map_err(|_| LibraryError::SteamNotFound)?;
     let mut repaired = Vec::new();
@@ -471,7 +504,7 @@ pub fn add_bundle(
     };
     let title = sanitize_title(&raw_title);
     let libraries = steam::libraries().map_err(|_| LibraryError::SteamNotFound)?;
-    let steamapps = libraries.into_iter().next().ok_or(LibraryError::SteamNotFound)?;
+    let steamapps = choose_library(&libraries)?;
     let acf = steamapps.join(format!("appmanifest_{appid}.acf"));
     if acf.exists() {
         return Err(LibraryError::AlreadyInstalled(appid.to_owned()));
@@ -626,6 +659,21 @@ mod tests {
             Some("3468650")
         );
         assert_eq!(normalize_appid("not-an-id"), None);
+    }
+
+    #[test]
+    fn prefers_library_with_games() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        let games = temp.path().join("games");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&games).unwrap();
+        std::fs::write(
+            games.join("appmanifest_42.acf"),
+            "\"AppState\"\n{\n\t\"name\"\t\t\"Game\"\n\t\"StateFlags\"\t\t\"4\"\n\t\"SizeOnDisk\"\t\t\"100\"\n}\n",
+        ).unwrap();
+        let chosen = choose_library(&[root, games.clone()]).unwrap();
+        assert_eq!(chosen, games);
     }
 
     #[test]
