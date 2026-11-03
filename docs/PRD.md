@@ -178,8 +178,10 @@ merged path: read-only-looking game view with copy-up writes
 | Account login/logout | Implemented; all app actions are gated behind sign-in |
 | Update/build listing and pinning | Implemented from archived SLSsteam/depotcache manifests |
 | Steam restart | Implemented from Settings |
-| Steam launch-option setup | Pending |
+| Steam launch-option setup | Implemented through `localconfig.vdf` and the dual-mode overlay wrapper |
 | Managed library removal | Implemented with appmanifest/Lua/manifest/symlink cleanup |
+| Add-game Steam library selection | Implemented |
+| Linux deb/AppImage packaging | Configured; build validation in progress |
 | Windows WinFsp overlay | Pending |
 | Plugin retirement | Pending |
 

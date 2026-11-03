@@ -110,3 +110,4 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .game-tab.active { color:#fff; border-bottom-color:#2f86c9; }
 .game-tab:disabled { opacity:.4; cursor:not-allowed; }
 .game-panel { min-height:200px; }
+.modal select { width:100%; margin-top:6px; padding:10px 12px; border:1px solid #3b5166; border-radius:7px; background:#101922; color:#e8f0f7; }

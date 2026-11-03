@@ -138,13 +138,15 @@ function renderGeneralPanel(panel, game) {
 function renderFixesPanel(panel, game, current) {
   panel.innerHTML = `
     <div class="row"><div class="label">Fixes</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
+    <div class="row"><div class="label">Steam launch option</div><div class="value">${current?.launch_option_set ? "Set" : "Not set"}</div></div>
     <div class="actions">
       <button class="primary" id="install">Install fixes ZIP</button>
       <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
       <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
+      <button id="launch-option" ${current ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
       <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
     </div>
-    <div class="status">${current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
+    <div class="status">${current?.launch_option_error ? escape(current.launch_option_error) : current ? (current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
   panel.querySelector("#install").onclick = async () => {
     const button = panel.querySelector("#install");
     const stop = busy(button, "Installing…");
@@ -157,7 +159,9 @@ function renderFixesPanel(panel, game, current) {
         stop();
         renderDetail(game, "fixes");
         renderGames();
-        status("Fixes installed.");
+        status(result.launch_option_error
+          ? `Fixes installed, but the Steam launch option failed: ${result.launch_option_error}`
+          : "Fixes installed and Steam launch option set. Restart Steam before launching.", !!result.launch_option_error);
       } else { stop(); status("Install cancelled."); }
     } catch (error) { stop(); status(String(error), true); }
   };
@@ -171,7 +175,23 @@ function renderFixesPanel(panel, game, current) {
   panel.querySelector("#toggle").onclick = async () => {
     const button = panel.querySelector("#toggle");
     const stop = busy(button, current.enabled ? "Disabling…" : "Enabling…");
-    try { await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled }); await loadFixes(); stop(); renderDetail(game, "fixes"); status(current.enabled ? "Fixes disabled." : "Fixes enabled."); }
+    try {
+      const message = await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled });
+      await loadFixes();
+      stop();
+      renderDetail(game, "fixes");
+      status(message);
+    } catch (error) {
+      stop();
+      try { await loadFixes(); renderDetail(game, "fixes"); } catch {}
+      status(String(error), true);
+    }
+  };
+  panel.querySelector("#launch-option").onclick = async () => {
+    const button = panel.querySelector("#launch-option");
+    const enabled = !current?.launch_option_set;
+    const stop = busy(button, enabled ? "Setting…" : "Clearing…");
+    try { const message = await invoke("apply_launch_option", { appid: game.appid, enabled }); await loadFixes(); stop(); renderDetail(game, "fixes"); status(message); }
     catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#remove").onclick = async () => {
@@ -386,7 +406,7 @@ function renderSettings() {
 function showAddGame() {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-cancel">Cancel</button><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><label for="add-library">Install library</label><select id="add-library"></select><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-cancel">Cancel</button><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
   document.body.appendChild(backdrop);
   const queryInput = backdrop.querySelector("#add-search");
   const searchButton = backdrop.querySelector("#add-search-button");
@@ -396,6 +416,7 @@ function showAddGame() {
   const submit = backdrop.querySelector("#add-submit");
   const importButton = backdrop.querySelector("#add-import");
   const actionRow = backdrop.querySelector("#add-actions");
+  const librarySelect = backdrop.querySelector("#add-library");
   let selected = null;
   const close = () => backdrop.remove();
   const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
@@ -455,7 +476,7 @@ function showAddGame() {
     const stop = busy(submit, "Adding…");
     importButton.disabled = true;
     setStatus(`Downloading manifest bundle for ${selected.name}…`);
-    try { const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name }); stop(); await finish(result); }
+    try { const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name, library: librarySelect.value || null }); stop(); await finish(result); }
     catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
   importButton.onclick = async () => {
@@ -464,13 +485,23 @@ function showAddGame() {
     submit.disabled = true;
     setStatus(`Choose the Lua manifest or ZIP for ${selected.name}…`);
     try {
-      const result = await invoke("import_game_file", { appidOrUrl: selected.appid, title: selected.name });
+      const result = await invoke("import_game_file", { appidOrUrl: selected.appid, title: selected.name, library: librarySelect.value || null });
       stop();
       if (!result) { setStatus("Import cancelled."); submit.disabled = false; importButton.disabled = false; return; }
       await finish(result);
     }
     catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
   };
+  invoke("list_libraries").then((libraries) => {
+    librarySelect.replaceChildren();
+    for (const library of libraries) {
+      const option = document.createElement("option");
+      option.value = library;
+      option.textContent = library;
+      librarySelect.appendChild(option);
+    }
+    if (!libraries.length) setStatus("No Steam libraries were found.", true);
+  }).catch((error) => setStatus(String(error), true));
   setStatus("Search to find a game, then select a result.");
   queryInput.focus();
 }
