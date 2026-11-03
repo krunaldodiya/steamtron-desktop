@@ -14,4 +14,5 @@ steamtron-core = { path = "../steamtron-core" }
 steamtron-overlay = { path = "../steamtron-overlay" }
 steamtron-unlock = { path = "../steamtron-unlock" }
 steamtron-doctor = { path = "../steamtron-doctor" }
+steamtron-auth = { path = "../steamtron-auth" }
 anyhow = "1"

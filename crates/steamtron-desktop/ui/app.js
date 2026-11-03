@@ -86,11 +86,12 @@ async function load() {
   catch (error) { detailEl.innerHTML = `<div class="status error">${escape(error)}</div>`; }
 }
 
-async function loadDoctor() {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><button id="doctor-refresh">Recheck</button></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
+async function loadDoctor(target = null) {
+  const host = target || detailEl;
+  host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><button id="doctor-refresh">Recheck</button></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
   try {
     const report = await invoke("doctor_report");
-    const list = detailEl.querySelector(".doctor-list");
+    const list = host.querySelector(".doctor-list");
     list.replaceChildren();
     for (const item of report.checks) {
       const row = document.createElement("div");
@@ -102,8 +103,8 @@ async function loadDoctor() {
         const button = document.createElement("button");
         button.textContent = item.repair === "install-unlock-backend" ? "Repair Steam library support" : "Repair";
         button.onclick = async () => {
-          try { button.disabled = true; const result = await invoke("repair_backend"); status(result); await loadDoctor(); }
-          catch (error) { status(String(error), true); button.disabled = false; }
+          try { button.disabled = true; const result = await invoke("repair_backend"); renderSettingsMessage(result); await loadDoctor(host); }
+          catch (error) { button.disabled = false; renderSettingsMessage(String(error), true); }
         };
         actions.appendChild(button);
         row.appendChild(actions);
@@ -115,11 +116,55 @@ async function loadDoctor() {
     summary.textContent = report.healthy ? "All checks passed." : "Some checks need attention.";
     list.prepend(summary);
   } catch (error) {
-    detailEl.innerHTML = `<div class="status error">${escape(error)}</div>`;
+    host.innerHTML = `<div class="status error">${escape(error)}</div>`;
   }
 }
 
-document.querySelector("#doctor").onclick = loadDoctor;
+async function renderProfile(host) {
+  host.innerHTML = `<div class="status">Loading profile…</div>`;
+  try {
+    const auth = await invoke("profile_status");
+    host.innerHTML = auth.authenticated
+      ? `<div class="label">Signed in as</div><div class="profile-email">${escape(auth.email || "SteamTron account")}</div><p class="muted">Session expires ${auth.expires_at ? new Date(auth.expires_at * 1000).toLocaleString() : "later"}.</p><div class="profile-actions"><button class="danger" id="signout">Sign out</button></div>`
+      : `<div class="label">SteamTron account</div><p class="muted">Sign in to add games and download manifests.</p><div class="profile-actions"><button class="primary" id="signin">Sign in</button></div>`;
+    const signin = host.querySelector("#signin");
+    const signout = host.querySelector("#signout");
+    if (signin) signin.onclick = async () => {
+      signin.disabled = true;
+      host.innerHTML = `<div class="status">Complete sign-in in your browser…</div>`;
+      try { await invoke("profile_login"); await renderProfile(host); }
+      catch (error) { host.innerHTML = `<div class="status error">${escape(error)}</div>`; }
+    };
+    if (signout) signout.onclick = async () => {
+      try { await invoke("profile_logout"); await renderProfile(host); }
+      catch (error) { host.innerHTML = `<div class="status error">${escape(error)}</div>`; }
+    };
+  } catch (error) {
+    host.innerHTML = `<div class="status error">${escape(error)}</div>`;
+  }
+}
+
+function renderSettingsMessage(message, isError = false) {
+  const node = document.querySelector("#settings-content .settings-message");
+  if (node) { node.textContent = message; node.classList.toggle("error", isError); }
+}
+
+function renderSettings() {
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
+  const panel = detailEl.querySelector("#settings-panel");
+  const profileTab = detailEl.querySelector("#tab-profile");
+  const doctorTab = detailEl.querySelector("#tab-doctor");
+  const select = (active) => {
+    profileTab.classList.toggle("active", active === "profile");
+    doctorTab.classList.toggle("active", active === "doctor");
+  };
+  profileTab.onclick = () => { select("profile"); renderProfile(panel); };
+  doctorTab.onclick = () => { select("doctor"); loadDoctor(panel); };
+  select("profile");
+  renderProfile(panel);
+}
+
+document.querySelector("#settings").onclick = renderSettings;
 document.querySelector("#refresh").onclick = load;
 searchEl.oninput = renderGames;
 load();

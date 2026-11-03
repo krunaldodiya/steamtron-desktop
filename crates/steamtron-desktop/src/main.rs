@@ -6,6 +6,7 @@ use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
+use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
 
 #[derive(Serialize)]
 struct GameView {
@@ -22,6 +23,21 @@ struct FixView {
     appid: String,
     fixes: String,
     enabled: bool,
+}
+
+#[tauri::command]
+fn profile_status() -> AuthState {
+    auth_status()
+}
+
+#[tauri::command]
+fn profile_login() -> Result<AuthState, String> {
+    auth_login().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn profile_logout() -> AuthState {
+    auth_logout()
 }
 
 #[tauri::command]
@@ -133,6 +149,9 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_status,
+            profile_status,
+            profile_login,
+            profile_logout,
             doctor_report,
             repair_backend,
             list_games,

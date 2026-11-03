@@ -169,12 +169,13 @@ merged path: read-only-looking game view with copy-up writes
 | Fixes ZIP install/export | Implemented |
 | Linux fuse-overlayfs engine | Implemented |
 | Desktop library/fixes UI | Implemented |
+| Settings with Profile and Doctor | Implemented |
 | Unlock backend status | Implemented |
-| Doctor checks and backend repair | Implemented |
+| Doctor checks and backend repair | Implemented in Settings > Doctor |
 | Automatic backend installation/repair | Implemented via managed installer handoff; hardening pending |
 | Add game by App ID / Steam URL | Pending |
 | Local Lua/manifest ZIP import | Pending |
-| Account login/logout | Pending |
+| Account login/logout | Implemented in Settings > Profile |
 | Update/build listing and pinning | Pending |
 | Steam launch-option setup | Pending |
 | Managed library removal | Pending |

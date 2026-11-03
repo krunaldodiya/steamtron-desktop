@@ -43,3 +43,9 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .doctor-title { color:#f2f6fa; font-weight:600; font-size:13px; }
 .doctor-detail { color:#8fa3b8; font-size:12px; margin-top:4px; overflow-wrap:anywhere; }
 .doctor-actions { display:flex; gap:8px; margin-top:10px; }
+
+.settings-tabs { display:flex; gap:6px; margin:16px 0; border-bottom:1px solid #2a3948; }
+.settings-tab { background:transparent; border:0; border-bottom:2px solid transparent; border-radius:0; color:#8fa3b8; }
+.settings-tab.active { color:#fff; border-bottom-color:#2f86c9; }
+.profile-email { color:#fff; font-size:16px; margin:8px 0 4px; }
+.profile-actions { display:flex; gap:8px; margin-top:18px; }
