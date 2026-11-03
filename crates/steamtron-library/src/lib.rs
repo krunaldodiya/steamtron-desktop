@@ -71,6 +71,13 @@ pub struct AddedGame {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RepairedGame {
+    pub appid: String,
+    pub title: String,
+    pub appmanifest: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct RemovedGame {
     pub appid: String,
     pub removed: Vec<String>,
@@ -202,6 +209,55 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
         return Err(LibraryError::Archive("archive is too large".into()));
     }
     parse_bundle(&bytes)
+}
+
+pub fn repair_missing_appmanifests() -> Result<Vec<RepairedGame>, LibraryError> {
+    let root = steam::steam_root().map_err(|_| LibraryError::SteamNotFound)?;
+    let libraries = steam::libraries().map_err(|_| LibraryError::SteamNotFound)?;
+    let library = libraries.first().ok_or(LibraryError::SteamNotFound)?;
+    let installed = steam::installed_appids().map_err(|_| LibraryError::SteamNotFound)?;
+    let managed = steam::managed_appids().map_err(|_| LibraryError::SteamNotFound)?;
+    let mut repaired = Vec::new();
+    for appid in managed {
+        if installed.contains(&appid) {
+            continue;
+        }
+        let lua_path = root.join("config/stplug-in").join(format!("{appid}.lua"));
+        let Ok(lua) = fs::read_to_string(lua_path) else {
+            continue;
+        };
+        let depots = parse_depots(&lua)?;
+        let title = lua
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("-- "))
+            .map(|line| line.trim_start_matches("-- ").trim())
+            .find(|line| {
+                !line.contains("Lua and Manifest")
+                    && !line.starts_with("Created:")
+                    && !line.starts_with("Website:")
+                    && !line.starts_with("Total ")
+                    && !line.starts_with("MAIN ")
+                    && !line.starts_with("SHARED ")
+                    && !line.starts_with("DLCS ")
+            })
+            .unwrap_or(&format!("Steam App {appid}"))
+            .to_owned();
+        let acf = library.join(format!("appmanifest_{appid}.acf"));
+        if acf.exists() {
+            continue;
+        }
+        let text = acf_text(&appid, &sanitize_title(&title), &depots);
+        let temporary = acf.with_extension("acf.steamtron.tmp");
+        fs::write(&temporary, text).map_err(|error| LibraryError::io(&temporary, error))?;
+        fs::rename(&temporary, &acf).map_err(|error| LibraryError::io(&acf, error))?;
+        repaired.push(RepairedGame {
+            appid,
+            title,
+            appmanifest: acf.display().to_string(),
+        });
+    }
+    Ok(repaired)
 }
 
 pub fn remove_game(appid: &str, backend: &dyn UnlockBackend) -> Result<RemovedGame, LibraryError> {

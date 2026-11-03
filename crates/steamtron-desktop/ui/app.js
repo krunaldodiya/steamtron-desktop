@@ -396,12 +396,24 @@ function renderSettingsMessage(message, isError = false) {
 }
 
 function renderSettings() {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-repair">Repair library entries</button><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
   const panel = detailEl.querySelector("#settings-panel");
   const profileTab = detailEl.querySelector("#tab-profile");
   const doctorTab = detailEl.querySelector("#tab-doctor");
   const settingsRestart = detailEl.querySelector("#settings-restart");
   settingsRestart.onclick = () => restartSteam(settingsRestart);
+  const settingsRepair = detailEl.querySelector("#settings-repair");
+  settingsRepair.onclick = async () => {
+    const stop = busy(settingsRepair, "Repairing…");
+    try {
+      const repaired = await invoke("repair_library_entries");
+      stop();
+      renderSettingsMessage(repaired.length
+        ? `Recreated ${repaired.length} appmanifest${repaired.length === 1 ? "" : "s"}: ${repaired.map((item) => item.title).join(", ")}`
+        : "No missing library entries were found.");
+      await load();
+    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+  };
   const settingsShortcut = detailEl.querySelector("#settings-shortcut");
   settingsShortcut.onclick = async () => {
     const stop = busy(settingsShortcut, "Installing…");

@@ -9,7 +9,7 @@ use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
 use steamtron_library::updates::{available_updates, clear_pin, pin_update, Updates};
-use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, search as steam_search, AddedGame, RemovedGame, SearchResult};
+use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, repair_missing_appmanifests, search as steam_search, AddedGame, RemovedGame, RepairedGame, SearchResult};
 
 #[derive(Serialize)]
 struct GameView {
@@ -184,6 +184,12 @@ fn install_desktop_entry() -> Result<String, String> {
 #[tauri::command]
 fn install_desktop_entry() -> Result<String, String> {
     Err("Desktop entries are only implemented on Linux.".into())
+}
+
+#[tauri::command]
+fn repair_library_entries() -> Result<Vec<RepairedGame>, String> {
+    require_auth()?;
+    repair_missing_appmanifests().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -464,6 +470,7 @@ fn main() {
             update_pin,
             clear_update_pin,
             install_desktop_entry,
+            repair_library_entries,
             restart_steam,
             profile_status,
             profile_login,
