@@ -232,9 +232,15 @@ pub fn launch_unlock_installer() -> Result<String, String> {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".local/share/Lumen/lumen");
+            let log = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".local/share/steamtron/installer.log");
             let command = format!(
-                "bash {} --noplugin; pkill -f {} 2>/dev/null || true; rm -rf {}",
+                "bash {} --noplugin 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; pkill -f {} 2>/dev/null || true; rm -rf {}",
                 shell_quote(&script),
+                shell_quote(&log),
+                shell_quote(&log),
                 shell_quote(&lumen),
                 shell_quote(&lumen.parent().unwrap_or_else(|| std::path::Path::new(".")))
             );

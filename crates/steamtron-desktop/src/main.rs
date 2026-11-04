@@ -83,9 +83,40 @@ fn doctor_report() -> Result<steamtron_doctor::DoctorReport, String> {
 }
 
 #[tauri::command]
-fn repair_backend() -> Result<String, String> {
+async fn repair_steam_library() -> Result<String, String> {
     require_auth()?;
-    launch_unlock_installer()
+    tauri::async_runtime::spawn_blocking(|| {
+        let installed = || {
+            platform_backend()
+                .ok()
+                .and_then(|backend| backend.status().ok())
+                .map(|status| status.installed)
+                .unwrap_or(false)
+        };
+        if !installed() {
+            launch_unlock_installer()?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+            while !installed() {
+                if std::time::Instant::now() >= deadline {
+                    return Err("SLSsteam was not installed within 180 seconds. Check ~/.local/share/steamtron/installer.log for the installer error.".into());
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+        let repaired = repair_missing_appmanifests().unwrap_or_default();
+        let steam_was_running = steam_process_running();
+        if steam_was_running {
+            restart_steam_impl()?;
+        }
+        Ok(format!(
+            "SLSsteam is installed. Recreated {} appmanifest{}. {}",
+            repaired.len(),
+            if repaired.len() == 1 { "" } else { "s" },
+            if steam_was_running { "Steam was restarted." } else { "Steam was not running; start it before launching games." }
+        ))
+    })
+    .await
+    .map_err(|error| format!("Repair task failed: {error}"))?
 }
 
 fn unlock_backend() -> Result<impl UnlockBackend, String> {
@@ -558,7 +589,7 @@ fn main() {
             profile_login,
             profile_logout,
             doctor_report,
-            repair_backend,
+            repair_steam_library,
             list_games,
             list_fixes,
             install_fixes,

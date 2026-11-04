@@ -366,8 +366,19 @@ async function refreshLibrary() {
 
 async function loadDoctor(target = null) {
   const host = target || detailEl;
-  host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><button id="doctor-refresh">Recheck</button></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
+  host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><div class="update-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button></div></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
   host.querySelector("#doctor-refresh").onclick = () => loadDoctor(host);
+  host.querySelector("#doctor-repair").onclick = async () => {
+    if (!window.confirm("Repair will install SLSsteam and restart Steam. Continue?")) return;
+    const button = host.querySelector("#doctor-repair");
+    const stop = busy(button, "Repairing…");
+    try {
+      const message = await invoke("repair_steam_library");
+      stop();
+      renderSettingsMessage(message);
+      await loadDoctor(host);
+    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+  };
   try {
     const report = await invoke("doctor_report");
     const list = host.querySelector(".doctor-list");
@@ -376,19 +387,6 @@ async function loadDoctor(target = null) {
       const row = document.createElement("div");
       row.className = `doctor-item ${item.status}`;
       row.innerHTML = `<div class="doctor-title">${escape(item.title)}</div><div class="doctor-detail">${escape(item.detail)}</div>`;
-      if (item.repair) {
-        const actions = document.createElement("div");
-        actions.className = "doctor-actions";
-        const button = document.createElement("button");
-        button.textContent = item.repair === "install-unlock-backend" ? "Repair Steam library support" : "Repair";
-        button.onclick = async () => {
-          const stop = busy(button, "Repairing…");
-          try { const result = await invoke("repair_backend"); stop(); renderSettingsMessage(result); await loadDoctor(host); }
-          catch (error) { stop(); renderSettingsMessage(String(error), true); }
-        };
-        actions.appendChild(button);
-        row.appendChild(actions);
-      }
       list.appendChild(row);
     }
     const summary = document.createElement("div");
@@ -431,24 +429,12 @@ function renderSettingsMessage(message, isError = false) {
 }
 
 function renderSettings() {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-repair">Repair library entries</button><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
   const panel = detailEl.querySelector("#settings-panel");
   const profileTab = detailEl.querySelector("#tab-profile");
   const doctorTab = detailEl.querySelector("#tab-doctor");
   const settingsRestart = detailEl.querySelector("#settings-restart");
   settingsRestart.onclick = () => restartSteam(settingsRestart);
-  const settingsRepair = detailEl.querySelector("#settings-repair");
-  settingsRepair.onclick = async () => {
-    const stop = busy(settingsRepair, "Repairing…");
-    try {
-      const repaired = await invoke("repair_library_entries");
-      stop();
-      renderSettingsMessage(repaired.length
-        ? `Recreated ${repaired.length} appmanifest${repaired.length === 1 ? "" : "s"}: ${repaired.map((item) => item.title).join(", ")}`
-        : "No missing library entries were found.");
-      await load();
-    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
-  };
   const settingsShortcut = detailEl.querySelector("#settings-shortcut");
   settingsShortcut.onclick = async () => {
     const stop = busy(settingsShortcut, "Installing…");
