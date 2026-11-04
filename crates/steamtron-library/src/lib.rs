@@ -112,6 +112,7 @@ pub struct SearchResult {
     pub name: String,
     pub kind: String,
     pub image: String,
+    pub hero: String,
     pub installed: bool,
 }
 
@@ -149,6 +150,12 @@ pub fn search(query: &str) -> Result<Vec<SearchResult>, LibraryError> {
                 .and_then(|value| value.as_str())
                 .unwrap_or("")
                 .to_owned();
+            let hero = data
+                .get("background_raw")
+                .and_then(|value| value.as_str())
+                .or_else(|| data.get("background").and_then(|value| value.as_str()))
+                .unwrap_or("")
+                .to_owned();
             let name = if name.is_empty() {
                 format!("Steam App {appid}")
             } else {
@@ -159,6 +166,7 @@ pub fn search(query: &str) -> Result<Vec<SearchResult>, LibraryError> {
                 name,
                 kind,
                 image,
+                hero,
                 installed: false,
             }]);
         }
@@ -193,7 +201,7 @@ pub fn search(query: &str) -> Result<Vec<SearchResult>, LibraryError> {
                 .and_then(|value| value.as_str())
                 .unwrap_or("")
                 .to_owned();
-            Some(SearchResult { appid: id, name, kind, image, installed: false })
+            Some(SearchResult { appid: id, name, kind, image, hero: String::new(), installed: false })
         })
         .collect())
 }

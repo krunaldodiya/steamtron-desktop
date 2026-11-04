@@ -308,9 +308,8 @@ function renderDetail(game, tab = "general") {
   if (game.managed) tabs.push(["updates", "Updates"]);
   if (game.managed || game.installed) tabs.push(["activity", "Activity"]);
   const active = tabs.some(([key]) => key === tab) ? tab : "general";
-  detailEl.innerHTML = `<div class="detail-heading"><div><h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="quicklooks">${quicklookMarkup(game)}</div></div><span class="detail-cover" aria-hidden="true"><img alt="" src="${escape(game.cover || coverUrl(game.appid))}"></span></div><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === active ? " active" : ""}" data-tab="${key}">${label}</button>`).join("")}</div><div class="game-panel"></div>`;
-  const image = detailEl.querySelector(".detail-cover img");
-  if (image) bindCoverImage(image, game.appid);
+  const hero = game.hero || game.cover || "";
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="quicklooks">${quicklookMarkup(game)}</div></div></div><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === active ? " active" : ""}" data-tab="${key}">${label}</button>`).join("")}</div><div class="game-panel"></div>`;
   const panel = detailEl.querySelector(".game-panel");
   for (const button of detailEl.querySelectorAll(".game-tab")) button.onclick = () => renderDetail(game, button.dataset.tab);
   if (active === "updates" && game.managed) { renderUpdatesPanel(panel, game); return; }

@@ -19,6 +19,7 @@ struct GameView {
     appid: String,
     name: String,
     cover: String,
+    hero: String,
     build_id: String,
     installed: bool,
     version: Option<String>,
@@ -38,21 +39,21 @@ struct FixView {
     launch_option_error: Option<String>,
 }
 
-fn cover_for_appid(appid: &str) -> String {
-    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+fn artwork_for_appid(appid: &str) -> (String, String) {
+    static CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(value) = cache.lock().ok().and_then(|cache| cache.get(appid).cloned()) {
         return value;
     }
-    let image = steam_search(appid)
+    let artwork = steam_search(appid)
         .ok()
         .and_then(|mut results| results.drain(..).next())
-        .map(|result| result.image)
+        .map(|result| (result.image, result.hero))
         .unwrap_or_default();
     if let Ok(mut cache) = cache.lock() {
-        cache.insert(appid.to_owned(), image.clone());
+        cache.insert(appid.to_owned(), artwork.clone());
     }
-    image
+    artwork
 }
 
 fn require_auth() -> Result<(), String> {
@@ -500,9 +501,11 @@ fn list_games() -> Result<Vec<GameView>, String> {
                 .as_ref()
                 .map(|updates| updates.latest.clone())
                 .filter(|latest| !latest.is_empty());
+            let (cover, hero) = artwork_for_appid(&game.appid);
             GameView {
                 managed: managed.contains(&game.appid),
-                cover: cover_for_appid(&game.appid),
+                cover,
+                hero,
                 appid: game.appid,
                 name: game.name,
                 build_id: game.build_id.clone(),
@@ -531,9 +534,11 @@ fn list_games() -> Result<Vec<GameView>, String> {
             .as_ref()
             .map(|updates| updates.pinned.clone())
             .filter(|pinned| !pinned.is_empty());
+        let (cover, hero) = artwork_for_appid(&appid);
         views.push(GameView {
             managed: true,
-            cover: cover_for_appid(&appid),
+            cover,
+            hero,
             appid: appid.clone(),
             name: title.clone(),
             build_id: "0".to_owned(),
