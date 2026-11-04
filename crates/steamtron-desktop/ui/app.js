@@ -794,6 +794,10 @@ document.querySelector("#restart-banner-dismiss").onclick = () => {
   document.querySelector("#restart-banner")?.classList.add("hidden");
 };
 document.addEventListener("keydown", (event) => {
+  if (event.key === "F11") {
+    event.preventDefault();
+    invoke("toggle_fullscreen").catch((error) => showToast(String(error), true));
+  }
   if (event.key === "Escape") {
     closeActivity();
     document.querySelectorAll(".modal-backdrop").forEach((node) => node.remove());
@@ -810,6 +814,3 @@ window.addEventListener("unhandledrejection", (event) => {
 renderRestartBanner();
 updateActivityCount();
 boot();
-if (window.__TAURI__?.window?.getCurrentWindow) {
-  window.__TAURI__.window.getCurrentWindow().maximize().catch(() => {});
-}

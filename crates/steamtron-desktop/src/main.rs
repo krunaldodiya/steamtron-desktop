@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
+use tauri::Manager;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value, set_launch_option};
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
@@ -126,6 +127,15 @@ fn with_steam_transaction<T>(
 ) -> Result<T, String> {
     require_steam_stopped()?;
     action()
+}
+
+#[tauri::command]
+fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let fullscreen = window.is_fullscreen().map_err(|error| error.to_string())?;
+    window
+        .set_fullscreen(!fullscreen)
+        .map_err(|error| error.to_string())?;
+    Ok(!fullscreen)
 }
 
 #[tauri::command]
@@ -806,6 +816,13 @@ fn main() {
         std::process::exit(code);
     }
     tauri::Builder::default()
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_fullscreen(true);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             backend_status,
             search_games,
@@ -819,6 +836,7 @@ fn main() {
             repair_launch_options,
             repair_library_entries,
             restart_steam,
+            toggle_fullscreen,
             profile_status,
             profile_login,
             profile_logout,
