@@ -153,7 +153,7 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .activity-list.compact-list { padding:0; }
 .compact-list .activity-row { padding:8px 0; }
 
-.detail-hero { position:relative; flex:1 0 auto; min-height:280px; margin:-24px -24px 18px; display:flex; align-items:flex-end; border-radius:11px 11px 0 0; overflow:hidden; background-size:cover; background-position:center; background-color:#17212c; }
+.detail-hero { position:relative; flex:0 0 auto; height:clamp(240px, 34vh, 300px); margin:-24px -24px 18px; display:flex; align-items:flex-end; border-radius:11px 11px 0 0; overflow:hidden; background-size:cover; background-position:center; background-color:#17212c; }
 .detail-hero.no-artwork { background-image:radial-gradient(circle at 25% 20%, #1d3c52, #111820 65%); }
 .detail-hero-shade { position:absolute; inset:0; background:linear-gradient(0deg, rgba(17,24,32,.98) 0%, rgba(17,24,32,.55) 45%, rgba(17,24,32,.08) 100%), linear-gradient(90deg, rgba(17,24,32,.55), transparent 65%); }
 .detail-hero-content { position:relative; z-index:1; padding:28px 26px 20px; width:100%; }
