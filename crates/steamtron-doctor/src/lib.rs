@@ -60,14 +60,34 @@ pub fn run() -> DoctorReport {
     };
 
     if let Some(root) = &steam_root {
+        let running = steam_running();
         checks.push(check(
             "steam-process",
             "Steam process",
-            if steam_running() { CheckStatus::Ok } else { CheckStatus::Warning },
-            if steam_running() {
+            if running { CheckStatus::Ok } else { CheckStatus::Warning },
+            if running {
                 "Steam is running.".to_string()
             } else {
-                "Steam is not running; restart it after repairs.".to_string()
+                "Steam is not running; start it manually after repairs.".to_string()
+            },
+        ));
+        let injected = running && steam_injected();
+        checks.push(check(
+            "steam-injection",
+            "SLSsteam injection",
+            if !running {
+                CheckStatus::Warning
+            } else if injected {
+                CheckStatus::Ok
+            } else {
+                CheckStatus::Warning
+            },
+            if !running {
+                "Steam is not running; start it through the SLSsteam wrapper.".to_string()
+            } else if injected {
+                "Steam is running with SLSsteam LD_AUDIT injection.".to_string()
+            } else {
+                "Steam is running without SLSsteam injection. Exit Steam and start it through the SLSsteam wrapper.".to_string()
             },
         ));
         checks.push(check(
@@ -172,6 +192,33 @@ pub fn run() -> DoctorReport {
 
     let healthy = checks.iter().all(|item| item.status != CheckStatus::Error);
     DoctorReport { healthy, checks }
+}
+
+pub fn steam_injected() -> bool {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let Ok(cmdline) = fs::read(entry.path().join("cmdline")) else {
+            continue;
+        };
+        let is_steam = cmdline
+            .split(|byte| *byte == 0)
+            .any(|arg| arg == b"steam" || arg.ends_with(b"/steam"));
+        if !is_steam {
+            continue;
+        }
+        let Ok(environ) = fs::read(entry.path().join("environ")) else {
+            continue;
+        };
+        if environ
+            .split(|byte| *byte == 0)
+            .any(|arg| arg.starts_with(b"LD_AUDIT=") && arg.windows(8).any(|window| window == b"SLSsteam"))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn steam_running() -> bool {

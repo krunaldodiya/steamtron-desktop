@@ -395,6 +395,9 @@ fn start_steam() -> Result<(), String> {
         }
         std::thread::sleep(Duration::from_millis(250));
     }
+    if !steamtron_doctor::steam_injected() {
+        return Err("Steam started without SLSsteam injection. Start Steam through the SLSsteam wrapper.".into());
+    }
     Ok(())
 }
 
