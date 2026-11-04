@@ -5,7 +5,7 @@ body { margin:0; min-height:100vh; background:radial-gradient(1200px 600px at 20
 h1 { margin:0; color:#fff; font-size:26px; letter-spacing:.3px; }
 h2 { margin:0 0 4px; color:#fff; font-size:20px; }
 .muted { color:#8fa3b8; margin:4px 0 0; font-size:13px; }
-.layout { display:grid; grid-template-columns:460px 1fr; gap:18px; padding:20px 32px 32px; height:calc(100vh - 100px); }
+.layout { display:grid; grid-template-columns:500px 1fr; gap:18px; padding:20px 32px 32px; height:calc(100vh - 100px); }
 .panel { background:#17212c; border:1px solid #2a3948; border-radius:12px; overflow:hidden; }
 .search { width:100%; padding:12px 14px; border:0; border-bottom:1px solid #2a3948; background:#111a23; color:#dbe4ed; outline:none; font-size:14px; }
 .games { height:calc(100% - 43px); overflow:auto; }
@@ -175,7 +175,8 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .games.list .game-meta { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
 .games.list .game-meta strong { color:#f2f6fa; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .games.list .game-meta > span:not(.badges) { color:#8fa3b8; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.games.list .badges { display:flex; gap:4px; flex-wrap:wrap; }
+.games.list .badges { display:flex; gap:3px; flex-wrap:nowrap; overflow:hidden; }
+.games.list .badge { font-size:9px; padding:1px 5px; }
 .library-empty { padding:28px 14px; }
 
 .cover img.missing { display: none; }
