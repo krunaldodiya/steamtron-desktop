@@ -248,15 +248,19 @@ pub fn launch_unlock_installer() -> Result<String, String> {
             if which(terminal).is_none() {
                 continue;
             }
-            let log = std::env::var_os("HOME")
+            let state_dir = std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".local/share/steamtron/installer.log");
+                .join(".local/share/steamtron");
+            let log = state_dir.join("installer.log");
+            let marker = state_dir.join("installer.exit");
+            let _ = fs::remove_file(&marker);
             let command = format!(
-                "bash {} --noplugin --nolaunch 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; exit $status",
+                "bash {} --noplugin --nolaunch 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; echo $status > {}; exit $status",
                 shell_quote(&script),
                 shell_quote(&log),
-                shell_quote(&log)
+                shell_quote(&log),
+                shell_quote(&marker)
             );
             Command::new(terminal)
                 .args(arguments)

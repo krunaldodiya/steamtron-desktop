@@ -133,15 +133,31 @@ async fn repair_steam_library() -> Result<String, String> {
             platform_backend()
                 .ok()
                 .and_then(|backend| backend.status().ok())
-                .map(|status| status.installed)
+                .map(|status| status.ready)
                 .unwrap_or(false)
         };
+        let marker = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".local/share/steamtron/installer.exit");
+        let _ = std::fs::remove_file(&marker);
         require_steam_stopped()?;
         let repair_result = (|| -> Result<String, String> {
             if !installed() {
                 launch_unlock_installer()?;
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
-                while !installed() {
+                loop {
+                    if installed() {
+                        break;
+                    }
+                    if let Ok(code) = std::fs::read_to_string(&marker) {
+                        let code = code.trim();
+                        if !code.is_empty() && code != "0" {
+                            return Err(format!(
+                                "SLSsteam installer failed with exit code {code}. Check ~/.local/share/steamtron/installer.log."
+                            ));
+                        }
+                    }
                     if std::time::Instant::now() >= deadline {
                         return Err("SLSsteam was not installed within 180 seconds. Check ~/.local/share/steamtron/installer.log for the installer error.".into());
                     }
