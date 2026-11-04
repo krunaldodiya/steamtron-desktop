@@ -21,15 +21,22 @@
       <p class="muted">Steam fixes and overlay manager</p>
     </div>
     <div class="top-actions">
+      <button id="activity" class="secondary activity-button">Activity<span id="activity-count" class="activity-count hidden">0</span></button>
       <button id="add-game" class="primary">+ Add Game</button>
       <button id="settings" class="secondary">Settings</button>
     </div>
   </header>
-  <div id="toast" class="toast"></div>
+  <div id="restart-banner" class="restart-banner hidden" role="status" aria-live="polite">
+    <span id="restart-banner-text">SteamTron changed Steam library files.</span>
+    <button id="restart-banner-button" class="primary">Restart Steam</button>
+    <button id="restart-banner-dismiss" class="banner-dismiss" aria-label="Dismiss">×</button>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <main class="layout">
     <aside class="panel library-panel">
       <div class="library-toolbar">
         <input id="search" class="search" placeholder="Search installed games">
+        <button id="view-toggle" class="secondary icon-button" title="Toggle grid/list view" aria-label="Toggle grid/list view">▦</button>
         <button id="refresh" class="secondary">Refresh</button>
       </div>
       <div id="games" class="games"></div>
@@ -38,6 +45,12 @@
       <div class="empty">Select a Steam game.</div>
     </section>
   </main>
+  <div id="activity-backdrop" class="drawer-backdrop hidden"></div>
+  <aside id="activity-drawer" class="activity-drawer hidden" aria-label="Activity">
+    <div class="drawer-head"><div><h2>Activity</h2><p class="muted">Operations from this computer</p></div><button id="activity-close" class="modal-close" aria-label="Close activity">×</button></div>
+    <div id="activity-list" class="activity-list"></div>
+    <div class="drawer-actions"><button id="activity-clear" class="secondary">Clear history</button></div>
+  </aside>
   <script src="app.js"></script>
 </body>
 </html>

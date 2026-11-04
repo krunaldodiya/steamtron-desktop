@@ -18,6 +18,8 @@ struct GameView {
     build_id: String,
     installed: bool,
     version: Option<String>,
+    pinned: Option<String>,
+    latest: Option<String>,
     common: String,
     manifest: String,
     managed: bool,
@@ -460,14 +462,23 @@ fn list_games() -> Result<Vec<GameView>, String> {
     let mut views: Vec<GameView> = games
         .into_iter()
         .map(|game| {
+            let updates = available_updates(&game.appid).ok();
             let version = if game.build_id == "0" {
-                available_updates(&game.appid)
-                    .ok()
-                    .map(|updates| updates.latest)
+                updates
+                    .as_ref()
+                    .map(|updates| updates.latest.clone())
                     .filter(|latest| !latest.is_empty())
             } else {
                 None
             };
+            let pinned = updates
+                .as_ref()
+                .map(|updates| updates.pinned.clone())
+                .filter(|pinned| !pinned.is_empty());
+            let latest = updates
+                .as_ref()
+                .map(|updates| updates.latest.clone())
+                .filter(|latest| !latest.is_empty());
             GameView {
                 managed: managed.contains(&game.appid),
                 appid: game.appid,
@@ -475,6 +486,8 @@ fn list_games() -> Result<Vec<GameView>, String> {
                 build_id: game.build_id.clone(),
                 installed: game.state_flags & 4 != 0 && game.size_on_disk > 0 && game.build_id != "0",
                 version,
+                pinned,
+                latest,
                 common: game.common.display().to_string(),
                 manifest: game.manifest.display().to_string(),
             }
@@ -487,17 +500,24 @@ fn list_games() -> Result<Vec<GameView>, String> {
             continue;
         }
         let title = title_for_appid(&appid).unwrap_or_else(|| format!("Steam App {appid}"));
-        let version = available_updates(&appid)
-            .ok()
-            .map(|updates| updates.latest)
+        let updates = available_updates(&appid).ok();
+        let version = updates
+            .as_ref()
+            .map(|updates| updates.latest.clone())
             .filter(|latest| !latest.is_empty());
+        let pinned = updates
+            .as_ref()
+            .map(|updates| updates.pinned.clone())
+            .filter(|pinned| !pinned.is_empty());
         views.push(GameView {
             managed: true,
             appid: appid.clone(),
             name: title.clone(),
             build_id: "0".to_owned(),
             installed: false,
-            version,
+            version: version.clone(),
+            pinned,
+            latest: version,
             common: library
                 .map(|path| path.join("common").join(&title).display().to_string())
                 .unwrap_or_default(),
