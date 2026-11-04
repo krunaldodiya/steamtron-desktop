@@ -11,6 +11,7 @@
     "windows": [
       {
         "title": "SteamTron",
+        "maximized": true,
         "width": 1120,
         "height": 760,
         "minWidth": 900,
