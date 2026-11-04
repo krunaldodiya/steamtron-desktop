@@ -32,6 +32,12 @@ struct GameView {
 }
 
 #[derive(Serialize)]
+struct GameArtwork {
+    cover: String,
+    hero: String,
+}
+
+#[derive(Serialize)]
 struct FixView {
     appid: String,
     fixes: String,
@@ -478,6 +484,33 @@ fn backend_status() -> Result<steamtron_unlock::BackendStatus, String> {
 }
 
 #[tauri::command]
+async fn game_artwork(appids: Vec<String>) -> Result<HashMap<String, GameArtwork>, String> {
+    require_auth()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut artwork = HashMap::new();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = appids
+                .into_iter()
+                .map(|appid| {
+                    scope.spawn({
+                        let appid = appid.clone();
+                        move || (appid.clone(), artwork_for_appid(&appid))
+                    })
+                })
+                .collect();
+            for handle in handles {
+                if let Ok((appid, (cover, hero))) = handle.join() {
+                    artwork.insert(appid, GameArtwork { cover, hero });
+                }
+            }
+        });
+        Ok(artwork)
+    })
+    .await
+    .map_err(|error| format!("Artwork task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn list_games() -> Result<Vec<GameView>, String> {
     require_auth()?;
     tauri::async_runtime::spawn_blocking(list_games_impl)
@@ -508,11 +541,10 @@ fn list_games_impl() -> Result<Vec<GameView>, String> {
                 .as_ref()
                 .map(|updates| updates.latest.clone())
                 .filter(|latest| !latest.is_empty());
-            let (cover, hero) = artwork_for_appid(&game.appid);
             GameView {
                 managed: managed.contains(&game.appid),
-                cover,
-                hero,
+                cover: String::new(),
+                hero: String::new(),
                 appid: game.appid,
                 name: game.name,
                 build_id: game.build_id.clone(),
@@ -541,11 +573,10 @@ fn list_games_impl() -> Result<Vec<GameView>, String> {
             .as_ref()
             .map(|updates| updates.pinned.clone())
             .filter(|pinned| !pinned.is_empty());
-        let (cover, hero) = artwork_for_appid(&appid);
         views.push(GameView {
             managed: true,
-            cover,
-            hero,
+            cover: String::new(),
+            hero: String::new(),
             appid: appid.clone(),
             name: title.clone(),
             build_id: "0".to_owned(),
@@ -816,6 +847,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             backend_status,
+            game_artwork,
             search_games,
             add_game,
             import_game_file,

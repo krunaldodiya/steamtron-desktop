@@ -5,6 +5,8 @@ const searchEl = document.querySelector("#search");
 let games = [];
 let fixes = new Map();
 let selected = null;
+let detailTab = "general";
+let artworkLoading = false;
 let activity = loadActivity();
 let pendingRestart = loadPendingRestart();
 
@@ -243,6 +245,37 @@ function showToast(message, error = false) {
   toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
 }
 
+function showLibraryLoading() {
+  gamesEl.className = "games list";
+  gamesEl.innerHTML = `<div class="loading-list">${Array.from({ length: 6 }, () => '<div class="loading-row"><span class="loading-cover"></span><span class="loading-lines"><i></i><i></i><i></i></span></div>').join("")}</div>`;
+  detailEl.innerHTML = `<div class="empty">Loading Steam library…</div>`;
+}
+
+async function loadArtwork() {
+  if (artworkLoading) return;
+  const appids = games.filter((game) => !game.artworkLoaded).map((game) => game.appid);
+  if (!appids.length) return;
+  artworkLoading = true;
+  try {
+    const artwork = await invoke("game_artwork", { appids });
+    for (const game of games) {
+      if (!artwork[game.appid]) continue;
+      game.cover = artwork[game.appid].cover || game.cover;
+      game.hero = artwork[game.appid].hero || game.hero;
+      game.artworkLoaded = true;
+    }
+    renderGames();
+    if (selected) {
+      const game = games.find((item) => item.appid === selected);
+      if (game) renderDetail(game, detailTab);
+    }
+  } catch (_error) {
+    // Standard Steam CDN URLs and the placeholder cover remain usable.
+  } finally {
+    artworkLoading = false;
+  }
+}
+
 function renderGames() {
   const query = searchEl.value.trim().toLowerCase();
   gamesEl.className = "games list";
@@ -302,6 +335,7 @@ gamesEl.addEventListener("click", (event) => {
 });
 
 function renderDetail(game, tab = "general") {
+  detailTab = tab;
   const current = fixes.get(game.appid);
   const tabs = [["general", "General"]];
   if (game.installed) tabs.push(["fixes", "Fixes"]);
@@ -549,6 +583,7 @@ async function loadFixes() {
 }
 
 async function load() {
+  if (!games.length) showLibraryLoading();
   await loadBackend();
   try {
     games = await invoke("list_games");
@@ -556,8 +591,9 @@ async function load() {
     renderGames();
     if (selected) {
       const game = games.find((item) => item.appid === selected);
-      if (game) renderDetail(game);
+      if (game) renderDetail(game, detailTab);
     }
+    void loadArtwork();
     return true;
   } catch (error) {
     detailEl.innerHTML = `<div class="status error">${escape(error)}</div>`;

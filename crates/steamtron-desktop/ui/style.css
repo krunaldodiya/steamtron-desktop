@@ -182,3 +182,12 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .library-empty { padding:28px 14px; }
 
 .cover img.missing { display: none; }
+
+.loading-list { display:flex; flex-direction:column; gap:12px; padding:12px; }
+.loading-row { display:flex; align-items:center; gap:14px; }
+.loading-cover { width:150px; height:84px; flex-shrink:0; border-radius:6px; background:#1d3140; animation:pulse 1.2s ease-in-out infinite; }
+.loading-lines { flex:1; display:flex; flex-direction:column; gap:8px; }
+.loading-lines i { display:block; height:10px; border-radius:4px; background:#1d3140; animation:pulse 1.2s ease-in-out infinite; }
+.loading-lines i:nth-child(2) { width:70%; }
+.loading-lines i:nth-child(3) { width:45%; }
+@keyframes pulse { 0%,100% { opacity:.45; } 50% { opacity:.9; } }
