@@ -928,10 +928,11 @@ document.querySelector("#activity-clear").onclick = () => {
   saveActivity();
   renderActivity();
   updateActivityCount();
+  clearRestartRequired();
 };
 document.querySelector("#restart-banner-button").onclick = (event) => restartSteam(event.currentTarget);
 document.querySelector("#restart-banner-dismiss").onclick = () => {
-  document.querySelector("#restart-banner")?.classList.add("hidden");
+  clearRestartRequired();
 };
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
