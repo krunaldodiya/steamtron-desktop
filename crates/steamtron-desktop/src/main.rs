@@ -93,42 +93,43 @@ async fn repair_steam_library() -> Result<String, String> {
                 .map(|status| status.installed)
                 .unwrap_or(false)
         };
-        let steam_was_running = steam_process_running();
-        if !installed() {
-            launch_unlock_installer()?;
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
-            while !installed() {
-                if std::time::Instant::now() >= deadline {
-                    return Err("SLSsteam was not installed within 180 seconds. Check ~/.local/share/steamtron/installer.log for the installer error.".into());
+        stop_steam()?;
+        let repair_result = (|| -> Result<String, String> {
+            if !installed() {
+                launch_unlock_installer()?;
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+                while !installed() {
+                    if std::time::Instant::now() >= deadline {
+                        return Err("SLSsteam was not installed within 180 seconds. Check ~/.local/share/steamtron/installer.log for the installer error.".into());
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
                 }
-                std::thread::sleep(std::time::Duration::from_secs(1));
             }
-        }
-        let lumen = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".local/share/Lumen");
-        if lumen.exists() {
-            let _ = std::process::Command::new("pkill")
-                .arg("-f")
-                .arg(lumen.join("lumen"))
-                .status();
-            let _ = std::fs::remove_dir_all(&lumen);
-        }
-        let repaired = repair_missing_appmanifests().unwrap_or_default();
-        if steam_was_running {
-            if steam_process_running() {
-                restart_steam_impl()?;
-            } else {
-                start_steam()?;
+            let lumen = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".local/share/Lumen");
+            if lumen.exists() {
+                let _ = std::process::Command::new("pkill")
+                    .arg("-f")
+                    .arg(lumen.join("lumen"))
+                    .status();
+                let _ = std::fs::remove_dir_all(&lumen);
             }
+            let repaired = repair_missing_appmanifests().unwrap_or_default();
+            Ok(format!(
+                "SLSsteam is installed; Lumen was removed. Recreated {} appmanifest{}.",
+                repaired.len(),
+                if repaired.len() == 1 { "" } else { "s" }
+            ))
+        })();
+        let start_result = start_steam();
+        match (repair_result, start_result) {
+            (Ok(message), Ok(())) => Ok(format!("{message} Steam was restarted.")),
+            (Err(error), Ok(())) => Err(format!("{error} Steam was restarted.")),
+            (Ok(message), Err(error)) => Err(format!("{message} Steam could not be started: {error}")),
+            (Err(error), Err(start_error)) => Err(format!("{error} Steam could not be started: {start_error}")),
         }
-        Ok(format!(
-            "SLSsteam is installed; Lumen was removed. Recreated {} appmanifest{}. {}",
-            repaired.len(),
-            if repaired.len() == 1 { "" } else { "s" },
-            if steam_was_running { "Steam was restarted." } else { "Steam was not running; start it before launching games." }
-        ))
     })
     .await
     .map_err(|error| format!("Repair task failed: {error}"))?
@@ -288,6 +289,34 @@ fn steam_process_running() -> bool {
 }
 
 #[cfg(target_os = "linux")]
+fn stop_steam() -> Result<(), String> {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    if !steam_process_running() {
+        return Ok(());
+    }
+    let output = Command::new("steam")
+        .arg("-shutdown")
+        .output()
+        .map_err(|error| format!("Steam executable not found: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Steam shutdown failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while steam_process_running() {
+        if Instant::now() >= deadline {
+            return Err("Steam did not exit within 60 seconds.".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn start_steam() -> Result<(), String> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
@@ -311,28 +340,7 @@ fn start_steam() -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn restart_steam_impl() -> Result<String, String> {
-    use std::process::Command;
-    use std::time::{Duration, Instant};
-
-    let output = Command::new("steam")
-        .arg("-shutdown")
-        .output()
-        .map_err(|error| format!("Steam executable not found: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "Steam shutdown failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while steam_process_running() {
-        if Instant::now() >= deadline {
-            return Err("Steam did not exit within 60 seconds; restart aborted.".into());
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
-
+    stop_steam()?;
     start_steam()?;
     Ok("Steam restarted.".into())
 }
