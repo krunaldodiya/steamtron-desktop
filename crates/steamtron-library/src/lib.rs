@@ -84,7 +84,7 @@ pub struct RemovedGame {
     pub steam_restart_required: bool,
 }
 
-fn title_from_store(appid: &str) -> Option<String> {
+pub fn title_for_appid(appid: &str) -> Option<String> {
     search(appid)
         .ok()?
         .into_iter()
@@ -284,7 +284,7 @@ pub fn repair_missing_appmanifests() -> Result<Vec<RepairedGame>, LibraryError> 
                     && !line.starts_with("DLCS ")
             })
             .map(str::to_owned)
-            .or_else(|| title_from_store(&appid))
+            .or_else(|| title_for_appid(&appid))
             .unwrap_or_else(|| format!("Steam App {appid}"));
         let acf = library.join(format!("appmanifest_{appid}.acf"));
         if acf.exists() {
@@ -508,7 +508,7 @@ pub fn add_bundle(
         )));
     }
     let raw_title = if title.trim().is_empty() {
-        title_from_store(appid).unwrap_or_else(|| format!("Steam App {appid}"))
+        title_for_appid(appid).unwrap_or_else(|| format!("Steam App {appid}"))
     } else {
         title.trim().to_owned()
     };

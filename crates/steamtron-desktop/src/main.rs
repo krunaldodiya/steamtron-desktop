@@ -9,7 +9,7 @@ use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
 use steamtron_library::updates::{available_updates, clear_pin, pin_update, Updates};
-use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, repair_missing_appmanifests, search as steam_search, AddedGame, RemovedGame, RepairedGame, SearchResult};
+use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, repair_missing_appmanifests, search as steam_search, title_for_appid, AddedGame, RemovedGame, RepairedGame, SearchResult};
 
 #[derive(Serialize)]
 struct GameView {
@@ -438,7 +438,7 @@ fn list_games() -> Result<Vec<GameView>, String> {
     require_auth()?;
     let managed = steam::managed_appids().map_err(|error| error.to_string())?;
     let games = steam::games().map_err(|error| error.to_string())?;
-    Ok(games
+    let mut views: Vec<GameView> = games
         .into_iter()
         .map(|game| {
             let version = if game.build_id == "0" {
@@ -460,7 +460,33 @@ fn list_games() -> Result<Vec<GameView>, String> {
                 manifest: game.manifest.display().to_string(),
             }
         })
-        .collect())
+        .collect();
+    let libraries = steam::libraries().unwrap_or_default();
+    let library = libraries.first();
+    for appid in managed {
+        if views.iter().any(|view| view.appid == appid) {
+            continue;
+        }
+        let title = title_for_appid(&appid).unwrap_or_else(|| format!("Steam App {appid}"));
+        let version = available_updates(&appid)
+            .ok()
+            .map(|updates| updates.latest)
+            .filter(|latest| !latest.is_empty());
+        views.push(GameView {
+            managed: true,
+            appid: appid.clone(),
+            name: title.clone(),
+            build_id: "0".to_owned(),
+            installed: false,
+            version,
+            common: library
+                .map(|path| path.join("common").join(&title).display().to_string())
+                .unwrap_or_default(),
+            manifest: String::new(),
+        });
+    }
+    views.sort_by(|left, right| left.name.to_ascii_lowercase().cmp(&right.name.to_ascii_lowercase()));
+    Ok(views)
 }
 
 #[tauri::command]
