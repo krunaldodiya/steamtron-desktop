@@ -376,6 +376,7 @@ async function loadDoctor(target = null) {
       const message = await invoke("repair_steam_library");
       stop();
       renderSettingsMessage(message);
+      await loadBackend();
       await loadDoctor(host);
     } catch (error) { stop(); renderSettingsMessage(String(error), true); }
   };
