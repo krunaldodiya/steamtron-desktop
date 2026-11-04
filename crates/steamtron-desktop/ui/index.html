@@ -23,13 +23,15 @@
     <div class="top-actions">
       <button id="add-game" class="primary">+ Add Game</button>
       <button id="settings" class="secondary">Settings</button>
-      <button id="refresh" class="secondary">Refresh</button>
     </div>
   </header>
   <div id="toast" class="toast"></div>
   <main class="layout">
-    <aside class="panel">
-      <input id="search" class="search" placeholder="Search installed games">
+    <aside class="panel library-panel">
+      <div class="library-toolbar">
+        <input id="search" class="search" placeholder="Search installed games">
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
       <div id="games" class="games"></div>
     </aside>
     <section id="detail" class="panel detail">

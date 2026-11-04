@@ -122,3 +122,9 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .fixes-section .actions { margin:8px 0 0; }
 .fixes-section .row { border-top:0; padding-top:0; }
 .fixes-separator { border-top:1px solid #2a3948; margin:18px 0; }
+
+.library-panel { display:flex; flex-direction:column; }
+.library-toolbar { display:flex; align-items:center; gap:8px; padding:10px 10px 9px; border-bottom:1px solid #2a3948; }
+.library-toolbar .search { flex:1; width:auto; border:1px solid #3b5166; border-radius:7px; padding:9px 11px; background:#101922; }
+.library-toolbar button { flex-shrink:0; }
+.library-panel .games { flex:1; min-height:0; height:auto; padding-top:4px; }
