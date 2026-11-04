@@ -108,16 +108,17 @@ function renderGames() {
 
 function renderDetail(game, tab = "general") {
   const current = fixes.get(game.appid);
-  const tabs = [
-    ["general", "General"],
-    ["fixes", "Fixes"],
-    ["updates", "Updates"],
-  ];
-  detailEl.innerHTML = `<h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === tab ? " active" : ""}" data-tab="${key}" ${key === "updates" && !game.managed ? "disabled" : ""}>${label}</button>`).join("")}</div><div class="game-panel"></div>`;
+  const tabs = [["general", "General"]];
+  if (game.installed) {
+    tabs.push(["fixes", "Fixes"]);
+    if (game.managed) tabs.push(["updates", "Updates"]);
+  }
+  const active = tabs.some(([key]) => key === tab) ? tab : "general";
+  detailEl.innerHTML = `<h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === active ? " active" : ""}" data-tab="${key}">${label}</button>`).join("")}</div><div class="game-panel"></div>`;
   const panel = detailEl.querySelector(".game-panel");
   for (const button of detailEl.querySelectorAll(".game-tab")) button.onclick = () => renderDetail(game, button.dataset.tab);
-  if (tab === "updates" && game.managed) { renderUpdatesPanel(panel, game); return; }
-  if (tab === "fixes") { renderFixesPanel(panel, game, current); return; }
+  if (active === "updates" && game.managed) { renderUpdatesPanel(panel, game); return; }
+  if (active === "fixes") { renderFixesPanel(panel, game, current); return; }
   renderGeneralPanel(panel, game);
 }
 
