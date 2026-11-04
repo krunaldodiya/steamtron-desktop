@@ -576,8 +576,10 @@ fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, 
     else {
         return Ok(None);
     };
-    export_zip(&entry.fixes, &path, &appid).map_err(|error| error.to_string())?;
-    Ok(Some(path.display().to_string()))
+    with_steam_transaction(|| {
+        export_zip(&entry.fixes, &path, &appid).map_err(|error| error.to_string())?;
+        Ok(Some(path.display().to_string()))
+    })
 }
 
 #[tauri::command]
