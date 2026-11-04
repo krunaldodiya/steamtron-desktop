@@ -228,21 +228,15 @@ pub fn launch_unlock_installer() -> Result<String, String> {
             if which(terminal).is_none() {
                 continue;
             }
-            let lumen = std::env::var_os("HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".local/share/Lumen/lumen");
             let log = std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".local/share/steamtron/installer.log");
             let command = format!(
-                "bash {} --noplugin 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; pkill -f {} 2>/dev/null || true; rm -rf {}",
+                "bash {} --noplugin 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; exit $status",
                 shell_quote(&script),
                 shell_quote(&log),
-                shell_quote(&log),
-                shell_quote(&lumen),
-                shell_quote(&lumen.parent().unwrap_or_else(|| std::path::Path::new(".")))
+                shell_quote(&log)
             );
             Command::new(terminal)
                 .args(arguments)
@@ -251,7 +245,7 @@ pub fn launch_unlock_installer() -> Result<String, String> {
                 .arg(command)
                 .spawn()
                 .map_err(|error| error.to_string())?;
-            return Ok("SLSsteam installer opened; Lumen is removed after installation.".into());
+            return Ok("SLSsteam installer opened.".into());
         }
         Err("No terminal emulator was found to run the SLSsteam installer.".into())
     }
