@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 use steamtron_core::config::Config;
-use steamtron_core::launch::{clear_managed_launch_option, has_launch_option, launch_option_value, set_launch_option};
+use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value, set_launch_option};
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
@@ -40,6 +40,32 @@ fn require_auth() -> Result<(), String> {
     }
 }
 
+fn steamtron_executable() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::var_os("APPIMAGE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_exe().ok())
+        .ok_or_else(|| "Could not resolve the SteamTron executable path.".to_string())?;
+    Ok(std::path::PathBuf::from(
+        exe.display()
+            .to_string()
+            .strip_suffix(" (deleted)")
+            .unwrap_or(&exe.display().to_string()),
+    ))
+}
+
+fn expected_launch_option(appid: &str, game: &steam::SteamGame, fixes: &std::path::Path) -> Result<String, String> {
+    let exe = steamtron_executable()?;
+    Ok(launch_option_value(&exe, appid, &game.common, fixes))
+}
+
+fn launch_option_matches_entry(appid: &str, fixes: &std::path::Path) -> bool {
+    steam::games()
+        .ok()
+        .and_then(|games| games.into_iter().find(|game| game.appid == appid))
+        .and_then(|game| expected_launch_option(appid, &game, fixes).ok())
+        .is_some_and(|expected| has_launch_option_value(appid, &expected))
+}
+
 fn configure_launch_option(appid: &str, enabled: bool) -> Result<bool, String> {
     if !enabled {
         clear_managed_launch_option(appid).map_err(|error| error.to_string())?;
@@ -52,19 +78,7 @@ fn configure_launch_option(appid: &str, enabled: bool) -> Result<bool, String> {
         .into_iter()
         .find(|game| game.appid == appid)
         .ok_or_else(|| "This game is not installed in a Steam library.".to_string())?;
-    let exe = std::env::var_os("APPIMAGE")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::current_exe().ok())
-        .ok_or_else(|| "Could not resolve the SteamTron executable path.".to_string())?;
-    // Linux appends " (deleted)" to /proc/self/exe after an application
-    // update replaces the running binary. Never write that marker into Steam.
-    let exe = std::path::PathBuf::from(
-        exe.display()
-            .to_string()
-            .strip_suffix(" (deleted)")
-            .unwrap_or(&exe.display().to_string()),
-    );
-    let value = launch_option_value(&exe, appid, &game.common, &entry.fixes);
+    let value = expected_launch_option(appid, &game, &entry.fixes)?;
     set_launch_option(appid, Some(&value)).map_err(|error| error.to_string())?;
     Ok(true)
 }
@@ -282,7 +296,7 @@ fn repair_launch_options() -> Result<Vec<String>, String> {
     let mut repaired = Vec::new();
     let mut errors = Vec::new();
     for entry in config.entries().filter(|entry| entry.enabled && !entry.launch_option_disabled) {
-        if has_launch_option(&entry.appid) {
+        if launch_option_matches_entry(&entry.appid, &entry.fixes) {
             continue;
         }
         match configure_launch_option(&entry.appid, true) {
@@ -468,10 +482,10 @@ fn list_fixes() -> Result<Vec<FixView>, String> {
     Ok(config
         .entries()
         .map(|entry| FixView {
+            launch_option_set: launch_option_matches_entry(&entry.appid, &entry.fixes),
             appid: entry.appid.clone(),
             fixes: entry.fixes.display().to_string(),
             enabled: entry.enabled,
-            launch_option_set: has_launch_option(&entry.appid),
             launch_option_error: None,
         })
         .collect())
@@ -500,7 +514,7 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
             appid: entry.appid.clone(),
             fixes: entry.fixes.display().to_string(),
             enabled: entry.enabled,
-            launch_option_set: has_launch_option(&entry.appid),
+            launch_option_set: launch_option_matches_entry(&entry.appid, &entry.fixes),
             launch_option_error: launch.err(),
         }))
     })
@@ -528,7 +542,7 @@ fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
             appid: entry.appid.clone(),
             fixes: entry.fixes.display().to_string(),
             enabled: entry.enabled,
-            launch_option_set: has_launch_option(&entry.appid),
+            launch_option_set: launch_option_matches_entry(&entry.appid, &entry.fixes),
             launch_option_error: launch.err(),
         }))
     })

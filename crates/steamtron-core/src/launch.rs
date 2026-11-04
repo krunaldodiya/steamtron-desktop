@@ -311,6 +311,18 @@ pub fn has_launch_option(appid: &str) -> bool {
     })
 }
 
+pub fn has_launch_option_value(appid: &str, expected: &str) -> bool {
+    let Ok(paths) = localconfig_paths() else {
+        return false;
+    };
+    paths.iter().any(|path| {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|text| launch_option_in_text(&text, appid))
+            .is_some_and(|value| value == expected)
+    })
+}
+
 pub fn clear_managed_launch_option(appid: &str) -> Result<Vec<PathBuf>, LaunchError> {
     let paths = localconfig_paths()?;
     let mut changed = Vec::new();
