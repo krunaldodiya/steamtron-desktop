@@ -304,6 +304,7 @@ function renderUpdatesPanel(host, game) {
 
 async function loadBackend() {
   const node = document.querySelector("#backend");
+  if (!node) return;
   try {
     const status = await invoke("backend_status");
     node.textContent = `${status.backend}: ${status.ready ? "ready" : "not ready"}`;
