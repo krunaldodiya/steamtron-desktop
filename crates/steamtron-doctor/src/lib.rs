@@ -216,9 +216,29 @@ pub fn launch_unlock_installer() -> Result<String, String> {
                     .join("Downloads/SLSteam-moon/install-slsteam-moon.sh")
             }),
         ];
-        let Some(script) = candidates.into_iter().flatten().find(|path| path.is_file()) else {
+        let Some(source_script) = candidates.into_iter().flatten().find(|path| path.is_file()) else {
             return Err("SLSsteam installer was not found. Install SLSsteam/Lumen and refresh Doctor.".into());
         };
+        let source = fs::read_to_string(&source_script).map_err(|error| error.to_string())?;
+        let filtered = source
+            .lines()
+            .map(|line| {
+                if line.trim() == "install_lumen" {
+                    "# install_lumen skipped by SteamTron"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let script = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".local/share/steamtron/install-slsteam-only.sh");
+        fs::create_dir_all(script.parent().unwrap_or_else(|| std::path::Path::new(".")))
+            .map_err(|error| error.to_string())?;
+        fs::write(&script, filtered).map_err(|error| error.to_string())?;
         let terminals = [
             ("konsole", vec!["-e"]),
             ("x-terminal-emulator", vec!["-e"]),

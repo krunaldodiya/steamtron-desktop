@@ -105,10 +105,14 @@ async fn repair_steam_library() -> Result<String, String> {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
-            let lumen = std::env::var_os("HOME")
+            let home = std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".local/share/Lumen");
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let lumen = home.join(".local/share/Lumen");
+            let webkit = home.join(".local/share/Steam/steamui/webkit");
+            for file in ["luatools.js", "steamdb-webkit.css"] {
+                let _ = std::fs::remove_file(webkit.join(file));
+            }
             if lumen.exists() {
                 let _ = std::process::Command::new("pkill")
                     .arg("-f")
