@@ -377,7 +377,7 @@ async function loadDoctor(target = null) {
   host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><div class="update-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button></div></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
   host.querySelector("#doctor-refresh").onclick = () => loadDoctor(host);
   host.querySelector("#doctor-repair").onclick = async () => {
-    if (!window.confirm("Repair will install SLSsteam and restart Steam. Continue?")) return;
+    if (!window.confirm("Repair will install SLSsteam. Start Steam manually afterward. Continue?")) return;
     const button = host.querySelector("#doctor-repair");
     const stop = busy(button, "Repairing…");
     try {
