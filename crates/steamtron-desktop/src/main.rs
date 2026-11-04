@@ -61,6 +61,33 @@ fn configure_launch_option(appid: &str, enabled: bool) -> Result<bool, String> {
     Ok(true)
 }
 
+#[cfg(target_os = "linux")]
+fn with_steam_transaction<T>(
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let was_running = steam_process_running();
+    if was_running {
+        stop_steam()?;
+    }
+    let result = action();
+    let start_error = if was_running { start_steam().err() } else { None };
+    match (result, start_error) {
+        (Ok(value), None) => Ok(value),
+        (Err(error), None) => Err(error),
+        (Ok(_), Some(error)) => Err(format!("Operation completed, but Steam did not restart: {error}")),
+        (Err(error), Some(start_error)) => {
+            Err(format!("{error} Steam also did not restart: {start_error}"))
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn with_steam_transaction<T>(
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    action()
+}
+
 #[tauri::command]
 fn profile_status() -> AuthState {
     auth_status()
@@ -240,6 +267,9 @@ fn install_desktop_entry() -> Result<String, String> {
 #[tauri::command]
 fn repair_launch_options() -> Result<Vec<String>, String> {
     require_auth()?;
+    if steam_process_running() {
+        return Ok(Vec::new());
+    }
     let config = Config::load().map_err(|error| error.to_string())?;
     let mut repaired = Vec::new();
     let mut errors = Vec::new();
@@ -448,22 +478,24 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     else {
         return Ok(None);
     };
-    let target = install_zip(&appid, &path).map_err(|error| error.to_string())?;
-    let mut config = Config::load().map_err(|error| error.to_string())?;
-    let entry = config
-        .upsert(&appid, target, true)
-        .map_err(|error| error.to_string())?;
-    config
-        .set_launch_option_disabled(&entry.appid, false)
-        .map_err(|error| error.to_string())?;
-    let launch = configure_launch_option(&entry.appid, true);
-    Ok(Some(FixView {
-        appid: entry.appid.clone(),
-        fixes: entry.fixes.display().to_string(),
-        enabled: entry.enabled,
-        launch_option_set: has_launch_option(&entry.appid),
-        launch_option_error: launch.err(),
-    }))
+    with_steam_transaction(|| {
+        let target = install_zip(&appid, &path).map_err(|error| error.to_string())?;
+        let mut config = Config::load().map_err(|error| error.to_string())?;
+        let entry = config
+            .upsert(&appid, target, true)
+            .map_err(|error| error.to_string())?;
+        config
+            .set_launch_option_disabled(&entry.appid, false)
+            .map_err(|error| error.to_string())?;
+        let launch = configure_launch_option(&entry.appid, true);
+        Ok(Some(FixView {
+            appid: entry.appid.clone(),
+            fixes: entry.fixes.display().to_string(),
+            enabled: entry.enabled,
+            launch_option_set: has_launch_option(&entry.appid),
+            launch_option_error: launch.err(),
+        }))
+    })
 }
 
 #[tauri::command]
@@ -475,21 +507,23 @@ fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
     else {
         return Ok(None);
     };
-    let mut config = Config::load().map_err(|error| error.to_string())?;
-    let entry = config
-        .upsert(&appid, &path, true)
-        .map_err(|error| error.to_string())?;
-    config
-        .set_launch_option_disabled(&entry.appid, false)
-        .map_err(|error| error.to_string())?;
-    let launch = configure_launch_option(&entry.appid, true);
-    Ok(Some(FixView {
-        appid: entry.appid.clone(),
-        fixes: entry.fixes.display().to_string(),
-        enabled: entry.enabled,
-        launch_option_set: has_launch_option(&entry.appid),
-        launch_option_error: launch.err(),
-    }))
+    with_steam_transaction(|| {
+        let mut config = Config::load().map_err(|error| error.to_string())?;
+        let entry = config
+            .upsert(&appid, &path, true)
+            .map_err(|error| error.to_string())?;
+        config
+            .set_launch_option_disabled(&entry.appid, false)
+            .map_err(|error| error.to_string())?;
+        let launch = configure_launch_option(&entry.appid, true);
+        Ok(Some(FixView {
+            appid: entry.appid.clone(),
+            fixes: entry.fixes.display().to_string(),
+            enabled: entry.enabled,
+            launch_option_set: has_launch_option(&entry.appid),
+            launch_option_error: launch.err(),
+        }))
+    })
 }
 
 #[tauri::command]
@@ -554,41 +588,50 @@ fn set_enabled(appid: String, enabled: bool) -> Result<String, String> {
         return Err("No fixes configured for this game.".into());
     };
     let fixes = entry.fixes.clone();
-    config
-        .upsert(&appid, fixes, enabled)
-        .map_err(|error| error.to_string())?;
-    config
-        .set_launch_option_disabled(&appid, !enabled)
-        .map_err(|error| error.to_string())?;
-    match configure_launch_option(&appid, enabled) {
-        Ok(true) => Ok("Fixes enabled and Steam launch option set. Restart Steam before launching.".into()),
-        Ok(false) => Ok("Fixes disabled and Steam launch option cleared.".into()),
-        Err(error) => Err(format!("Fixes state saved, but the Steam launch option failed: {error}. Restart Steam and retry.")),
-    }
+    with_steam_transaction(|| {
+        config
+            .upsert(&appid, fixes, enabled)
+            .map_err(|error| error.to_string())?;
+        config
+            .set_launch_option_disabled(&appid, !enabled)
+            .map_err(|error| error.to_string())?;
+        configure_launch_option(&appid, enabled)?;
+        Ok(())
+    })?;
+    Ok(if enabled {
+        "Fixes enabled and Steam launch option set. Steam was restarted.".into()
+    } else {
+        "Fixes disabled and Steam launch option cleared. Steam was restarted.".into()
+    })
 }
 
 #[tauri::command]
 fn apply_launch_option(appid: String, enabled: bool) -> Result<String, String> {
     require_auth()?;
-    configure_launch_option(&appid, enabled)?;
-    let mut config = Config::load().map_err(|error| error.to_string())?;
-    config
-        .set_launch_option_disabled(&appid, !enabled)
-        .map_err(|error| error.to_string())?;
+    with_steam_transaction(|| {
+        configure_launch_option(&appid, enabled)?;
+        let mut config = Config::load().map_err(|error| error.to_string())?;
+        config
+            .set_launch_option_disabled(&appid, !enabled)
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })?;
     Ok(if enabled {
-        "Steam launch option set. Restart Steam before launching.".into()
+        "Steam launch option set. Steam was restarted.".into()
     } else {
-        "Steam launch option cleared. Restart Steam before launching.".into()
+        "Steam launch option cleared. Steam was restarted.".into()
     })
 }
 
 #[tauri::command]
 fn remove_fixes(appid: String) -> Result<(), String> {
     require_auth()?;
-    let mut config = Config::load().map_err(|error| error.to_string())?;
-    config.remove(&appid).map_err(|error| error.to_string())?;
-    clear_managed_launch_option(&appid).map_err(|error| error.to_string())?;
-    Ok(())
+    with_steam_transaction(|| {
+        let mut config = Config::load().map_err(|error| error.to_string())?;
+        config.remove(&appid).map_err(|error| error.to_string())?;
+        clear_managed_launch_option(&appid).map_err(|error| error.to_string())?;
+        Ok(())
+    })
 }
 
 #[cfg(target_os = "linux")]
