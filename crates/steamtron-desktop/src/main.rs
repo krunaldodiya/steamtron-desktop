@@ -93,6 +93,7 @@ async fn repair_steam_library() -> Result<String, String> {
                 .map(|status| status.installed)
                 .unwrap_or(false)
         };
+        let steam_was_running = steam_process_running();
         if !installed() {
             launch_unlock_installer()?;
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
@@ -103,13 +104,27 @@ async fn repair_steam_library() -> Result<String, String> {
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
         }
+        let lumen = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".local/share/Lumen");
+        if lumen.exists() {
+            let _ = std::process::Command::new("pkill")
+                .arg("-f")
+                .arg(lumen.join("lumen"))
+                .status();
+            let _ = std::fs::remove_dir_all(&lumen);
+        }
         let repaired = repair_missing_appmanifests().unwrap_or_default();
-        let steam_was_running = steam_process_running();
         if steam_was_running {
-            restart_steam_impl()?;
+            if steam_process_running() {
+                restart_steam_impl()?;
+            } else {
+                start_steam()?;
+            }
         }
         Ok(format!(
-            "SLSsteam is installed. Recreated {} appmanifest{}. {}",
+            "SLSsteam is installed; Lumen was removed. Recreated {} appmanifest{}. {}",
             repaired.len(),
             if repaired.len() == 1 { "" } else { "s" },
             if steam_was_running { "Steam was restarted." } else { "Steam was not running; start it before launching games." }
@@ -273,8 +288,30 @@ fn steam_process_running() -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn restart_steam_impl() -> Result<String, String> {
+fn start_steam() -> Result<(), String> {
     use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    Command::new("setsid")
+        .arg("steam")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start Steam: {error}"))?;
+    let startup_deadline = Instant::now() + Duration::from_secs(10);
+    while !steam_process_running() {
+        if Instant::now() >= startup_deadline {
+            return Err("Steam did not start within 10 seconds.".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn restart_steam_impl() -> Result<String, String> {
+    use std::process::Command;
     use std::time::{Duration, Instant};
 
     let output = Command::new("steam")
@@ -296,20 +333,7 @@ fn restart_steam_impl() -> Result<String, String> {
         std::thread::sleep(Duration::from_millis(250));
     }
 
-    Command::new("setsid")
-        .arg("steam")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("Could not start Steam: {error}"))?;
-    let startup_deadline = Instant::now() + Duration::from_secs(10);
-    while !steam_process_running() {
-        if Instant::now() >= startup_deadline {
-            return Err("Steam did not start within 10 seconds.".into());
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
+    start_steam()?;
     Ok("Steam restarted.".into())
 }
 

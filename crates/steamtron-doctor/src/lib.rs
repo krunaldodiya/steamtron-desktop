@@ -233,7 +233,7 @@ pub fn launch_unlock_installer() -> Result<String, String> {
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".local/share/steamtron/installer.log");
             let command = format!(
-                "bash {} --noplugin 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; exit $status",
+                "bash {} --noplugin --nolaunch 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; exit $status",
                 shell_quote(&script),
                 shell_quote(&log),
                 shell_quote(&log)
