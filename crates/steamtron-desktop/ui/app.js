@@ -14,7 +14,11 @@ let pendingRestart = loadPendingRestart();
 function loadActivity() {
   try {
     const value = JSON.parse(localStorage.getItem("steamtron.activity.v1") || "[]");
-    return Array.isArray(value) ? value.slice(0, 100) : [];
+    return Array.isArray(value)
+      ? value.slice(0, 100).map((item) => item.status === "running"
+          ? { ...item, status: "interrupted", detail: item.detail || "Interrupted before completion" }
+          : item)
+      : [];
   } catch (_error) { return []; }
 }
 
@@ -60,12 +64,35 @@ function recordActivity(action, options = {}) {
     title: options.title || null,
     detail: options.detail || "",
     status: options.status || "success",
+    command: options.command || null,
+    args: options.args || null,
   };
   activity.unshift(item);
   activity = activity.slice(0, 100);
   saveActivity();
   renderActivity();
   updateActivityCount();
+}
+
+function updateActivity(id, changes) {
+  const item = activity.find((entry) => entry.id === id);
+  if (!item) return;
+  Object.assign(item, changes);
+  saveActivity();
+  renderActivity();
+  updateActivityCount();
+}
+
+async function retryActivity(item) {
+  if (!item?.command) return;
+  updateActivity(item.id, { status: "running", detail: "Retrying…" });
+  try {
+    await invoke(item.command, item.args || {});
+    updateActivity(item.id, { status: "success", detail: "Retry succeeded." });
+    await load();
+  } catch (error) {
+    updateActivity(item.id, { status: "error", detail: String(error) });
+  }
 }
 
 function updateActivityCount() {
@@ -93,9 +120,17 @@ function activityFor(appid) {
 
 function activityRow(item, compact = false) {
   const row = document.createElement("div");
-  row.className = `activity-row ${item.status === "error" ? "error" : ""}`;
+  row.className = `activity-row ${item.status === "error" ? "error" : ""} ${item.status || "success"}`;
   const subject = item.title || (item.appid ? `App ${item.appid}` : "SteamTron");
-  row.innerHTML = `<div class="activity-top"><strong>${escape(item.action)}</strong><span>${escape(timeAgo(item.at))}</span></div><div class="activity-subject">${escape(subject)}${item.detail ? ` · ${escape(item.detail)}` : ""}</div>`;
+  const statusLabel = item.status === "running" ? "Running" : item.status === "error" ? "Failed" : item.status === "interrupted" ? "Interrupted" : "";
+  row.innerHTML = `<div class="activity-top"><strong>${escape(item.action)}</strong><span>${escape(statusLabel || timeAgo(item.at))}</span></div><div class="activity-subject">${escape(subject)}${item.detail ? ` · ${escape(item.detail)}` : ""}</div>`;
+  if (item.status === "error" && item.command) {
+    const retry = document.createElement("button");
+    retry.className = "secondary activity-retry";
+    retry.textContent = "Retry";
+    retry.onclick = () => retryActivity(item);
+    row.appendChild(retry);
+  }
   if (compact) row.classList.add("compact");
   return row;
 }
@@ -732,23 +767,25 @@ function renderSettings() {
   const settingsBackup = detailEl.querySelector("#settings-backup");
   settingsBackup.onclick = async () => {
     const stop = busy(settingsBackup, "Backing up…");
+    const operationId = recordActivity("Exporting library backup", { status: "running" });
     try {
       const result = await invoke("export_backup");
+      updateActivity(operationId, { status: result ? "success" : "interrupted", detail: result ? `${result.games} games · ${result.files} files` : "Cancelled" });
       stop();
       if (!result) { renderSettingsMessage("Backup cancelled."); return; }
-      recordActivity("Exported library backup", { detail: `${result.games} games · ${result.files} files` });
       renderSettingsMessage(`Backup written: ${result.path} (${result.games} games, ${result.files} files).`);
-    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+    } catch (error) { updateActivity(operationId, { status: "error", detail: String(error) }); stop(); renderSettingsMessage(String(error), true); }
   };
   const settingsRestore = detailEl.querySelector("#settings-restore");
   settingsRestore.onclick = async () => {
     if (!window.confirm("Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest, and fixes files may be overwritten.")) return;
     const stop = busy(settingsRestore, "Restoring…");
+    const operationId = recordActivity("Restoring library backup", { status: "running" });
     try {
       const result = await invoke("restore_backup");
+      updateActivity(operationId, { status: result ? "success" : "interrupted", detail: result ? `${result.games} games` : "Cancelled" });
       stop();
       if (!result) { renderSettingsMessage("Restore cancelled."); return; }
-      recordActivity("Restored library backup", { detail: `${result.games} games · ${result.fixes} fixes` });
       markRestartRequired("Library metadata restored. Start Steam to apply the restored files.");
       await load();
       renderSettingsMessage(`Restored ${result.games} games (${result.lua_files} Lua, ${result.appmanifests} appmanifest, ${result.fixes} fixes).`);
@@ -846,8 +883,19 @@ function showAddGame() {
     importButton.disabled = true;
     setStatus(`Downloading manifest bundle for ${selected.name}…`);
     await nextPaint();
-    try { const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name }); stop(); await finish(result); }
-    catch (error) { stop(); setStatus(String(error), true); submit.disabled = false; importButton.disabled = false; }
+    const operationId = recordActivity("Adding game", { appid: selected.appid, title: selected.name, status: "running", command: "add_game", args: { appidOrUrl: selected.appid, title: selected.name } });
+    try {
+      const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name });
+      updateActivity(operationId, { status: "success", detail: "Library entry added." });
+      stop();
+      await finish(result);
+    } catch (error) {
+      updateActivity(operationId, { status: "error", detail: String(error) });
+      stop();
+      setStatus(String(error), true);
+      submit.disabled = false;
+      importButton.disabled = false;
+    }
   };
   importButton.onclick = async () => {
     if (!selected) return;

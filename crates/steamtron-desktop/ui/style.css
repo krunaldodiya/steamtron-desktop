@@ -191,3 +191,8 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .loading-lines i:nth-child(2) { width:70%; }
 .loading-lines i:nth-child(3) { width:45%; }
 @keyframes pulse { 0%,100% { opacity:.45; } 50% { opacity:.9; } }
+
+.activity-row.running .activity-top span { color:#67e8f9; }
+.activity-row.error .activity-top span { color:#ffb5b5; }
+.activity-row.interrupted .activity-top span { color:#ffd479; }
+.activity-retry { margin-top:8px; padding:4px 9px; font-size:11px; }
