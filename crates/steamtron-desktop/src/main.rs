@@ -243,7 +243,7 @@ fn repair_launch_options() -> Result<Vec<String>, String> {
     let config = Config::load().map_err(|error| error.to_string())?;
     let mut repaired = Vec::new();
     let mut errors = Vec::new();
-    for entry in config.entries().filter(|entry| entry.enabled) {
+    for entry in config.entries().filter(|entry| entry.enabled && !entry.launch_option_disabled) {
         if has_launch_option(&entry.appid) {
             continue;
         }
@@ -453,6 +453,9 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     let entry = config
         .upsert(&appid, target, true)
         .map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&entry.appid, false)
+        .map_err(|error| error.to_string())?;
     let launch = configure_launch_option(&entry.appid, true);
     Ok(Some(FixView {
         appid: entry.appid.clone(),
@@ -475,6 +478,9 @@ fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
     let mut config = Config::load().map_err(|error| error.to_string())?;
     let entry = config
         .upsert(&appid, &path, true)
+        .map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&entry.appid, false)
         .map_err(|error| error.to_string())?;
     let launch = configure_launch_option(&entry.appid, true);
     Ok(Some(FixView {
@@ -524,6 +530,9 @@ fn set_enabled(appid: String, enabled: bool) -> Result<String, String> {
     config
         .upsert(&appid, fixes, enabled)
         .map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&appid, !enabled)
+        .map_err(|error| error.to_string())?;
     match configure_launch_option(&appid, enabled) {
         Ok(true) => Ok("Fixes enabled and Steam launch option set. Restart Steam before launching.".into()),
         Ok(false) => Ok("Fixes disabled and Steam launch option cleared.".into()),
@@ -535,6 +544,10 @@ fn set_enabled(appid: String, enabled: bool) -> Result<String, String> {
 fn apply_launch_option(appid: String, enabled: bool) -> Result<String, String> {
     require_auth()?;
     configure_launch_option(&appid, enabled)?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&appid, !enabled)
+        .map_err(|error| error.to_string())?;
     Ok(if enabled {
         "Steam launch option set. Restart Steam before launching.".into()
     } else {

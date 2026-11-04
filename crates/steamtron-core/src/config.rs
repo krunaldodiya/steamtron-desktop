@@ -39,6 +39,8 @@ pub struct GameEntry {
     pub appid: String,
     pub enabled: bool,
     pub fixes: PathBuf,
+    #[serde(default)]
+    pub launch_option_disabled: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,6 +94,7 @@ impl Config {
                     appid: key,
                     enabled: entry.enabled,
                     fixes,
+                    launch_option_disabled: entry.launch_option_disabled,
                 },
             );
         }
@@ -134,10 +137,27 @@ impl Config {
             appid: appid.clone(),
             enabled,
             fixes,
+            launch_option_disabled: self
+                .games
+                .get(&appid)
+                .map(|entry| entry.launch_option_disabled)
+                .unwrap_or(false),
         };
         self.games.insert(appid, entry.clone());
         self.save()?;
         Ok(entry)
+    }
+
+    pub fn set_launch_option_disabled(
+        &mut self,
+        appid: &str,
+        disabled: bool,
+    ) -> Result<(), ConfigError> {
+        if let Some(entry) = self.games.get_mut(appid) {
+            entry.launch_option_disabled = disabled;
+            self.save()?;
+        }
+        Ok(())
     }
 
     pub fn remove(&mut self, appid: &str) -> Result<bool, ConfigError> {
