@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use serde::Serialize;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value, set_launch_option};
@@ -15,6 +18,7 @@ use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize
 struct GameView {
     appid: String,
     name: String,
+    cover: String,
     build_id: String,
     installed: bool,
     version: Option<String>,
@@ -32,6 +36,23 @@ struct FixView {
     enabled: bool,
     launch_option_set: bool,
     launch_option_error: Option<String>,
+}
+
+fn cover_for_appid(appid: &str) -> String {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(value) = cache.lock().ok().and_then(|cache| cache.get(appid).cloned()) {
+        return value;
+    }
+    let image = steam_search(appid)
+        .ok()
+        .and_then(|mut results| results.drain(..).next())
+        .map(|result| result.image)
+        .unwrap_or_default();
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(appid.to_owned(), image.clone());
+    }
+    image
 }
 
 fn require_auth() -> Result<(), String> {
@@ -481,6 +502,7 @@ fn list_games() -> Result<Vec<GameView>, String> {
                 .filter(|latest| !latest.is_empty());
             GameView {
                 managed: managed.contains(&game.appid),
+                cover: cover_for_appid(&game.appid),
                 appid: game.appid,
                 name: game.name,
                 build_id: game.build_id.clone(),
@@ -511,6 +533,7 @@ fn list_games() -> Result<Vec<GameView>, String> {
             .filter(|pinned| !pinned.is_empty());
         views.push(GameView {
             managed: true,
+            cover: cover_for_appid(&appid),
             appid: appid.clone(),
             name: title.clone(),
             build_id: "0".to_owned(),

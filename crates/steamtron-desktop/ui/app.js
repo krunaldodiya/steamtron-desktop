@@ -5,7 +5,6 @@ const searchEl = document.querySelector("#search");
 let games = [];
 let fixes = new Map();
 let selected = null;
-let viewMode = localStorage.getItem("steamtron.view") || "list";
 let activity = loadActivity();
 let pendingRestart = loadPendingRestart();
 
@@ -246,12 +245,7 @@ function showToast(message, error = false) {
 
 function renderGames() {
   const query = searchEl.value.trim().toLowerCase();
-  const toggle = document.querySelector("#view-toggle");
-  if (toggle) {
-    toggle.textContent = viewMode === "grid" ? "☰" : "▦";
-    toggle.setAttribute("aria-label", viewMode === "grid" ? "Switch to list view" : "Switch to grid view");
-  }
-  gamesEl.className = `games ${viewMode}`;
+  gamesEl.className = "games list";
   gamesEl.replaceChildren();
   for (const game of games.filter((item) => !query || `${item.name} ${item.appid}`.toLowerCase().includes(query))) {
     const button = document.createElement("button");
@@ -271,7 +265,7 @@ function renderGames() {
     button.innerHTML = `
       <span class="cover" aria-hidden="true">
         <span class="cover-fallback">${escape((game.name || "?").slice(0, 1).toUpperCase())}</span>
-        <img loading="lazy" src="${coverUrl(game.appid)}" alt="">
+        <img loading="lazy" src="${escape(game.cover || coverUrl(game.appid))}" alt="">
       </span>
       <span class="game-meta">
         <strong>${escape(game.name)}</strong>
@@ -787,11 +781,6 @@ document.querySelector("#add-game").onclick = showAddGame;
 document.querySelector("#settings").onclick = renderSettings;
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = renderGames;
-document.querySelector("#view-toggle").onclick = () => {
-  viewMode = viewMode === "grid" ? "list" : "grid";
-  localStorage.setItem("steamtron.view", viewMode);
-  renderGames();
-};
 document.querySelector("#activity").onclick = openActivity;
 document.querySelector("#activity-close").onclick = closeActivity;
 document.querySelector("#activity-backdrop").onclick = closeActivity;
