@@ -259,20 +259,45 @@ async function loadArtwork() {
   try {
     const artwork = await invoke("game_artwork", { appids });
     for (const game of games) {
-      if (!artwork[game.appid]) continue;
-      game.cover = artwork[game.appid].cover || game.cover;
-      game.hero = artwork[game.appid].hero || game.hero;
+      const art = artwork[game.appid];
       game.artworkLoaded = true;
-    }
-    renderGames();
-    if (selected) {
-      const game = games.find((item) => item.appid === selected);
-      if (game) renderDetail(game, detailTab);
+      if (!art) continue;
+      if (art.cover) {
+        game.cover = art.cover;
+        updateCardCover(game);
+      }
+      if (art.hero) {
+        game.hero = art.hero;
+        if (selected === game.appid) updateDetailHero(game);
+      }
     }
   } catch (_error) {
     // Standard Steam CDN URLs and the placeholder cover remain usable.
   } finally {
     artworkLoading = false;
+  }
+}
+
+function updateCardCover(game) {
+  const image = gamesEl.querySelector(`.game-card[data-appid="${game.appid}"] img`);
+  if (!image) return;
+  image.classList.remove("missing");
+  delete image.dataset.fallback;
+  image.src = game.cover || coverUrl(game.appid);
+}
+
+function updateDetailHero(game) {
+  const hero = detailEl.querySelector(".detail-hero");
+  if (!hero) return;
+  const source = game.hero || game.cover;
+  if (!source) return;
+  hero.classList.remove("no-artwork");
+  hero.style.backgroundImage = `url(${JSON.stringify(source)})`;
+}
+
+function highlightSelected() {
+  for (const card of gamesEl.querySelectorAll(".game-card")) {
+    card.classList.toggle("active", card.dataset.appid === selected);
   }
 }
 
@@ -320,7 +345,7 @@ function selectGame(game) {
   if (!game) return;
   try {
     selected = game.appid;
-    renderGames();
+    highlightSelected();
     renderDetail(game);
   } catch (error) {
     console.error("Could not open game", error);
@@ -588,10 +613,16 @@ async function load() {
   try {
     games = await invoke("list_games");
     await loadFixes();
+    if (!games.some((game) => game.appid === selected)) {
+      selected = games[0]?.appid || null;
+      detailTab = "general";
+    }
     renderGames();
     if (selected) {
       const game = games.find((item) => item.appid === selected);
       if (game) renderDetail(game, detailTab);
+    } else {
+      detailEl.innerHTML = `<div class="empty">No Steam games found.</div>`;
     }
     void loadArtwork();
     return true;
