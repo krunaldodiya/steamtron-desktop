@@ -149,6 +149,7 @@ function renderFixesPanel(panel, game, current) {
     <div class="row"><div class="label">Steam launch option</div><div class="value">${current?.launch_option_set ? "Set" : "Not set"}</div></div>
     <div class="actions">
       <button class="primary" id="install">Install fixes ZIP</button>
+      <button id="use-folder">Use existing fixes folder</button>
       <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
       <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
       <button id="launch-option" ${current ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
@@ -171,6 +172,22 @@ function renderFixesPanel(panel, game, current) {
           ? `Fixes installed, but the Steam launch option failed: ${result.launch_option_error}`
           : "Fixes installed and Steam launch option set. Restart Steam before launching.", !!result.launch_option_error);
       } else { stop(); status("Install cancelled."); }
+    } catch (error) { stop(); status(String(error), true); }
+  };
+  panel.querySelector("#use-folder").onclick = async () => {
+    const button = panel.querySelector("#use-folder");
+    const stop = busy(button, "Opening…");
+    try {
+      const result = await invoke("use_fixes_folder", { appid: game.appid });
+      if (!result) { stop(); status("Folder selection cancelled."); return; }
+      fixes.set(game.appid, result);
+      await loadFixes();
+      stop();
+      renderDetail(game, "fixes");
+      renderGames();
+      status(result.launch_option_error
+        ? `Fixes folder set, but the Steam launch option failed: ${result.launch_option_error}`
+        : "Fixes folder set and Steam launch option applied.", !!result.launch_option_error);
     } catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#export").onclick = async () => {

@@ -397,6 +397,29 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
 }
 
 #[tauri::command]
+fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose fixes folder")
+        .pick_folder()
+    else {
+        return Ok(None);
+    };
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    let entry = config
+        .upsert(&appid, &path, true)
+        .map_err(|error| error.to_string())?;
+    let launch = configure_launch_option(&entry.appid, true);
+    Ok(Some(FixView {
+        appid: entry.appid.clone(),
+        fixes: entry.fixes.display().to_string(),
+        enabled: entry.enabled,
+        launch_option_set: has_launch_option(&entry.appid),
+        launch_option_error: launch.err(),
+    }))
+}
+
+#[tauri::command]
 fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, String> {
     require_auth()?;
     let config = Config::load().map_err(|error| error.to_string())?;
@@ -539,6 +562,7 @@ fn main() {
             list_games,
             list_fixes,
             install_fixes,
+            use_fixes_folder,
             export_fixes,
             set_enabled,
             apply_launch_option,
