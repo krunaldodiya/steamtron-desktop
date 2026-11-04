@@ -810,3 +810,6 @@ window.addEventListener("unhandledrejection", (event) => {
 renderRestartBanner();
 updateActivityCount();
 boot();
+if (window.__TAURI__?.window?.getCurrentWindow) {
+  window.__TAURI__.window.getCurrentWindow().maximize().catch(() => {});
+}

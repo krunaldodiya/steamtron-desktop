@@ -477,8 +477,14 @@ fn backend_status() -> Result<steamtron_unlock::BackendStatus, String> {
 }
 
 #[tauri::command]
-fn list_games() -> Result<Vec<GameView>, String> {
+async fn list_games() -> Result<Vec<GameView>, String> {
     require_auth()?;
+    tauri::async_runtime::spawn_blocking(list_games_impl)
+        .await
+        .map_err(|error| format!("Library scan failed: {error}"))?
+}
+
+fn list_games_impl() -> Result<Vec<GameView>, String> {
     let managed = steam::managed_appids().map_err(|error| error.to_string())?;
     let games = steam::games().map_err(|error| error.to_string())?;
     let mut views: Vec<GameView> = games
