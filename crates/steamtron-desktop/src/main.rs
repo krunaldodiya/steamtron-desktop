@@ -56,6 +56,14 @@ fn configure_launch_option(appid: &str, enabled: bool) -> Result<bool, String> {
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .ok_or_else(|| "Could not resolve the SteamTron executable path.".to_string())?;
+    // Linux appends " (deleted)" to /proc/self/exe after an application
+    // update replaces the running binary. Never write that marker into Steam.
+    let exe = std::path::PathBuf::from(
+        exe.display()
+            .to_string()
+            .strip_suffix(" (deleted)")
+            .unwrap_or(&exe.display().to_string()),
+    );
     let value = launch_option_value(&exe, appid, &game.common, &entry.fixes);
     set_launch_option(appid, Some(&value)).map_err(|error| error.to_string())?;
     Ok(true)
