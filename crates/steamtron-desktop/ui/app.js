@@ -154,7 +154,7 @@ function renderFixesPanel(panel, game, current) {
     <div class="fixes-separator"></div>
     <div class="fixes-section">
       <div class="row"><div class="label">Current fixes location</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
-      <div class="actions"><button id="use-folder">Use existing fixes folder</button></div>
+      <div class="actions"><button id="use-folder">Browse fixes folder…</button></div>
     </div>
     <div class="fixes-separator"></div>
     <div class="fixes-section">
