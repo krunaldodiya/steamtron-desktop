@@ -130,15 +130,6 @@ fn with_steam_transaction<T>(
 }
 
 #[tauri::command]
-fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
-    let fullscreen = window.is_fullscreen().map_err(|error| error.to_string())?;
-    window
-        .set_fullscreen(!fullscreen)
-        .map_err(|error| error.to_string())?;
-    Ok(!fullscreen)
-}
-
-#[tauri::command]
 fn profile_status() -> AuthState {
     auth_status()
 }
@@ -819,7 +810,7 @@ fn main() {
         .setup(|app| {
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_fullscreen(true);
+                let _ = window.maximize();
             }
             Ok(())
         })
@@ -836,7 +827,6 @@ fn main() {
             repair_launch_options,
             repair_library_entries,
             restart_steam,
-            toggle_fullscreen,
             profile_status,
             profile_login,
             profile_logout,
