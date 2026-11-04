@@ -84,29 +84,23 @@ fn configure_launch_option(appid: &str, enabled: bool) -> Result<bool, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn with_steam_transaction<T>(
-    action: impl FnOnce() -> Result<T, String>,
-) -> Result<T, String> {
-    let was_running = steam_process_running();
-    if was_running {
-        stop_steam()?;
-    }
-    let result = action();
-    let start_error = if was_running { start_steam().err() } else { None };
-    match (result, start_error) {
-        (Ok(value), None) => Ok(value),
-        (Err(error), None) => Err(error),
-        (Ok(_), Some(error)) => Err(format!("Operation completed, but Steam did not restart: {error}")),
-        (Err(error), Some(start_error)) => {
-            Err(format!("{error} Steam also did not restart: {start_error}"))
-        }
+fn require_steam_stopped() -> Result<(), String> {
+    if steam_process_running() {
+        Err("Steam is running. Exit Steam completely, then retry this action.".into())
+    } else {
+        Ok(())
     }
 }
 
 #[cfg(not(target_os = "linux"))]
+fn require_steam_stopped() -> Result<(), String> {
+    Ok(())
+}
+
 fn with_steam_transaction<T>(
     action: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
+    require_steam_stopped()?;
     action()
 }
 
@@ -142,7 +136,7 @@ async fn repair_steam_library() -> Result<String, String> {
                 .map(|status| status.installed)
                 .unwrap_or(false)
         };
-        stop_steam()?;
+        require_steam_stopped()?;
         let repair_result = (|| -> Result<String, String> {
             if !installed() {
                 launch_unlock_installer()?;
@@ -171,18 +165,12 @@ async fn repair_steam_library() -> Result<String, String> {
             }
             let repaired = repair_missing_appmanifests().unwrap_or_default();
             Ok(format!(
-                "SLSsteam is installed; Lumen was removed. Recreated {} appmanifest{}.",
+                "SLSsteam is installed; Lumen was removed. Recreated {} appmanifest{}. You can now start Steam manually.",
                 repaired.len(),
                 if repaired.len() == 1 { "" } else { "s" }
             ))
         })();
-        let start_result = start_steam();
-        match (repair_result, start_result) {
-            (Ok(message), Ok(())) => Ok(format!("{message} Steam was restarted.")),
-            (Err(error), Ok(())) => Err(format!("{error} Steam was restarted.")),
-            (Ok(message), Err(error)) => Err(format!("{message} Steam could not be started: {error}")),
-            (Err(error), Err(start_error)) => Err(format!("{error} Steam could not be started: {start_error}")),
-        }
+        repair_result
     })
     .await
     .map_err(|error| format!("Repair task failed: {error}"))?
@@ -494,6 +482,7 @@ fn list_fixes() -> Result<Vec<FixView>, String> {
 #[tauri::command]
 fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     require_auth()?;
+    require_steam_stopped()?;
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Fixes ZIP", &["zip"])
         .pick_file()
@@ -523,6 +512,7 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
 #[tauri::command]
 fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
     require_auth()?;
+    require_steam_stopped()?;
     let Some(path) = rfd::FileDialog::new()
         .set_title("Choose fixes folder")
         .pick_folder()
@@ -578,6 +568,7 @@ fn open_fixes_folder(appid: String) -> Result<(), String> {
 #[tauri::command]
 fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, String> {
     require_auth()?;
+    require_steam_stopped()?;
     let config = Config::load().map_err(|error| error.to_string())?;
     let Some(entry) = config.entry(&appid) else {
         return Err("No fixes configured for this game.".into());
@@ -623,9 +614,9 @@ fn set_enabled(appid: String, enabled: bool) -> Result<String, String> {
         Ok(())
     })?;
     Ok(if enabled {
-        "Fixes enabled and Steam launch option set. Steam was restarted.".into()
+        "Fixes enabled and Steam launch option set. Start Steam manually.".into()
     } else {
-        "Fixes disabled and Steam launch option cleared. Steam was restarted.".into()
+        "Fixes disabled and Steam launch option cleared. Start Steam manually.".into()
     })
 }
 
@@ -641,15 +632,16 @@ fn apply_launch_option(appid: String, enabled: bool) -> Result<String, String> {
         Ok(())
     })?;
     Ok(if enabled {
-        "Steam launch option set. Steam was restarted.".into()
+        "Steam launch option set. Start Steam manually.".into()
     } else {
-        "Steam launch option cleared. Steam was restarted.".into()
+        "Steam launch option cleared. Start Steam manually.".into()
     })
 }
 
 #[tauri::command]
 fn remove_fixes(appid: String) -> Result<(), String> {
     require_auth()?;
+    require_steam_stopped()?;
     with_steam_transaction(|| {
         let mut config = Config::load().map_err(|error| error.to_string())?;
         config.remove(&appid).map_err(|error| error.to_string())?;

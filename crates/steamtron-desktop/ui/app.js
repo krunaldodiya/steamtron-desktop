@@ -181,7 +181,7 @@ function renderFixesPanel(panel, game, current) {
         renderGames();
         status(result.launch_option_error
           ? `Fixes installed, but the Steam launch option failed: ${result.launch_option_error}`
-          : "Fixes installed and Steam launch option set. Restart Steam before launching.", !!result.launch_option_error);
+          : "Fixes installed and Steam launch option set. Start Steam manually.", !!result.launch_option_error);
       } else { stop(); status("Install cancelled."); }
     } catch (error) { stop(); status(String(error), true); }
   };
@@ -204,7 +204,7 @@ function renderFixesPanel(panel, game, current) {
       renderGames();
       status(result.launch_option_error
         ? `Fixes folder set, but the Steam launch option failed: ${result.launch_option_error}`
-        : "Fixes folder set and Steam launch option applied.", !!result.launch_option_error);
+        : "Fixes folder set and Steam launch option applied. Start Steam manually.", !!result.launch_option_error);
     } catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#export").onclick = async () => {
