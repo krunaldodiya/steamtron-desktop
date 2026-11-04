@@ -723,12 +723,37 @@ function renderSettingsMessage(message, isError = false) {
 }
 
 function renderSettings() {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
+  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-backup">Backup library</button><button id="settings-restore">Restore backup</button><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
   const panel = detailEl.querySelector("#settings-panel");
   const profileTab = detailEl.querySelector("#tab-profile");
   const doctorTab = detailEl.querySelector("#tab-doctor");
   const settingsRestart = detailEl.querySelector("#settings-restart");
   settingsRestart.onclick = () => restartSteam(settingsRestart);
+  const settingsBackup = detailEl.querySelector("#settings-backup");
+  settingsBackup.onclick = async () => {
+    const stop = busy(settingsBackup, "Backing up…");
+    try {
+      const result = await invoke("export_backup");
+      stop();
+      if (!result) { renderSettingsMessage("Backup cancelled."); return; }
+      recordActivity("Exported library backup", { detail: `${result.games} games · ${result.files} files` });
+      renderSettingsMessage(`Backup written: ${result.path} (${result.games} games, ${result.files} files).`);
+    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+  };
+  const settingsRestore = detailEl.querySelector("#settings-restore");
+  settingsRestore.onclick = async () => {
+    if (!window.confirm("Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest, and fixes files may be overwritten.")) return;
+    const stop = busy(settingsRestore, "Restoring…");
+    try {
+      const result = await invoke("restore_backup");
+      stop();
+      if (!result) { renderSettingsMessage("Restore cancelled."); return; }
+      recordActivity("Restored library backup", { detail: `${result.games} games · ${result.fixes} fixes` });
+      markRestartRequired("Library metadata restored. Start Steam to apply the restored files.");
+      await load();
+      renderSettingsMessage(`Restored ${result.games} games (${result.lua_files} Lua, ${result.appmanifests} appmanifest, ${result.fixes} fixes).`);
+    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+  };
   const settingsShortcut = detailEl.querySelector("#settings-shortcut");
   settingsShortcut.onclick = async () => {
     const stop = busy(settingsShortcut, "Installing…");

@@ -13,7 +13,7 @@ use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
 use steamtron_library::updates::{available_updates, clear_pin, pin_update, Updates};
-use steamtron_library::{add_bundle, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, repair_missing_appmanifests, search as steam_search, title_for_appid, AddedGame, RemovedGame, RepairedGame, SearchResult};
+use steamtron_library::{add_bundle, backup, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, repair_missing_appmanifests, search as steam_search, title_for_appid, AddedGame, RemovedGame, RepairedGame, SearchResult};
 
 #[derive(Serialize)]
 struct GameView {
@@ -484,6 +484,42 @@ fn backend_status() -> Result<steamtron_unlock::BackendStatus, String> {
 }
 
 #[tauri::command]
+async fn export_backup() -> Result<Option<backup::BackupSummary>, String> {
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Save SteamTron library backup")
+        .set_file_name("steamtron-library-backup.zip")
+        .add_filter("SteamTron backup", &["zip"])
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::export_backup(&path, None).map(Some).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Backup task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn restore_backup() -> Result<Option<backup::RestoreSummary>, String> {
+    require_auth()?;
+    require_steam_stopped()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose SteamTron library backup")
+        .add_filter("SteamTron backup", &["zip"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::restore_backup(&path).map(Some).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Restore task failed: {error}"))?
+}
+
+#[tauri::command]
 async fn game_artwork(appids: Vec<String>) -> Result<HashMap<String, GameArtwork>, String> {
     require_auth()?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -847,6 +883,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             backend_status,
+            export_backup,
+            restore_backup,
             game_artwork,
             search_games,
             add_game,

@@ -15,6 +15,7 @@ use steamtron_core::steam;
 use steamtron_unlock::UnlockBackend;
 
 pub mod updates;
+pub mod backup;
 
 const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;
 const STEAMML_URL: &str = "https://pub-5b6d3b7c03fd4ac1afb5bd3017850e20.r2.dev/{appid}.zip";
@@ -41,6 +42,8 @@ pub enum LibraryError {
         #[source]
         source: std::io::Error,
     },
+    #[error("ZIP error: {0}")]
+    Zip(#[from] zip::result::ZipError),
 }
 
 impl LibraryError {
