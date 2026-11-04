@@ -117,3 +117,8 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .update-version .date { line-height:1.2; }
 .update-version small { color:#8fa3b8; line-height:1.2; }
 .badge.warn { color:#ffd479; border-color:#7a6130; background:#2b2514; }
+
+.fixes-section { padding:2px 0; }
+.fixes-section .actions { margin:8px 0 0; }
+.fixes-section .row { border-top:0; padding-top:0; }
+.fixes-separator { border-top:1px solid #2a3948; margin:18px 0; }

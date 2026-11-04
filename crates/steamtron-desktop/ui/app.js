@@ -145,17 +145,27 @@ function renderGeneralPanel(panel, game) {
 
 function renderFixesPanel(panel, game, current) {
   panel.innerHTML = `
-    <div class="row"><div class="label">Fixes</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
-    <div class="row"><div class="label">Steam launch option</div><div class="value">${current?.launch_option_set ? "Set" : "Not set"}</div></div>
-    <div class="actions">
-      <button class="primary" id="install">Install fixes ZIP</button>
-      <button id="use-folder">Use existing fixes folder</button>
-      <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
-      <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
-      <button id="launch-option" ${current ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
-      <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
+    <div class="fixes-section">
+      <div class="actions">
+        <button class="primary" id="install">Import fixes ZIP</button>
+        <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
+      </div>
     </div>
-    <div class="status${current && current.enabled && !current.launch_option_set ? " error" : ""}">${current?.launch_option_error ? escape(current.launch_option_error) : current ? (current.enabled && !current.launch_option_set ? "Fixes are enabled, but the Steam launch option is not set. Click Set launch option, then fully restart Steam." : current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Install a ZIP to enable the fixes overlay."}</div>`;
+    <div class="fixes-separator"></div>
+    <div class="fixes-section">
+      <div class="row"><div class="label">Current fixes location</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
+      <div class="actions"><button id="use-folder">Use existing fixes folder</button></div>
+    </div>
+    <div class="fixes-separator"></div>
+    <div class="fixes-section">
+      <div class="row"><div class="label">Steam launch option</div><div class="value">${current?.launch_option_set ? "Set" : "Not set"}</div></div>
+      <div class="actions">
+        <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
+        <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
+        <button id="launch-option" ${current ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
+      </div>
+    </div>
+    <div class="status${current && current.enabled && !current.launch_option_set ? " error" : ""}">${current?.launch_option_error ? escape(current.launch_option_error) : current ? (current.enabled && !current.launch_option_set ? "Fixes are enabled, but the Steam launch option is not set. Click Set launch option, then fully restart Steam." : current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Import a ZIP or choose an existing fixes folder."}</div>`;
   panel.querySelector("#install").onclick = async () => {
     const button = panel.querySelector("#install");
     const stop = busy(button, "Installing…");
