@@ -154,7 +154,7 @@ function renderFixesPanel(panel, game, current) {
     <div class="fixes-separator"></div>
     <div class="fixes-section">
       <div class="row"><div class="label">Current fixes location</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
-      <div class="actions"><button id="use-folder">Browse fixes folder…</button></div>
+      <div class="actions"><button id="open-folder" ${current ? "" : "disabled"}>Open fixes folder</button><button id="use-folder">Change fixes folder…</button></div>
     </div>
     <div class="fixes-separator"></div>
     <div class="fixes-section">
@@ -183,6 +183,12 @@ function renderFixesPanel(panel, game, current) {
           : "Fixes installed and Steam launch option set. Restart Steam before launching.", !!result.launch_option_error);
       } else { stop(); status("Install cancelled."); }
     } catch (error) { stop(); status(String(error), true); }
+  };
+  panel.querySelector("#open-folder").onclick = async () => {
+    const button = panel.querySelector("#open-folder");
+    const stop = busy(button, "Opening…");
+    try { await invoke("open_fixes_folder", { appid: game.appid }); stop(); }
+    catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#use-folder").onclick = async () => {
     const button = panel.querySelector("#use-folder");

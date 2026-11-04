@@ -493,6 +493,33 @@ fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
 }
 
 #[tauri::command]
+fn open_fixes_folder(appid: String) -> Result<(), String> {
+    require_auth()?;
+    let config = Config::load().map_err(|error| error.to_string())?;
+    let entry = config
+        .entry(&appid)
+        .ok_or_else(|| "No fixes configured for this game.".to_string())?;
+    if !entry.fixes.is_dir() {
+        return Err(format!(
+            "Fixes directory does not exist: {}",
+            entry.fixes.display()
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&entry.fixes)
+            .spawn()
+            .map_err(|error| format!("Could not open the fixes folder: {error}"))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("Opening the fixes folder is only implemented on Linux.".into())
+    }
+}
+
+#[tauri::command]
 fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, String> {
     require_auth()?;
     let config = Config::load().map_err(|error| error.to_string())?;
@@ -643,6 +670,7 @@ fn main() {
             list_fixes,
             install_fixes,
             use_fixes_folder,
+            open_fixes_folder,
             export_fixes,
             set_enabled,
             apply_launch_option,
