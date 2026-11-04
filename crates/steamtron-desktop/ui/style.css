@@ -123,11 +123,11 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .fixes-section .row { border-top:0; padding-top:0; }
 .fixes-separator { border-top:1px solid #2a3948; margin:18px 0; }
 
-.library-panel { display:flex; flex-direction:column; }
+.library-panel { display:flex; flex-direction:column; min-height:0; }
 .library-toolbar { display:flex; align-items:center; gap:8px; padding:10px 10px 9px; border-bottom:1px solid #2a3948; }
 .library-toolbar .search { flex:1; width:auto; border:1px solid #3b5166; border-radius:7px; padding:9px 11px; background:#101922; }
 .library-toolbar button { flex-shrink:0; }
-.library-panel .games { flex:1; min-height:0; height:auto; padding-top:4px; }
+.library-panel .games { flex:1 1 0; min-height:0; height:0; padding-top:4px; overflow-y:auto; overflow-x:hidden; }
 
 /* Activity, restart banner, and library presentation */
 .hidden { display: none !important; }
@@ -180,9 +180,9 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .games.grid .badges { display:flex; flex-wrap:wrap; gap:3px; margin-top:2px; }
 .games.grid .badge { font-size:9px; padding:1px 5px; }
 .games.list { display:flex; flex-direction:column; }
-.games.list .game-card { display:flex; flex-direction:row; align-items:center; gap:12px; width:100%; border:0; border-bottom:1px solid #22303e; border-radius:0; padding:10px 12px; background:transparent; text-align:left; }
+.games.list .game-card { flex-shrink:0; display:flex; flex-direction:row; align-items:center; gap:12px; width:100%; border:0; border-bottom:1px solid #22303e; border-radius:0; padding:10px 12px; background:transparent; text-align:left; }
 .games.list .game-card:hover, .games.list .game-card.active { background:#203041; }
-.games.list .cover { width:56px; height:78px; flex-shrink:0; border-radius:6px; overflow:hidden; background:#1d3140; }
+.games.list .cover { position:relative; display:block; width:56px; height:78px; flex-shrink:0; border-radius:6px; overflow:hidden; background:#1d3140; }
 .games.list .cover img { width:100%; height:100%; object-fit:cover; display:block; }
 .games.list .game-meta { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
 .games.list .game-meta strong { color:#f2f6fa; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

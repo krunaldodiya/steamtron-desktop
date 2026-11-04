@@ -135,6 +135,11 @@ function headerUrl(appid) {
 function bindCoverImage(image, appid) {
   image.addEventListener("error", () => {
     if (image.dataset.fallback === "header") {
+      image.dataset.fallback = "shared";
+      image.src = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${encodeURIComponent(appid)}/header.jpg`;
+      return;
+    }
+    if (image.dataset.fallback === "shared") {
       image.classList.add("missing");
       image.removeAttribute("src");
       return;
@@ -251,6 +256,7 @@ function renderGames() {
   for (const game of games.filter((item) => !query || `${item.name} ${item.appid}`.toLowerCase().includes(query))) {
     const button = document.createElement("button");
     button.className = `game game-card${selected === game.appid ? " active" : ""}`;
+    button.dataset.appid = game.appid;
     button.title = `${game.name} · App ${game.appid}`;
     const build = game.build_id && game.build_id !== "0"
       ? `build ${game.build_id}`
@@ -274,7 +280,6 @@ function renderGames() {
       </span>`;
     const image = button.querySelector("img");
     bindCoverImage(image, game.appid);
-    button.addEventListener("click", () => { selected = game.appid; renderGames(); renderDetail(game); });
     gamesEl.appendChild(button);
   }
   if (!gamesEl.children.length) {
@@ -284,6 +289,24 @@ function renderGames() {
     gamesEl.appendChild(empty);
   }
 }
+
+function selectGame(game) {
+  if (!game) return;
+  try {
+    selected = game.appid;
+    renderGames();
+    renderDetail(game);
+  } catch (error) {
+    console.error("Could not open game", error);
+    showToast(`Could not open ${game.name}: ${error}`, true);
+  }
+}
+
+gamesEl.addEventListener("click", (event) => {
+  const button = event.target.closest(".game-card");
+  if (!button) return;
+  selectGame(games.find((game) => game.appid === button.dataset.appid));
+});
 
 function renderDetail(game, tab = "general") {
   const current = fixes.get(game.appid);
@@ -788,6 +811,14 @@ document.addEventListener("keydown", (event) => {
     closeActivity();
     document.querySelectorAll(".modal-backdrop").forEach((node) => node.remove());
   }
+});
+window.addEventListener("error", (event) => {
+  console.error(event.error || event.message);
+  showToast(`UI error: ${event.message}`, true);
+});
+window.addEventListener("unhandledrejection", (event) => {
+  console.error(event.reason);
+  showToast(`UI error: ${event.reason}`, true);
 });
 renderRestartBanner();
 updateActivityCount();
