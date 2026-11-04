@@ -95,10 +95,10 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 @keyframes spin { to { transform: rotate(360deg); } }
 button.loading { cursor:progress; opacity:.85; }
 button.loading::before { content:""; display:inline-block; width:12px; height:12px; margin-right:7px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; vertical-align:-2px; animation:spin .7s linear infinite; }
-.updates-panel { display:flex; flex-direction:column; gap:12px; }
+.updates-panel { display:flex; flex-direction:column; gap:12px; padding-bottom:10px; }
 .update-summary { padding:10px 12px; border:1px solid #2a3948; border-radius:8px; background:#131d27; color:#b7c7d6; font-size:13px; white-space:pre-line; }
-.update-actions { display:flex; gap:8px; flex-wrap:wrap; }
-.update-list { display:flex; flex-direction:column; gap:5px; max-height:360px; overflow:auto; }
+.update-actions { position:sticky; bottom:-1px; z-index:2; display:flex; gap:8px; flex-wrap:wrap; padding:10px 0 4px; background:#17212c; }
+.update-list { display:flex; flex-direction:column; gap:5px; max-height:300px; overflow:auto; padding-bottom:4px; }
 .update-row { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border:1px solid #2a3948; border-radius:7px; background:#131d27; color:#e8f0f7; text-align:left; }
 .update-row.selected { border-color:#2f86c9; background:#1b3143; }
 .update-row .date { font-weight:600; }
