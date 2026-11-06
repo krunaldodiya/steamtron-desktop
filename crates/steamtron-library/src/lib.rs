@@ -561,6 +561,68 @@ pub fn parse_bundle(bytes: &[u8]) -> Result<Bundle, LibraryError> {
     Ok(Bundle { lua, manifests })
 }
 
+fn non_windows_depots(appid: &str) -> Result<BTreeSet<String>, LibraryError> {
+    let url = format!("https://api.steamcmd.net/v1/info/{appid}");
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| LibraryError::Download(error.to_string()))?
+        .get(url)
+        .send()
+        .map_err(|error| LibraryError::Download(error.to_string()))?;
+    if !response.status().is_success() {
+        return Err(LibraryError::Download(format!(
+            "Steam app info returned HTTP {}",
+            response.status()
+        )));
+    }
+    let payload: serde_json::Value = response
+        .json()
+        .map_err(|error| LibraryError::Download(format!("Steam app info is invalid: {error}")))?;
+    let depots = payload
+        .get("data")
+        .and_then(|data| data.get(appid))
+        .and_then(|info| info.get("depots"))
+        .and_then(|depots| depots.as_object())
+        .ok_or_else(|| LibraryError::Download(format!("No depot metadata for App {appid}")))?;
+    let mut result = BTreeSet::new();
+    for (depot, meta) in depots {
+        let oslist = meta
+            .get("config")
+            .and_then(|config| config.get("oslist"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !oslist.is_empty() && !oslist.split(',').any(|part| part.trim() == "windows") {
+            result.insert(depot.clone());
+        }
+    }
+    Ok(result)
+}
+
+fn windows_only_lua(appid: &str, lua: &str) -> Result<String, LibraryError> {
+    let blocked = non_windows_depots(appid)?;
+    if blocked.is_empty() {
+        return Ok(lua.to_owned());
+    }
+    let add = Regex::new(r"^\s*(?:--\s*)?addappid\s*\(\s*(\d+)").unwrap();
+    let manifest = Regex::new(r"^\s*(?:--\s*)?setManifestid\s*\(\s*(\d+)").unwrap();
+    let mut output = String::with_capacity(lua.len());
+    for line in lua.lines() {
+        let depot = add
+            .captures(line)
+            .or_else(|| manifest.captures(line))
+            .and_then(|captures| captures.get(1))
+            .map(|value| value.as_str());
+        if depot.is_some_and(|depot| blocked.contains(depot)) {
+            continue;
+        }
+        output.push_str(line);
+        output.push('\n');
+    }
+    Ok(output)
+}
+
 pub fn add_bundle(
     appid: &str,
     title: &str,
@@ -588,11 +650,15 @@ pub fn add_bundle(
         return Err(LibraryError::AlreadyInstalled(appid.to_owned()));
     }
     let existing_pin = updates::has_existing_pin(appid);
+    // Steam always installs the host platform; on Linux that is the native
+    // build. UmuTron-style Windows-only libraries must strip native Linux and
+    // macOS depots from the provider Lua before Steam sees it.
+    let lua = windows_only_lua(appid, &bundle.lua)?;
     let installed = backend
-        .install_lua(appid, &bundle.lua, &bundle.manifests)
+        .install_lua(appid, &lua, &bundle.manifests)
         .map_err(|error| LibraryError::Archive(error.to_string()))?;
 
-    let depots = parse_depots(&bundle.lua)?;
+    let depots = parse_depots(&lua)?;
     let text = acf_text(appid, &title, &depots, &steamapps.join("common").join(&title));
     let temporary = acf.with_extension("acf.steamtron.tmp");
     fs::write(&temporary, text).map_err(|error| LibraryError::io(&temporary, error))?;
