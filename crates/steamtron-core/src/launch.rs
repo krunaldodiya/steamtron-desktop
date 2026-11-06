@@ -34,12 +34,29 @@ pub fn vdf_string(value: &str) -> String {
 }
 
 pub fn launch_option_value(exe: &Path, appid: &str, common: &Path, fixes: &Path) -> String {
-    format!(
-        "\"{}\" {MARKER} --appid {appid} --common \"{}\" --fixes \"{}\" -- %command%",
+    launch_option_value_with_target(exe, appid, common, Some(fixes), None)
+}
+
+pub fn launch_option_value_with_target(
+    exe: &Path,
+    appid: &str,
+    common: &Path,
+    fixes: Option<&Path>,
+    target_id: Option<&str>,
+) -> String {
+    let mut value = format!(
+        "\"{}\" {MARKER} --appid {appid} --common \"{}\"",
         vdf_string(&exe.display().to_string()),
-        vdf_string(&common.display().to_string()),
-        vdf_string(&fixes.display().to_string())
-    )
+        vdf_string(&common.display().to_string())
+    );
+    if let Some(fixes) = fixes {
+        value.push_str(&format!(" --fixes \"{}\"", vdf_string(&fixes.display().to_string())));
+    }
+    if let Some(target_id) = target_id {
+        value.push_str(&format!(" --target-id {target_id}"));
+    }
+    value.push_str(" -- %command%");
+    value
 }
 
 fn skip_space(text: &str, mut pos: usize) -> usize {

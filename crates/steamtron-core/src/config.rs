@@ -35,12 +35,68 @@ impl ConfigError {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LaunchTarget {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub executable: PathBuf,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    #[serde(default)]
+    pub primary: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GameEntry {
     pub appid: String,
     pub enabled: bool,
     pub fixes: PathBuf,
     #[serde(default)]
     pub launch_option_disabled: bool,
+    #[serde(default)]
+    pub launch_target: Option<PathBuf>,
+    #[serde(default)]
+    pub launch_targets: Vec<LaunchTarget>,
+    /// A game entry created only to hold launch targets. It has no fixes
+    /// directory and must never be treated as a fixes entry.
+    #[serde(default)]
+    pub launch_only: bool,
+}
+
+fn clean_name(name: String) -> String {
+    name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(80).collect()
+}
+
+fn clean_arguments(arguments: Vec<String>) -> Vec<String> {
+    arguments
+        .into_iter()
+        .map(|argument| argument.trim().to_owned())
+        .filter(|argument| !argument.is_empty())
+        .take(32)
+        .collect()
+}
+
+fn normalize_targets(targets: &mut Vec<LaunchTarget>) {
+    let mut seen_paths = std::collections::BTreeSet::new();
+    let mut seen_ids = std::collections::BTreeSet::new();
+    targets.retain(|target| seen_paths.insert(target.executable.clone()));
+    for (index, target) in targets.iter_mut().enumerate() {
+        if target.id.is_empty() || !seen_ids.insert(target.id.clone()) {
+            let mut next = index + 1;
+            while seen_ids.contains(&format!("t{next}")) {
+                next += 1;
+            }
+            target.id = format!("t{next}");
+            seen_ids.insert(target.id.clone());
+        }
+        target.name = clean_name(std::mem::take(&mut target.name));
+        target.arguments = clean_arguments(std::mem::take(&mut target.arguments));
+    }
+    if !targets.iter().any(|target| target.primary) {
+        if let Some(first) = targets.first_mut() {
+            first.primary = true;
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -82,19 +138,36 @@ impl Config {
             if !key.bytes().all(|byte| byte.is_ascii_digit()) {
                 continue;
             }
-            let Ok(fixes) = entry.fixes.canonicalize() else {
-                continue;
-            };
-            if !fixes.is_dir() {
+            let fixes = entry.fixes.canonicalize().ok().filter(|path| path.is_dir());
+            if !entry.launch_only && fixes.is_none() {
                 continue;
             }
+            let fixes = fixes.unwrap_or_default();
             games.insert(
                 key.clone(),
                 GameEntry {
                     appid: key,
-                    enabled: entry.enabled,
+                    enabled: entry.enabled && !entry.launch_only,
                     fixes,
                     launch_option_disabled: entry.launch_option_disabled,
+                    launch_target: entry.launch_target.clone(),
+                    launch_targets: {
+                        let mut targets = entry.launch_targets;
+                        if targets.is_empty() {
+                            if let Some(path) = entry.launch_target {
+                                targets.push(LaunchTarget {
+                                    id: "default".into(),
+                                    name: String::new(),
+                                    executable: path,
+                                    arguments: Vec::new(),
+                                    primary: true,
+                                });
+                            }
+                        }
+                        normalize_targets(&mut targets);
+                        targets
+                    },
+                    launch_only: entry.launch_only,
                 },
             );
         }
@@ -142,10 +215,191 @@ impl Config {
                 .get(&appid)
                 .map(|entry| entry.launch_option_disabled)
                 .unwrap_or(false),
+            launch_target: self
+                .games
+                .get(&appid)
+                .and_then(|entry| entry.launch_target.clone()),
+            launch_targets: self
+                .games
+                .get(&appid)
+                .map(|entry| entry.launch_targets.clone())
+                .unwrap_or_default(),
+            launch_only: false,
         };
         self.games.insert(appid, entry.clone());
         self.save()?;
         Ok(entry)
+    }
+
+    pub fn add_launch_target(
+        &mut self,
+        appid: &str,
+        executable: PathBuf,
+        name: String,
+        arguments: Vec<String>,
+    ) -> Result<LaunchTarget, ConfigError> {
+        if !self.games.contains_key(appid) {
+            self.games.insert(
+                appid.to_owned(),
+                GameEntry {
+                    appid: appid.to_owned(),
+                    enabled: false,
+                    fixes: PathBuf::new(),
+                    launch_option_disabled: false,
+                    launch_target: None,
+                    launch_targets: Vec::new(),
+                    launch_only: true,
+                },
+            );
+        }
+        let entry = self
+            .games
+            .get_mut(appid)
+            .ok_or_else(|| ConfigError::Invalid(format!("no fixes entry for App {appid}")))?;
+        let executable = executable
+            .canonicalize()
+            .map_err(|_| ConfigError::Invalid(format!("launch target does not exist: {}", executable.display())))?;
+        if !executable.is_file() {
+            return Err(ConfigError::Invalid(format!("launch target is not a file: {}", executable.display())));
+        }
+        if entry.launch_targets.len() >= 16 {
+            return Err(ConfigError::Invalid("At most 16 launch targets are allowed.".into()));
+        }
+        if entry.launch_targets.iter().any(|target| target.executable == executable) {
+            return Err(ConfigError::Invalid("That launch target is already added.".into()));
+        }
+        let id = {
+            let mut index = entry.launch_targets.len() + 1;
+            while entry.launch_targets.iter().any(|target| target.id == format!("t{index}")) {
+                index += 1;
+            }
+            format!("t{index}")
+        };
+        let target = LaunchTarget {
+            id,
+            name: clean_name(name),
+            executable,
+            arguments: clean_arguments(arguments),
+            primary: entry.launch_targets.is_empty(),
+        };
+        entry.launch_targets.push(target.clone());
+        normalize_targets(&mut entry.launch_targets);
+        self.save()?;
+        Ok(target)
+    }
+
+    pub fn update_launch_target(
+        &mut self,
+        appid: &str,
+        id: &str,
+        name: String,
+        arguments: Vec<String>,
+        executable: Option<PathBuf>,
+    ) -> Result<(), ConfigError> {
+        let executable = match executable {
+            Some(path) => Some(
+                path.canonicalize()
+                    .map_err(|_| ConfigError::Invalid(format!("launch target does not exist: {}", path.display())))?,
+            ),
+            None => None,
+        };
+        if let Some(path) = executable.as_ref() {
+            if !path.is_file() {
+                return Err(ConfigError::Invalid(format!("launch target is not a file: {}", path.display())));
+            }
+        }
+        let entry = self
+            .games
+            .get_mut(appid)
+            .ok_or_else(|| ConfigError::Invalid(format!("no fixes entry for App {appid}")))?;
+        if let Some(path) = executable.as_ref() {
+            if entry
+                .launch_targets
+                .iter()
+                .any(|target| target.id != id && target.executable == *path)
+            {
+                return Err(ConfigError::Invalid("That launch target is already added.".into()));
+            }
+        }
+        let target = entry
+            .launch_targets
+            .iter_mut()
+            .find(|target| target.id == id)
+            .ok_or_else(|| ConfigError::Invalid("That launch target no longer exists.".into()))?;
+        target.name = clean_name(name);
+        target.arguments = clean_arguments(arguments);
+        if let Some(path) = executable {
+            target.executable = path;
+        }
+        self.save()?;
+        Ok(())
+    }
+
+    pub fn remove_launch_target(&mut self, appid: &str, id: &str) -> Result<(), ConfigError> {
+        let entry = self
+            .games
+            .get_mut(appid)
+            .ok_or_else(|| ConfigError::Invalid(format!("no fixes entry for App {appid}")))?;
+        entry.launch_targets.retain(|target| target.id != id);
+        normalize_targets(&mut entry.launch_targets);
+        self.save()?;
+        Ok(())
+    }
+
+    pub fn set_launch_target(
+        &mut self,
+        appid: &str,
+        target: Option<PathBuf>,
+    ) -> Result<(), ConfigError> {
+        let Some(entry) = self.games.get_mut(appid) else {
+            return Err(ConfigError::Invalid(format!(
+                "no fixes entry for App {appid}"
+            )));
+        };
+        let target = match target {
+            Some(path) => {
+                let path = path
+                    .canonicalize()
+                    .map_err(|_| ConfigError::Invalid(format!(
+                        "launch target does not exist: {}",
+                        path.display()
+                    )))?;
+                if !path.is_file() {
+                    return Err(ConfigError::Invalid(format!(
+                        "launch target is not a file: {}",
+                        path.display()
+                    )));
+                }
+                Some(path)
+            }
+            None => None,
+        };
+        entry.launch_target = target.clone();
+        entry.launch_targets = target
+            .map(|path| vec![LaunchTarget {
+                id: "t1".into(),
+                name: String::new(),
+                executable: path,
+                arguments: Vec::new(),
+                primary: true,
+            }])
+            .unwrap_or_default();
+        self.save()?;
+        Ok(())
+    }
+
+    pub fn set_fixes_path(
+        &mut self,
+        appid: &str,
+        fixes: PathBuf,
+    ) -> Result<(), ConfigError> {
+        let entry = self
+            .games
+            .get_mut(appid)
+            .ok_or_else(|| ConfigError::Invalid(format!("no fixes entry for App {appid}")))?;
+        entry.fixes = fixes;
+        self.save()?;
+        Ok(())
     }
 
     pub fn set_launch_option_disabled(
@@ -206,6 +460,76 @@ mod tests {
         let entry = config.entry("42").unwrap();
         assert!(entry.enabled);
         assert_eq!(entry.fixes, fixes.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn round_trips_launch_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let fixes = temp.path().join("fixes");
+        let common = temp.path().join("game");
+        fs::create_dir_all(&fixes).unwrap();
+        fs::create_dir_all(&common).unwrap();
+        let target = common.join("game.exe");
+        fs::write(&target, b"x").unwrap();
+        let path = temp.path().join("config.json");
+        {
+            let mut config = Config::open(&path).unwrap();
+            config.upsert("42", &fixes, true).unwrap();
+            config
+                .set_launch_target("42", Some(target.clone()))
+                .unwrap();
+        }
+        let config = Config::open(&path).unwrap();
+        assert_eq!(
+            config.entry("42").unwrap().launch_target.as_ref(),
+            Some(&target.canonicalize().unwrap())
+        );
+    }
+
+    #[test]
+    fn keeps_launch_targets_without_fixes() {
+        let temp = tempfile::tempdir().unwrap();
+        let common = temp.path().join("game");
+        fs::create_dir_all(&common).unwrap();
+        let target = common.join("game.exe");
+        fs::write(&target, b"x").unwrap();
+        let path = temp.path().join("config.json");
+        {
+            let mut config = Config::open(&path).unwrap();
+            config
+                .add_launch_target("42", target.clone(), String::new(), vec!["-nolauncher".into()])
+                .unwrap();
+        }
+        let config = Config::open(&path).unwrap();
+        let entry = config.entry("42").expect("launch-only entry");
+        assert!(entry.launch_only);
+        assert_eq!(entry.launch_targets.len(), 1);
+        assert_eq!(entry.launch_targets[0].executable, target.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn adds_updates_and_removes_launch_targets() {
+        let temp = tempfile::tempdir().unwrap();
+        let fixes = temp.path().join("fixes");
+        let common = temp.path().join("game");
+        fs::create_dir_all(&fixes).unwrap();
+        fs::create_dir_all(&common).unwrap();
+        let first = common.join("a.exe");
+        let second = common.join("b.exe");
+        fs::write(&first, b"a").unwrap();
+        fs::write(&second, b"b").unwrap();
+        let path = temp.path().join("config.json");
+        let mut config = Config::open(&path).unwrap();
+        config.upsert("42", &fixes, true).unwrap();
+        let target = config.add_launch_target("42", first.clone(), "A".into(), vec!["-nolauncher".into()]).unwrap();
+        assert_eq!(target.arguments, vec!["-nolauncher"]);
+        let target2 = config.add_launch_target("42", second, "B".into(), vec![]).unwrap();
+        config.update_launch_target("42", &target2.id, "Bee".into(), vec!["-skip".into()], None).unwrap();
+        assert_eq!(config.entry("42").unwrap().launch_targets.len(), 2);
+        config.remove_launch_target("42", &target.id).unwrap();
+        assert_eq!(config.entry("42").unwrap().launch_targets.len(), 1);
+        let reopened = Config::open(&path).unwrap();
+        assert_eq!(reopened.entry("42").unwrap().launch_targets[0].name, "Bee");
     }
 
     #[test]

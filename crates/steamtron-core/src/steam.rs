@@ -31,6 +31,41 @@ pub struct SteamGame {
     pub manifest: PathBuf,
 }
 
+#[cfg(target_os = "windows")]
+fn steam_registry_path() -> Vec<PathBuf> {
+    use std::process::Command;
+
+    let mut result = Vec::new();
+    for (hive, key, value) in [
+        ("HKCU", "Software\\Valve\\Steam", "SteamPath"),
+        ("HKLM", "SOFTWARE\\WOW6432Node\\Valve\\Steam", "InstallPath"),
+        ("HKLM", "SOFTWARE\\Valve\\Steam", "InstallPath"),
+    ] {
+        let query = format!("{hive}\\{key}");
+        let Ok(output) = Command::new("reg")
+            .args(["query", &query, "/v", value])
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        if let Some(value) = text
+            .lines()
+            .find(|line| line.contains(value))
+            .and_then(|line| line.split_once("REG_SZ"))
+            .map(|(_, value)| value.trim())
+        {
+            if !value.is_empty() {
+                result.push(PathBuf::from(value));
+            }
+        }
+    }
+    result
+}
+
 pub fn steam_root() -> Result<PathBuf, SteamError> {
     if let Some(value) = std::env::var_os("STEAMTRON_STEAM_ROOT") {
         let path = PathBuf::from(value);
@@ -38,16 +73,46 @@ pub fn steam_root() -> Result<PathBuf, SteamError> {
             return Ok(path);
         }
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    for candidate in [
-        home.join(".local/share/Steam"),
-        home.join(".steam/steam"),
-        home.join(".steam/root"),
-    ] {
-        if candidate.join("steamapps").is_dir() {
-            return Ok(candidate);
+    #[cfg(target_os = "windows")]
+    {
+        let mut candidates = Vec::new();
+        if let Some(value) = std::env::var_os("STEAM_PATH") {
+            candidates.push(PathBuf::from(value));
+        }
+        candidates.extend(steam_registry_path());
+        for variable in ["ProgramFiles(x86)", "ProgramFiles"] {
+            if let Some(value) = std::env::var_os(variable) {
+                candidates.push(PathBuf::from(value).join("Steam"));
+            }
+        }
+        for candidate in candidates {
+            if candidate.join("steamapps").is_dir() {
+                return Ok(candidate);
+            }
+        }
+        for candidate in [
+            PathBuf::from("C:/Program Files (x86)/Steam"),
+            PathBuf::from("C:/Program Files/Steam"),
+        ] {
+            if candidate.join("steamapps").is_dir() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        for candidate in [
+            home.join(".local/share/Steam"),
+            home.join(".steam/steam"),
+            home.join(".steam/root"),
+        ] {
+            if candidate.join("steamapps").is_dir() {
+                return Ok(candidate);
+            }
         }
     }
     Err(SteamError::NotFound)
@@ -200,7 +265,12 @@ pub fn installed_appids() -> Result<BTreeSet<String>, SteamError> {
 }
 
 pub fn managed_appids() -> Result<BTreeSet<String>, SteamError> {
-    let root = steam_root()?.join("config/stplug-in");
+    let root = steam_root()?;
+    let root = if root.join("config/stplug-in").is_dir() {
+        root.join("config/stplug-in")
+    } else {
+        root.join("config/lua")
+    };
     let mut result = BTreeSet::new();
     if let Ok(entries) = fs::read_dir(root) {
         for entry in entries.flatten() {

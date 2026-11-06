@@ -8,5 +8,11 @@ sha2 = "0.10"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
+[target.'cfg(windows)'.dependencies]
+winfsp = { version = "0.13", features = ["system"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winfsp = { version = "0.13", features = ["build"] }
+
 [dev-dependencies]
 tempfile = "3"

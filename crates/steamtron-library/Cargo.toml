@@ -13,6 +13,7 @@ thiserror = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 steamtron-core = { path = "../steamtron-core" }
 steamtron-unlock = { path = "../steamtron-unlock" }
+steamtron-auth = { path = "../steamtron-auth" }
 
 [dev-dependencies]
 tempfile = "3"

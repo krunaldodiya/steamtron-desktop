@@ -4,9 +4,11 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
+#[cfg(target_os = "linux")]
 use tauri::Manager;
+mod security;
 use steamtron_core::config::Config;
-use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value, set_launch_option};
+use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
 use steamtron_unlock::{platform_backend, UnlockBackend};
@@ -44,6 +46,105 @@ struct FixView {
     enabled: bool,
     launch_option_set: bool,
     launch_option_error: Option<String>,
+    launch_target: Option<String>,
+    launch_targets: Vec<steamtron_core::config::LaunchTarget>,
+    launch_only: bool,
+}
+
+fn fix_view(entry: &steamtron_core::config::GameEntry) -> FixView {
+    FixView {
+        appid: entry.appid.clone(),
+        fixes: entry.fixes.display().to_string(),
+        enabled: entry.enabled,
+        launch_option_set: launch_option_matches_entry(entry),
+        launch_option_error: None,
+        launch_target: entry
+            .launch_targets
+            .first()
+            .map(|target| target.executable.display().to_string())
+            .or_else(|| entry.launch_target.as_ref().map(|path| path.display().to_string())),
+        launch_targets: entry.launch_targets.clone(),
+        launch_only: entry.launch_only,
+    }
+}
+
+#[cfg(unix)]
+fn overlay_pids(appid: &str) -> Vec<u32> {
+    let needle = format!("/{appid}-");
+    let mut result = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return result;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        let cwd = std::fs::read_link(entry.path().join("cwd"))
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let cmdline = std::fs::read(entry.path().join("cmdline"))
+            .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', " "))
+            .unwrap_or_default();
+        let environ = std::fs::read(entry.path().join("environ"))
+            .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', "\n"))
+            .unwrap_or_default();
+        let belongs_to_overlay = (cwd.contains("steamtron-") && cwd.contains(&needle))
+            || (cmdline.contains("steamtron-") && cmdline.contains(&needle) && cmdline.contains("merged"))
+            || (cmdline.contains("--steamtron-overlay") && cmdline.contains(&format!("--appid {appid}")))
+            || (environ.contains(&format!("SteamAppId={appid}"))
+                || environ.contains(&format!("SteamGameId={appid}")));
+        if belongs_to_overlay {
+            result.push(pid);
+        }
+    }
+    result
+}
+
+#[cfg(unix)]
+fn stop_overlay_processes(appid: &str) -> Result<(), String> {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    let pids = overlay_pids(appid);
+    for pid in &pids {
+        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+    }
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !overlay_pids(appid).is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for pid in overlay_pids(appid) {
+        let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+    }
+    // Drop the FUSE mount if its process was killed rather than asked to exit.
+    let mount = std::env::temp_dir().join("steamtron-");
+    if let Ok(mountinfo) = std::fs::read_to_string("/proc/self/mountinfo") {
+        for line in mountinfo.lines() {
+            let Some(fields) = line.split(" - ").next() else { continue };
+            let Some(path) = fields.split_whitespace().nth(4) else { continue };
+            let mount_text = mount.to_string_lossy();
+            if path.starts_with(mount_text.as_ref()) && path.contains(&format!("/{appid}-")) && path.ends_with("/merged") {
+                let _ = Command::new("fusermount3").args(["-u", "-z", path]).status();
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn game_process_running(appid: &str) -> bool {
+    !overlay_pids(appid).is_empty()
+}
+
+#[cfg(windows)]
+fn game_process_running(_appid: &str) -> bool {
+    false
+}
+
+static RUNNING_GAMES: OnceLock<Mutex<HashMap<String, std::process::Child>>> = OnceLock::new();
+
+fn running_games() -> &'static Mutex<HashMap<String, std::process::Child>> {
+    RUNNING_GAMES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn artwork_for_appid(appid: &str) -> (String, String) {
@@ -84,17 +185,28 @@ fn steamtron_executable() -> Result<std::path::PathBuf, String> {
     ))
 }
 
-fn expected_launch_option(appid: &str, game: &steam::SteamGame, fixes: &std::path::Path) -> Result<String, String> {
+fn expected_launch_option(
+    entry: &steamtron_core::config::GameEntry,
+    game: &steam::SteamGame,
+) -> Result<String, String> {
     let exe = steamtron_executable()?;
-    Ok(launch_option_value(&exe, appid, &game.common, fixes))
+    let fixes = (!entry.fixes.as_os_str().is_empty()).then_some(entry.fixes.as_path());
+    let target = entry.launch_targets.first();
+    Ok(launch_option_value_with_target(
+        &exe,
+        &entry.appid,
+        &game.common,
+        fixes,
+        target.map(|target| target.id.as_str()),
+    ))
 }
 
-fn launch_option_matches_entry(appid: &str, fixes: &std::path::Path) -> bool {
+fn launch_option_matches_entry(entry: &steamtron_core::config::GameEntry) -> bool {
     steam::games()
         .ok()
-        .and_then(|games| games.into_iter().find(|game| game.appid == appid))
-        .and_then(|game| expected_launch_option(appid, &game, fixes).ok())
-        .is_some_and(|expected| has_launch_option_value(appid, &expected))
+        .and_then(|games| games.into_iter().find(|game| game.appid == entry.appid))
+        .and_then(|game| expected_launch_option(entry, &game).ok())
+        .is_some_and(|expected| has_launch_option_value(&entry.appid, &expected))
 }
 
 fn configure_launch_option(appid: &str, enabled: bool) -> Result<bool, String> {
@@ -102,14 +214,24 @@ fn configure_launch_option(appid: &str, enabled: bool) -> Result<bool, String> {
         clear_managed_launch_option(appid).map_err(|error| error.to_string())?;
         return Ok(false);
     }
-    let config = Config::load().map_err(|error| error.to_string())?;
-    let entry = config.entry(appid).ok_or_else(|| "No fixes configured for this game.".to_string())?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    let Some(mut entry) = config.entry(appid).cloned() else {
+        return Err("No fixes configured for this game.".into());
+    };
+    if entry.launch_only && entry.fixes.as_os_str().is_empty() {
+        let fixes = steamtron_core::fixes::fixes_path(appid)
+            .map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&fixes)
+            .map_err(|error| format!("Could not create launch fixes directory: {error}"))?;
+        config.set_fixes_path(appid, fixes.clone()).map_err(|error| error.to_string())?;
+        entry.fixes = fixes;
+    }
     let game = steam::games()
         .map_err(|error| error.to_string())?
         .into_iter()
         .find(|game| game.appid == appid)
         .ok_or_else(|| "This game is not installed in a Steam library.".to_string())?;
-    let value = expected_launch_option(appid, &game, &entry.fixes)?;
+    let value = expected_launch_option(&entry, &game)?;
     set_launch_option(appid, Some(&value)).map_err(|error| error.to_string())?;
     Ok(true)
 }
@@ -125,14 +247,11 @@ fn require_steam_stopped() -> Result<(), String> {
 
 #[cfg(not(target_os = "linux"))]
 fn require_steam_stopped() -> Result<(), String> {
-    Ok(())
-}
-
-fn with_steam_transaction<T>(
-    action: impl FnOnce() -> Result<T, String>,
-) -> Result<T, String> {
-    require_steam_stopped()?;
-    action()
+    if steam_process_running() {
+        Err("Steam is running. Exit Steam completely, then retry this action.".into())
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -330,8 +449,8 @@ fn repair_launch_options() -> Result<Vec<String>, String> {
     let config = Config::load().map_err(|error| error.to_string())?;
     let mut repaired = Vec::new();
     let mut errors = Vec::new();
-    for entry in config.entries().filter(|entry| entry.enabled && !entry.launch_option_disabled) {
-        if launch_option_matches_entry(&entry.appid, &entry.fixes) {
+    for entry in config.entries().filter(|entry| (entry.enabled || entry.launch_only) && !entry.launch_option_disabled) {
+        if launch_option_matches_entry(entry) {
             continue;
         }
         match configure_launch_option(&entry.appid, true) {
@@ -350,6 +469,21 @@ fn repair_launch_options() -> Result<Vec<String>, String> {
 fn repair_library_entries() -> Result<Vec<RepairedGame>, String> {
     require_auth()?;
     repair_missing_appmanifests().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn steam_running() -> bool {
+    steam_process_running()
+}
+
+#[tauri::command]
+fn ensure_steam_running() -> Result<(), String> {
+    require_auth()?;
+    if steam_process_running() {
+        Ok(())
+    } else {
+        Err("Steam is not running. Start Steam, then try Play again.".into())
+    }
 }
 
 #[tauri::command]
@@ -377,6 +511,74 @@ fn steam_process_running() -> bool {
         }
     }
     false
+}
+
+#[cfg(target_os = "windows")]
+fn steam_process_running() -> bool {
+    use std::process::Command;
+    Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq steam.exe", "/NH"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains("steam.exe"))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn stop_steam() -> Result<(), String> {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    if !steam_process_running() {
+        return Ok(());
+    }
+    let output = Command::new("taskkill")
+        .args(["/IM", "steam.exe", "/F"])
+        .output()
+        .map_err(|error| format!("Could not stop Steam: {error}"))?;
+    if !output.status.success() && steam_process_running() {
+        return Err(format!(
+            "Steam shutdown failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while steam_process_running() {
+        if Instant::now() >= deadline {
+            return Err("Steam did not exit within 60 seconds.".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn start_steam() -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let root = steam::steam_root().map_err(|error| error.to_string())?;
+    let executable = root.join("steam.exe");
+    Command::new(&executable)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start Steam: {error}"))?;
+    let startup_deadline = Instant::now() + Duration::from_secs(20);
+    while !steam_process_running() {
+        if Instant::now() >= startup_deadline {
+            return Err("Steam did not start within 20 seconds.".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn restart_steam_impl() -> Result<String, String> {
+    stop_steam()?;
+    start_steam()?;
+    Ok("Steam restarted.".into())
 }
 
 #[cfg(target_os = "linux")]
@@ -439,9 +641,9 @@ fn restart_steam_impl() -> Result<String, String> {
     Ok("Steam restarted.".into())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn restart_steam_impl() -> Result<String, String> {
-    Err("Steam restart is only implemented on Linux.".into())
+    Err("Steam restart is not implemented on this platform.".into())
 }
 
 #[tauri::command]
@@ -636,73 +838,511 @@ fn list_fixes() -> Result<Vec<FixView>, String> {
     let config = Config::load().map_err(|error| error.to_string())?;
     Ok(config
         .entries()
-        .map(|entry| FixView {
-            launch_option_set: launch_option_matches_entry(&entry.appid, &entry.fixes),
-            appid: entry.appid.clone(),
-            fixes: entry.fixes.display().to_string(),
-            enabled: entry.enabled,
-            launch_option_error: None,
-        })
+        .map(fix_view)
         .collect())
+}
+
+fn single_fix_executable(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    fn walk(root: &std::path::Path, current: &std::path::Path, found: &mut Vec<std::path::PathBuf>, depth: usize) {
+        if depth > 6 || found.len() > 1 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(current) else { return; };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(root, &path, found, depth + 1);
+            } else if path.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case("exe")) {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    found.push(relative.to_path_buf());
+                }
+            }
+            if found.len() > 1 { return; }
+        }
+    }
+    let mut found = Vec::new();
+    walk(root, root, &mut found, 0);
+    (found.len() == 1).then(|| found.remove(0))
+}
+
+#[tauri::command]
+fn auto_launch_targets() -> Result<Vec<String>, String> {
+    require_auth()?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    let games = steam::games().map_err(|error| error.to_string())?;
+    let entries: Vec<_> = config.entries().cloned().collect();
+    let mut added = Vec::new();
+    for entry in entries {
+        if !entry.enabled || entry.fixes.as_os_str().is_empty() || !entry.fixes.is_dir() || !entry.launch_targets.is_empty() {
+            continue;
+        }
+        let Some(relative) = single_fix_executable(&entry.fixes) else { continue; };
+        let Some(game) = games.iter().find(|game| game.appid == entry.appid) else { continue; };
+        let target = game.common.join(relative);
+        if !target.is_file() {
+            continue;
+        }
+        if config
+            .add_launch_target(&entry.appid, target, String::new(), Vec::new())
+            .is_ok()
+        {
+            let _ = configure_launch_option(&entry.appid, true);
+            added.push(entry.appid);
+        }
+    }
+    Ok(added)
+}
+
+#[tauri::command]
+fn auto_pin_installed() -> Result<Vec<String>, String> {
+    require_auth()?;
+    let managed = steam::managed_appids().map_err(|error| error.to_string())?;
+    let mut pinned = Vec::new();
+    for appid in managed {
+        if steamtron_library::updates::has_existing_pin(&appid) {
+            let _ = steamtron_library::updates::ensure_pin_lock(&appid);
+            continue;
+        }
+        match steamtron_library::updates::pin_installed(&appid) {
+            Ok(Some(updates)) if !updates.installed.is_empty() => pinned.push(appid),
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    }
+    Ok(pinned)
+}
+
+#[tauri::command]
+fn windows_security_supported() -> bool {
+    security::supported()
+}
+
+#[tauri::command]
+fn windows_security_status(appid: String) -> Result<security::SecurityStatus, String> {
+    require_auth()?;
+    security::status(&appid)
+}
+
+#[tauri::command]
+fn windows_security_apply(
+    appid: String,
+    include_game: Option<bool>,
+) -> Result<security::SecurityStatus, String> {
+    require_auth()?;
+    security::apply(&appid, include_game.unwrap_or(true))
+}
+
+#[tauri::command]
+fn windows_security_remove(appid: String) -> Result<security::SecurityStatus, String> {
+    require_auth()?;
+    security::remove(&appid)
+}
+
+#[tauri::command]
+fn windows_security_repair(appid: String) -> Result<security::SecurityStatus, String> {
+    require_auth()?;
+    security::repair(&appid)
+}
+
+fn installed_game(appid: &str) -> Result<steam::SteamGame, String> {
+    steam::games()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|game| game.appid == appid)
+        .ok_or_else(|| "This game is not installed in a Steam library.".to_string())
+}
+
+fn validate_launch_executable(game: &steam::SteamGame, value: &str) -> Result<std::path::PathBuf, String> {
+    let path = std::path::PathBuf::from(value)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !path.is_file() {
+        return Err("Launch target is not a file.".into());
+    }
+    if !path.starts_with(&game.common) {
+        return Err("Launch target must be inside the game directory.".into());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn pick_launch_executable(appid: String) -> Result<Option<String>, String> {
+    require_auth()?;
+    let game = installed_game(&appid)?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose launch executable")
+        .set_directory(&game.common)
+        .add_filter("Windows executable", &["exe"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = validate_launch_executable(&game, &path.display().to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+fn ensure_launch_only_fixes(
+    config: &mut Config,
+    appid: &str,
+) -> Result<(), String> {
+    let Some(entry) = config.entry(appid) else { return Ok(()); };
+    if !entry.launch_only || !entry.fixes.as_os_str().is_empty() {
+        return Ok(());
+    }
+    let fixes = steamtron_core::fixes::fixes_path(appid)
+        .map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&fixes).map_err(|error| format!("Could not create launch fixes directory: {error}"))?;
+    config.set_fixes_path(appid, fixes).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn add_launch_target(
+    appid: String,
+    executable: String,
+    name: Option<String>,
+    arguments: Option<Vec<String>>,
+) -> Result<FixView, String> {
+    require_auth()?;
+    let game = installed_game(&appid)?;
+    let path = validate_launch_executable(&game, &executable)?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    config
+        .add_launch_target(
+            &appid,
+            path,
+            name.unwrap_or_default(),
+            arguments.unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    ensure_launch_only_fixes(&mut config, &appid)?;
+    let entry = config
+        .entry(&appid)
+        .ok_or_else(|| "Fixes entry disappeared.".to_string())?;
+    let launch = configure_launch_option(&appid, true);
+    let mut view = fix_view(entry);
+    view.launch_option_error = launch.err();
+    Ok(view)
+}
+
+#[tauri::command]
+fn update_launch_target(
+    appid: String,
+    id: String,
+    name: Option<String>,
+    arguments: Option<Vec<String>>,
+) -> Result<FixView, String> {
+    require_auth()?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    config
+        .update_launch_target(
+            &appid,
+            &id,
+            name.unwrap_or_default(),
+            arguments.unwrap_or_default(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+    ensure_launch_only_fixes(&mut config, &appid)?;
+    let entry = config
+        .entry(&appid)
+        .ok_or_else(|| "Fixes entry disappeared.".to_string())?;
+    let launch = configure_launch_option(&appid, true);
+    let mut view = fix_view(entry);
+    view.launch_option_error = launch.err();
+    Ok(view)
+}
+
+#[tauri::command]
+fn remove_launch_target(appid: String, id: String) -> Result<FixView, String> {
+    require_auth()?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    config
+        .remove_launch_target(&appid, &id)
+        .map_err(|error| error.to_string())?;
+    ensure_launch_only_fixes(&mut config, &appid)?;
+    let entry = config
+        .entry(&appid)
+        .ok_or_else(|| "Fixes entry disappeared.".to_string())?;
+    let launch = if entry.launch_only && entry.launch_targets.is_empty() {
+        clear_managed_launch_option(&appid).map(|_| false).map_err(|error| error.to_string())
+    } else {
+        configure_launch_option(&appid, true)
+    };
+    let mut view = fix_view(entry);
+    view.launch_option_error = launch.err();
+    Ok(view)
+}
+
+fn play_target_without_overlay(
+    appid: &str,
+    game: &steam::SteamGame,
+    target: &std::path::Path,
+    arguments: &[String],
+) -> Result<(), String> {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        let (proton, compat) = proton_launcher(appid)
+            .ok_or("could not resolve the Steam Proton runtime")?;
+        let mut command = std::process::Command::new(proton);
+        command
+            .arg("waitforexitandrun")
+            .arg(target)
+            .args(arguments)
+            .env("STEAM_COMPAT_DATA_PATH", compat)
+            .env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam::steam_root().map_err(|error| error.to_string())?)
+            .env("SteamAppId", appid)
+            .env("SteamGameId", appid)
+            .current_dir(&game.common)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let child = command
+            .spawn()
+            .map_err(|error| format!("Could not start the game: {error}"))?;
+        running_games()
+            .lock()
+            .map_err(|_| "Game state lock failed.".to_string())?
+            .insert(appid.to_owned(), child);
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        let child = std::process::Command::new(target)
+            .args(arguments)
+            .current_dir(&game.common)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|error| format!("Could not start the game: {error}"))?;
+        running_games()
+            .lock()
+            .map_err(|_| "Game state lock failed.".to_string())?
+            .insert(appid.to_owned(), child);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn play_game(appid: String, target_id: Option<String>) -> Result<(), String> {
+    require_auth()?;
+    let config = Config::load().map_err(|error| error.to_string())?;
+    let entry = config
+        .entry(&appid)
+        .ok_or_else(|| "Install fixes and choose a launch target first.".to_string())?;
+    // Games without fixes cannot use the overlay path. Let Steam run its
+    // native launcher and launch configuration instead of guessing an exe,
+    // especially for launchers such as The Witcher 3's REDprelauncher.exe.
+    if entry.launch_only {
+        return launch_steam_app(&appid, false);
+    }
+    let selected = target_id
+        .as_deref()
+        .and_then(|id| entry.launch_targets.iter().find(|target| target.id == id))
+        .or_else(|| entry.launch_targets.iter().find(|target| target.primary))
+        .or_else(|| entry.launch_targets.first());
+    let target = selected
+        .map(|target| target.executable.clone())
+        .or_else(|| entry.launch_target.clone());
+    let game = steam::games()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|game| game.appid == appid)
+        .ok_or_else(|| "This game is not installed in a Steam library.".to_string())?;
+    let Some(target) = target else {
+        if entry.launch_only || !entry.enabled {
+            return play_steam_game(appid);
+        }
+        return launch_steam_app(&appid, false);
+    };
+    if !target.starts_with(&game.common) {
+        return Err("Launch target is outside the game directory.".into());
+    }
+    if entry.launch_only || !entry.enabled {
+        let arguments = selected
+            .map(|target| target.arguments.clone())
+            .unwrap_or_default();
+        if game_process_running(&appid) {
+            return Err("This game is already running through SteamTron.".into());
+        }
+        return play_target_without_overlay(&appid, &game, &target, &arguments);
+    }
+    let exe = steamtron_executable()?;
+    let mut args = vec![
+        "--steamtron-overlay".to_owned(),
+        "--appid".to_owned(),
+        appid.clone(),
+        "--common".to_owned(),
+        game.common.display().to_string(),
+        "--fixes".to_owned(),
+        entry.fixes.display().to_string(),
+    ];
+    let selected_id = selected.map(|target| target.id.clone());
+    if let Some(id) = selected_id.as_deref().or(target_id.as_deref()) {
+        args.push("--target-id".to_owned());
+        args.push(id.to_owned());
+    }
+    #[cfg(target_os = "linux")]
+    args.push("--proton".to_owned());
+    args.push("--".to_owned());
+    args.push(target.display().to_string());
+
+    if game_process_running(&appid) {
+        return Err("This game is already running through SteamTron.".into());
+    }
+    let mut games = running_games().lock().map_err(|_| "Game state lock failed.")?;
+    if games.contains_key(&appid) {
+        return Err("This game is already running through SteamTron.".into());
+    }
+    let mut command = if cfg!(unix) {
+        let mut command = std::process::Command::new("setsid");
+        command.arg(exe).args(args);
+        command
+    } else {
+        let mut command = std::process::Command::new(exe);
+        command.args(args);
+        command
+    };
+    let child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start the game: {error}"))?;
+    games.insert(appid, child);
+    Ok(())
+}
+
+fn launch_steam_app(appid: &str, clear_stale_launch_option: bool) -> Result<(), String> {
+    let _game = installed_game(appid)?;
+    // A previous SteamTron/UmuLibrary wrapper may still be attached to this
+    // app. Steam would run that wrapper instead of the plain game and fail if
+    // its old fixes directory no longer exists. A fixes-enabled game without a
+    // launch target must keep its managed launch option.
+    if clear_stale_launch_option {
+        clear_managed_launch_option(appid).map_err(|error| error.to_string())?;
+    }
+    let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
+    let mut steam = if steam_root.join("steam.sh").is_file() {
+        steam_root.join("steam.sh")
+    } else if steam_root.join("steam").is_file() {
+        steam_root.join("steam")
+    } else {
+        std::path::PathBuf::from("steam")
+    };
+    if !steam.is_absolute() {
+        steam = std::path::PathBuf::from("steam");
+    }
+    let mut command = if cfg!(unix) {
+        let mut command = std::process::Command::new("setsid");
+        command.arg(steam).args(["-applaunch", appid]);
+        command
+    } else {
+        let mut command = std::process::Command::new(steam);
+        command.args(["-applaunch", appid]);
+        command
+    };
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start the game through Steam: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn play_steam_game(appid: String) -> Result<(), String> {
+    require_auth()?;
+    launch_steam_app(&appid, true)
+}
+
+#[tauri::command]
+fn stop_game(appid: String) -> Result<(), String> {
+    require_auth()?;
+    let mut games = running_games().lock().map_err(|_| "Game state lock failed.")?;
+    let tracked = games.remove(&appid);
+    if let Some(mut child) = tracked {
+        let _ = child.kill();
+    }
+    drop(games);
+    #[cfg(unix)]
+    {
+        stop_overlay_processes(&appid)?;
+    }
+    #[cfg(windows)]
+    {
+        // The Windows wrapper is tracked by its direct child process; the
+        // tracked process was killed above. No Proton process tree is involved.
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn game_running(appid: String) -> Result<bool, String> {
+    if game_process_running(&appid) {
+        return Ok(true);
+    }
+    let mut games = running_games().lock().map_err(|_| "Game state lock failed.")?;
+    let Some(child) = games.get_mut(&appid) else {
+        return Ok(false);
+    };
+    match child.try_wait().map_err(|error| error.to_string())? {
+        Some(_) => {
+            games.remove(&appid);
+            Ok(false)
+        }
+        None => Ok(true),
+    }
 }
 
 #[tauri::command]
 fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     require_auth()?;
     require_steam_stopped()?;
+    security::require_exception(&appid)?;
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Fixes ZIP", &["zip"])
         .pick_file()
     else {
         return Ok(None);
     };
-    with_steam_transaction(|| {
-        let target = install_zip(&appid, &path).map_err(|error| error.to_string())?;
-        let mut config = Config::load().map_err(|error| error.to_string())?;
-        let entry = config
-            .upsert(&appid, target, true)
-            .map_err(|error| error.to_string())?;
-        config
-            .set_launch_option_disabled(&entry.appid, false)
-            .map_err(|error| error.to_string())?;
-        let launch = configure_launch_option(&entry.appid, true);
-        Ok(Some(FixView {
-            appid: entry.appid.clone(),
-            fixes: entry.fixes.display().to_string(),
-            enabled: entry.enabled,
-            launch_option_set: launch_option_matches_entry(&entry.appid, &entry.fixes),
-            launch_option_error: launch.err(),
-        }))
-    })
+    let target = install_zip(&appid, &path).map_err(|error| error.to_string())?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    let entry = config
+        .upsert(&appid, target, true)
+        .map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&entry.appid, false)
+        .map_err(|error| error.to_string())?;
+    let launch = configure_launch_option(&entry.appid, true);
+    let mut view = fix_view(&entry);
+    view.launch_option_error = launch.err();
+    Ok(Some(view))
 }
 
 #[tauri::command]
 fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
     require_auth()?;
     require_steam_stopped()?;
+    security::require_exception(&appid)?;
     let Some(path) = rfd::FileDialog::new()
         .set_title("Choose fixes folder")
         .pick_folder()
     else {
         return Ok(None);
     };
-    with_steam_transaction(|| {
-        let mut config = Config::load().map_err(|error| error.to_string())?;
-        let entry = config
-            .upsert(&appid, &path, true)
-            .map_err(|error| error.to_string())?;
-        config
-            .set_launch_option_disabled(&entry.appid, false)
-            .map_err(|error| error.to_string())?;
-        let launch = configure_launch_option(&entry.appid, true);
-        Ok(Some(FixView {
-            appid: entry.appid.clone(),
-            fixes: entry.fixes.display().to_string(),
-            enabled: entry.enabled,
-            launch_option_set: launch_option_matches_entry(&entry.appid, &entry.fixes),
-            launch_option_error: launch.err(),
-        }))
-    })
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    let entry = config
+        .upsert(&appid, &path, true)
+        .map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&entry.appid, false)
+        .map_err(|error| error.to_string())?;
+    let launch = configure_launch_option(&entry.appid, true);
+    let mut view = fix_view(&entry);
+    view.launch_option_error = launch.err();
+    Ok(Some(view))
 }
 
 #[tauri::command]
@@ -756,30 +1396,26 @@ fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, 
     else {
         return Ok(None);
     };
-    with_steam_transaction(|| {
-        export_zip(&entry.fixes, &path, &appid).map_err(|error| error.to_string())?;
-        Ok(Some(path.display().to_string()))
-    })
+    export_zip(&entry.fixes, &path, &appid).map_err(|error| error.to_string())?;
+    Ok(Some(path.display().to_string()))
 }
 
 #[tauri::command]
 fn set_enabled(appid: String, enabled: bool) -> Result<String, String> {
     require_auth()?;
+    require_steam_stopped()?;
     let mut config = Config::load().map_err(|error| error.to_string())?;
     let Some(entry) = config.entry(&appid) else {
         return Err("No fixes configured for this game.".into());
     };
     let fixes = entry.fixes.clone();
-    with_steam_transaction(|| {
-        config
-            .upsert(&appid, fixes, enabled)
-            .map_err(|error| error.to_string())?;
-        config
-            .set_launch_option_disabled(&appid, !enabled)
-            .map_err(|error| error.to_string())?;
-        configure_launch_option(&appid, enabled)?;
-        Ok(())
-    })?;
+    config
+        .upsert(&appid, fixes, enabled)
+        .map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&appid, !enabled)
+        .map_err(|error| error.to_string())?;
+    configure_launch_option(&appid, enabled)?;
     Ok(if enabled {
         "Fixes enabled and Steam launch option set. Start Steam manually.".into()
     } else {
@@ -790,14 +1426,12 @@ fn set_enabled(appid: String, enabled: bool) -> Result<String, String> {
 #[tauri::command]
 fn apply_launch_option(appid: String, enabled: bool) -> Result<String, String> {
     require_auth()?;
-    with_steam_transaction(|| {
-        configure_launch_option(&appid, enabled)?;
-        let mut config = Config::load().map_err(|error| error.to_string())?;
-        config
-            .set_launch_option_disabled(&appid, !enabled)
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    })?;
+    require_steam_stopped()?;
+    configure_launch_option(&appid, enabled)?;
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    config
+        .set_launch_option_disabled(&appid, !enabled)
+        .map_err(|error| error.to_string())?;
     Ok(if enabled {
         "Steam launch option set. Start Steam manually.".into()
     } else {
@@ -809,17 +1443,84 @@ fn apply_launch_option(appid: String, enabled: bool) -> Result<String, String> {
 fn remove_fixes(appid: String) -> Result<(), String> {
     require_auth()?;
     require_steam_stopped()?;
-    with_steam_transaction(|| {
-        let mut config = Config::load().map_err(|error| error.to_string())?;
-        config.remove(&appid).map_err(|error| error.to_string())?;
-        clear_managed_launch_option(&appid).map_err(|error| error.to_string())?;
-        Ok(())
-    })
+    let mut config = Config::load().map_err(|error| error.to_string())?;
+    let fixes = config.entry(&appid).map(|entry| entry.fixes.clone());
+    config.remove(&appid).map_err(|error| error.to_string())?;
+    clear_managed_launch_option(&appid).map_err(|error| error.to_string())?;
+
+    // Removing the entry removes its fixes folder as well. This is deliberate:
+    // the folder belongs to that fixes entry, including a folder selected
+    // through "Change fixes folder".
+    if let Some(fixes) = fixes {
+        let fixes = fixes.canonicalize().unwrap_or(fixes);
+        if fixes.is_dir() {
+            std::fs::remove_dir_all(&fixes)
+                .map_err(|error| format!("Could not remove fixes folder {}: {error}", fixes.display()))?;
+        }
+    }
+    Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn proton_launcher(appid: &str) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    use std::fs;
+
+    let root = steam::steam_root().ok()?;
+    let libraries = steam::libraries().ok()?;
+    let mut tool = String::new();
+    if let Ok(config) = fs::read_to_string(root.join("config/config.vdf")) {
+        if let Some(start) = config.find("\"CompatToolMapping\"") {
+            let tail = &config[start..];
+            let marker = format!("\"{appid}\"");
+            if let Some(index) = tail.find(&marker) {
+                let block = &tail[index..];
+                if let Some(name) = block.find("\"name\"") {
+                    let after = &block[name + 6..];
+                    if let Some(open) = after.find('"') {
+                        if let Some(close) = after[open + 1..].find('"') {
+                            tool = after[open + 1..open + 1 + close].to_owned();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let want = match tool.as_str() {
+        "proton_experimental" => "experimental",
+        "proton_9" => "proton 9",
+        "proton_8" => "proton 8",
+        "proton_7" => "proton 7",
+        _ => "",
+    };
+    let mut candidates = Vec::new();
+    for library in &libraries {
+        let common = library.join("common");
+        if let Ok(entries) = fs::read_dir(&common) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                if name.starts_with("proton") && path.join("proton").is_file() {
+                    candidates.push((name, path));
+                }
+            }
+        }
+    }
+    candidates.sort_by_key(|(name, _)| {
+        if !want.is_empty() && name.contains(want) { 0 } else if name.contains("experimental") { 1 } else { 2 }
+    });
+    let (_, proton_dir) = candidates.into_iter().next()?;
+    let proton = proton_dir.join("proton");
+    let compat = libraries
+        .iter()
+        .map(|library| library.join("compatdata").join(appid))
+        .find(|path| path.exists())
+        .or_else(|| libraries.first().map(|library| library.join("compatdata").join(appid)))?;
+    Some((proton, compat))
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn try_overlay_wrapper() -> Option<i32> {
-    use steamtron_overlay::{LinuxOverlay, OverlayGame};
+    use steamtron_overlay::{OverlayGame, PlatformOverlay};
     use std::process::Command;
 
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -830,12 +1531,16 @@ fn try_overlay_wrapper() -> Option<i32> {
     let mut common = None;
     let mut fixes = None;
     let mut command = Vec::new();
+    let mut use_proton = false;
+    let mut target_id = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
             "--appid" => { appid = args.get(index + 1).cloned(); index += 2; }
             "--common" => { common = args.get(index + 1).cloned(); index += 2; }
             "--fixes" => { fixes = args.get(index + 1).cloned(); index += 2; }
+            "--proton" => { use_proton = true; index += 1; }
+            "--target-id" => { target_id = args.get(index + 1).cloned(); index += 2; }
             "--" => { command.extend_from_slice(&args[index + 1..]); break; }
             value => { command.push(value.to_owned()); index += 1; }
         }
@@ -847,16 +1552,99 @@ fn try_overlay_wrapper() -> Option<i32> {
         if command.is_empty() {
             return Err("missing game command after --".into());
         }
-        let game = OverlayGame::new(common, fixes, Some(appid))
+        let game = OverlayGame::new(common.clone(), fixes, Some(appid.clone()))
             .map_err(|error| error.to_string())?;
-        let mut overlay = LinuxOverlay::new(game);
+        let mut overlay = PlatformOverlay::new(game);
         let merged = overlay.mount().map_err(|error| error.to_string())?.to_path_buf();
-        let rewritten: Vec<String> = command.iter().map(|value| overlay.game().rewrite_arg(value, &merged)).collect();
-        let mut process = Command::new(&rewritten[0]);
-        process.args(&rewritten[1..]).current_dir(&merged);
+        // Only PlayTron launches pass --target-id. Steam launches must keep
+        // using the command Steam prepared; otherwise a configured launcher
+        // target silently overrides %command% for Steam Play.
+        let selected_target = Config::load().ok().and_then(|config| {
+            let entry = config.entry(&appid)?;
+            target_id
+                .as_deref()
+                .and_then(|id| entry.launch_targets.iter().find(|target| target.id == id))
+                .cloned()
+        });
+        let mut source_command = command.clone();
+        if let Some(target) = selected_target.as_ref() {
+            // Steam wraps %command% (steam-launch-wrapper -> runtime -> Proton
+            // -> game.exe). Replace only the game executable in that chain so
+            // the Proton/runtime wrappers are preserved. A bare PlayTron
+            // command is just the executable, which is handled by the same
+            // replacement.
+            let common_path = std::path::Path::new(&common);
+            let target_path = target.executable.display().to_string();
+            let replace = command.iter().rposition(|value| {
+                let lower = value.to_ascii_lowercase();
+                lower.ends_with(".exe")
+                    && (std::path::Path::new(value).starts_with(common_path)
+                        || value.contains("merged"))
+            }).or_else(|| command.iter().rposition(|value| value.to_ascii_lowercase().ends_with(".exe")));
+            if let Some(index) = replace {
+                source_command[index] = target_path;
+                source_command.splice(index + 1..index + 1, target.arguments.iter().cloned());
+            } else {
+                source_command = vec![target.executable.display().to_string()];
+                source_command.extend(target.arguments.iter().cloned());
+                source_command.extend(command);
+            }
+        }
+        let rewritten: Vec<String> = source_command
+            .iter()
+            .map(|value| overlay.game().rewrite_arg(value, &merged))
+            .collect();
+        let mut process = if use_proton {
+            let (proton, compat) = proton_launcher(&appid)
+                .ok_or("could not resolve the Steam Proton runtime")?;
+            let mut process = Command::new(proton);
+            process
+                .arg("waitforexitandrun")
+                .arg(&rewritten[0])
+                .env("STEAM_COMPAT_DATA_PATH", compat)
+                .env("STEAM_COMPAT_CLIENT_INSTALL_PATH", steam::steam_root().map_err(|e| e.to_string())?)
+                .env("SteamAppId", &appid)
+                .env("SteamGameId", &appid);
+            process
+        } else {
+            Command::new(&rewritten[0])
+        };
+        // Use the launcher's own directory. Steam's native launch usually
+        // runs a nested executable from its own directory (e.g. Max Payne 3's
+        // PlayMaxPayne3.exe); running it from the game root changes its
+        // relative-path configuration and can terminate it immediately.
+        let workdir = selected_target
+            .as_ref()
+            .map(|target| overlay.game().rewrite_arg(
+                &target.executable.display().to_string(),
+                &merged,
+            ))
+            .and_then(|path| std::path::Path::new(&path).parent().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(|| merged.clone());
+        process.args(&rewritten[1..]).current_dir(workdir);
         if let Some(appid) = overlay.game().appid() {
             process.env("SteamAppId", appid);
             process.env("SteamGameId", appid);
+        }
+        // A fix that ships a launcher loader DLL must win over Wine's
+        // builtin/prefix copy. This is required for Uplay/Ubisoft Connect
+        // fixes, which otherwise start the real Ubisoft launcher.
+        let mut overrides: Vec<String> = ["uplay_r1_loader64", "uplay_r1_loader", "dbdata"]
+            .into_iter()
+            .filter(|name| overlay.game().fixes().join(format!("{name}.dll")).is_file())
+            .map(|name| format!("{name}=n,b"))
+            .collect();
+        if !overrides.is_empty() {
+            if let Some(existing) = std::env::var_os("WINEDLLOVERRIDES") {
+                overrides.extend(
+                    existing
+                        .to_string_lossy()
+                        .split(';')
+                        .filter(|part| !part.trim().is_empty())
+                        .map(str::to_owned),
+                );
+            }
+            process.env("WINEDLLOVERRIDES", overrides.join(";"));
         }
         let status = process.status().map_err(|error| format!("could not launch game: {error}"))?;
         overlay.unmount().map_err(|error| error.to_string())?;
@@ -869,12 +1657,14 @@ fn try_overlay_wrapper() -> Option<i32> {
 }
 
 fn main() {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     if let Some(code) = try_overlay_wrapper() {
         std::process::exit(code);
     }
     tauri::Builder::default()
         .setup(|app| {
+            #[cfg(not(target_os = "linux"))]
+            let _ = app;
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.maximize();
@@ -897,6 +1687,8 @@ fn main() {
             repair_launch_options,
             repair_library_entries,
             restart_steam,
+            steam_running,
+            ensure_steam_running,
             profile_status,
             profile_login,
             profile_logout,
@@ -904,6 +1696,21 @@ fn main() {
             repair_steam_library,
             list_games,
             list_fixes,
+            auto_launch_targets,
+            auto_pin_installed,
+            pick_launch_executable,
+            add_launch_target,
+            update_launch_target,
+            remove_launch_target,
+            play_game,
+            play_steam_game,
+            stop_game,
+            game_running,
+            windows_security_supported,
+            windows_security_status,
+            windows_security_apply,
+            windows_security_remove,
+            windows_security_repair,
             install_fixes,
             use_fixes_folder,
             open_fixes_folder,

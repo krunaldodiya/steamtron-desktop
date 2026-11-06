@@ -149,12 +149,19 @@ fn manifest_store() -> Option<PathBuf> {
     Some(base.join("SLSsteam/manifests"))
 }
 
+fn lua_path(appid: &str) -> Option<PathBuf> {
+    let root = steam::steam_root().ok()?;
+    let stplug = root.join("config/stplug-in");
+    let lua = root.join("config/lua");
+    let directory = if stplug.is_dir() { stplug } else { lua };
+    Some(directory.join(format!("{appid}.lua")))
+}
+
 fn lua_depots(appid: &str) -> BTreeMap<String, String> {
-    let Some(root) = steam::steam_root().ok() else {
+    let Some(path) = lua_path(appid) else {
         return BTreeMap::new();
     };
-    let text = fs::read_to_string(root.join("config/stplug-in").join(format!("{appid}.lua")))
-        .unwrap_or_default();
+    let text = fs::read_to_string(path).unwrap_or_default();
     let regex = Regex::new(r#"setManifestid\s*\(\s*(\d+)\s*,\s*["'](\d+)["']"#).unwrap();
     let mut depots: BTreeMap<String, String> = regex
         .captures_iter(&text)
@@ -462,6 +469,37 @@ pub fn pin_update(appid: &str, date: &str) -> Result<Updates, LibraryError> {
     available_updates(appid)
 }
 
+/// Pin the exact build currently installed in Steam.
+///
+/// This is deliberately different from pinning `latest`: an installation may
+/// finish after the library entry is created, and the archived latest build can
+/// move ahead while the installed content stays on an older complete build.
+/// Re-apply the SLSsteam owned-game ManifestIds lock for an existing pin.
+/// ManifestPins alone is not enough on older SLSsteam builds.
+pub fn ensure_pin_lock(appid: &str) -> Result<(), LibraryError> {
+    let gids = configured_pin_gids(appid)
+        .filter(|depots| !depots.is_empty())
+        .or_else(|| {
+            let depots = preferred_gids(&lua_depots(appid));
+            (!depots.is_empty()).then_some(depots)
+        });
+    if let Some(gids) = gids {
+        write_manifest_pin(appid, Some(&gids))?;
+    }
+    Ok(())
+}
+
+pub fn pin_installed(appid: &str) -> Result<Option<Updates>, LibraryError> {
+    let data = available_updates(appid)?;
+    if data.installed.is_empty() {
+        return Ok(None);
+    }
+    if data.pinned == data.installed {
+        return Ok(Some(data));
+    }
+    pin_update(appid, &data.installed).map(Some)
+}
+
 fn configured_pin_gids(appid: &str) -> Option<BTreeMap<String, String>> {
     let path = config_path()?;
     let text = fs::read_to_string(path).ok()?;
@@ -493,20 +531,139 @@ fn configured_pin_gids(appid: &str) -> Option<BTreeMap<String, String>> {
     if found { Some(depots) } else { None }
 }
 
+fn write_lua_pin(appid: &str, gids: &BTreeMap<String, String>) -> Result<(), LibraryError> {
+    let Some(path) = lua_path(appid) else {
+        return Ok(());
+    };
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let manifest = Regex::new(
+        r#"^(\s*)setManifestid\(\s*(\d+)\s*,\s*["'](\d+)["'](?:\s*,\s*(\d+))?\s*\)\s*$"#,
+    )
+    .unwrap();
+    let mut seen = BTreeSet::new();
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let Some(captures) = manifest.captures(line) else {
+            lines.push(line.to_owned());
+            continue;
+        };
+        let indent = &captures[1];
+        let depot = &captures[2];
+        let Some(gid) = gids.get(depot) else {
+            lines.push(line.to_owned());
+            continue;
+        };
+        seen.insert(depot.to_owned());
+        let size = captures.get(4).map(|value| format!(", {}", value.as_str())).unwrap_or_default();
+        lines.push(format!("{indent}setManifestid({depot}, \"{gid}\"{size})"));
+    }
+    for (depot, gid) in gids {
+        if seen.insert(depot.clone()) {
+            lines.push(format!("setManifestid({depot}, \"{gid}\")"));
+        }
+    }
+    let updated = format!("{}\n", lines.join("\n"));
+    if updated != text {
+        fs::write(&path, updated).map_err(|error| LibraryError::io(&path, error))?;
+    }
+    Ok(())
+}
+
 fn write_manifest_pin(appid: &str, gids: Option<&BTreeMap<String, String>>) -> Result<(), LibraryError> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(gids) = gids {
+            return write_lua_pin(appid, gids);
+        }
+        return Ok(());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        write_sls_manifest_pin(appid, gids)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn write_sls_manifest_pin(appid: &str, gids: Option<&BTreeMap<String, String>>) -> Result<(), LibraryError> {
     let Some(path) = config_path() else {
         return Ok(());
     };
     let Ok(text) = fs::read_to_string(&path) else {
         return Ok(());
     };
+    let previous = configured_pin_gids(appid);
     let updated = splice_app_pin(&text, appid, gids);
+    // ManifestIds is global per depot and caused cross-game manifest
+    // overrides. Keep the app-scoped ManifestPins lock instead.
+    let _ = previous;
     if updated == text {
         return Ok(());
     }
     let temporary = path.with_file_name("config.yaml.steamtron.tmp");
     fs::write(&temporary, updated).map_err(|error| LibraryError::io(&temporary, error))?;
     fs::rename(&temporary, &path).map_err(|error| LibraryError::io(&path, error))
+}
+
+fn splice_manifest_ids(
+    text: &str,
+    gids: Option<&BTreeMap<String, String>>,
+    previous: Option<&BTreeMap<String, String>>,
+) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let Some(start) = lines.iter().position(|line| line.starts_with("ManifestIds:")) else {
+        let Some(gids) = gids else {
+            return text.to_owned();
+        };
+        while lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.pop();
+        }
+        lines.push("ManifestIds:".into());
+        for (depot, gid) in gids {
+            lines.push(format!("  {depot}: {gid}"));
+        }
+        return format!("{}\n", lines.join("\n"));
+    };
+    let mut end = lines.len();
+    for index in start + 1..lines.len() {
+        if !lines[index].trim().is_empty() && !lines[index].starts_with(char::is_whitespace) {
+            end = index;
+            break;
+        }
+    }
+    let entry = Regex::new(r#"^\s+(\d+):\s*["']?(\d+)"#).unwrap();
+    let mut current: BTreeMap<String, String> = BTreeMap::new();
+    let mut prefix = Vec::new();
+    for line in &lines[start + 1..end] {
+        if let Some(captures) = entry.captures(line) {
+            current.insert(captures[1].to_owned(), captures[2].to_owned());
+        } else {
+            prefix.push(line.clone());
+        }
+    }
+    if let Some(gids) = gids {
+        for (depot, gid) in gids {
+            current.insert(depot.clone(), gid.clone());
+        }
+    } else if let Some(previous) = previous {
+        for (depot, gid) in previous {
+            if current.get(depot) == Some(gid) {
+                current.remove(depot);
+            }
+        }
+    }
+    let mut rebuilt = prefix;
+    for (depot, gid) in current {
+        rebuilt.push(format!("  {depot}: {gid}"));
+    }
+    while rebuilt.last().is_some_and(|line| line.trim().is_empty()) {
+        rebuilt.pop();
+    }
+    let mut result = lines[..start + 1].to_vec();
+    result.extend(rebuilt);
+    result.extend_from_slice(&lines[end..]);
+    format!("{}\n", result.join("\n"))
 }
 
 fn splice_app_pin(text: &str, appid: &str, gids: Option<&BTreeMap<String, String>>) -> String {
@@ -593,6 +750,20 @@ mod tests {
         assert!(!updated.contains("  1:"));
         assert!(updated.contains("  2:"));
         assert!(updated.contains("ManifestPins:"));
+    }
+
+    #[test]
+    fn manifest_ids_are_written_and_removed() {
+        let text = "ManifestIds:\n  11: 111\n# next\nOther: yes\n";
+        let mut gids = BTreeMap::new();
+        gids.insert("22".to_owned(), "222".to_owned());
+        let added = splice_manifest_ids(text, Some(&gids), None);
+        assert!(added.contains("  22: 222"));
+        assert!(added.contains("  11: 111"));
+        let removed = splice_manifest_ids(&added, None, Some(&gids));
+        assert!(!removed.contains("  22: 222"));
+        assert!(removed.contains("  11: 111"));
+        assert!(removed.contains("Other: yes"));
     }
 
     #[test]

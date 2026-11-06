@@ -196,3 +196,29 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .activity-row.error .activity-top span { color:#ffb5b5; }
 .activity-row.interrupted .activity-top span { color:#ffd479; }
 .activity-retry { margin-top:8px; padding:4px 9px; font-size:11px; }
+
+.security-option { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.security-option label { display: flex; gap: 8px; align-items: flex-start; font-weight: 600; }
+.security-option .muted { margin-top: 4px; font-size: 12px; }
+
+.security-block .actions { flex-wrap: wrap; }
+.security-block .status { margin-top: 8px; }
+
+.detail-hero-actions { display: flex; gap: 8px; margin-top: 14px; }
+.detail-hero-actions .primary { min-width: 150px; }
+
+.launch-options-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.launch-option-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.launch-option-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.launch-option-copy small { overflow-wrap: anywhere; color: var(--muted); }
+.launch-choice-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.launch-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 10px 12px; }
+.launch-choice small { color: var(--muted); overflow-wrap: anywhere; }
+.detail-hero-actions { margin-top: 20px; }
+
+.launch-editor label { display: block; margin-top: 12px; font-weight: 600; }
+.launch-editor input { width: 100%; margin-top: 5px; }
+.launch-editor .search-row { margin-top: 5px; }
+.launch-editor .modal-actions { margin-top: 18px; }
+
+.launch-editor-path { margin-top: 5px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); overflow-wrap: anywhere; color: var(--muted); }

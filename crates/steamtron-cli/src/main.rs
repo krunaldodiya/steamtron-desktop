@@ -6,9 +6,9 @@ use clap::{Parser, Subcommand};
 use steamtron_core::config::Config;
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
-use steamtron_overlay::{LinuxOverlay, OverlayGame};
-use steamtron_unlock::{platform_backend, UnlockBackend};
 use steamtron_doctor::run as run_doctor;
+use steamtron_overlay::{OverlayGame, PlatformOverlay};
+use steamtron_unlock::{UnlockBackend, platform_backend};
 
 #[derive(Debug, Parser)]
 #[command(name = "steamtron-overlay", version)]
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
             fixes,
         } => {
             let game = OverlayGame::new(common, fixes, appid)?;
-            let overlay = LinuxOverlay::new(game);
+            let overlay = PlatformOverlay::new(game);
             println!("game={}", overlay.game().common().display());
             println!("fixes={}", overlay.game().fixes().display());
             println!("upper={}", overlay.layout().upper.display());
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
             command,
         } => {
             let game = OverlayGame::new(common, fixes, appid)?;
-            let mut overlay = LinuxOverlay::new(game);
+            let mut overlay = PlatformOverlay::new(game);
             let merged = overlay.mount()?.to_path_buf();
             let mut rewritten = Vec::with_capacity(command.len());
             for value in &command {
@@ -111,7 +111,14 @@ fn main() -> Result<()> {
             let workdir = cwd
                 .as_deref()
                 .map(|path| overlay.game().rewrite_cwd(path, &merged))
-                .unwrap_or_else(|| merged.clone());
+                .unwrap_or_else(|| {
+                    rewritten
+                        .first()
+                        .map(std::path::Path::new)
+                        .and_then(std::path::Path::parent)
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or_else(|| merged.clone())
+                });
             let mut process = Command::new(rewritten.first().context("missing command after --")?);
             process.args(&rewritten[1..]).current_dir(workdir);
             if let Some(appid) = overlay.game().appid() {

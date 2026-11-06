@@ -4,6 +4,8 @@ const detailEl = document.querySelector("#detail");
 const searchEl = document.querySelector("#search");
 let games = [];
 let fixes = new Map();
+let playStates = new Map();
+let heroPlayTimer = null;
 let selected = null;
 let detailTab = "general";
 let artworkLoading = false;
@@ -219,11 +221,62 @@ function busy(button, label) {
   };
 }
 
+function showErrorDialog(message, title = "Action failed") {
+  const existing = document.querySelector(".error-dialog-backdrop");
+  if (existing) existing.remove();
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop error-dialog-backdrop";
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>${escape(title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <p>${escape(String(message))}</p>
+    <div class="modal-actions"><button class="primary" id="error-dialog-ok">OK</button></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const close = () => backdrop.remove();
+  backdrop.querySelector(".modal-close").onclick = close;
+  backdrop.querySelector("#error-dialog-ok").onclick = close;
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  backdrop.querySelector("#error-dialog-ok").focus();
+}
+
+function showSteamRunningDialog(action) {
+  const existing = document.querySelector(".steam-running-backdrop");
+  if (existing) existing.remove();
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop steam-running-backdrop";
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Steam is running</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <p>Steam must be fully closed before you can ${escape(action)}.</p>
+    <p class="muted">Close Steam completely, then try again. This prevents Steam from overwriting fixes files and launch options.</p>
+    <div class="modal-actions"><button class="primary" id="steam-running-ok">OK</button></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const close = () => backdrop.remove();
+  backdrop.querySelector(".modal-close").onclick = close;
+  backdrop.querySelector("#steam-running-ok").onclick = close;
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  backdrop.querySelector("#steam-running-ok").focus();
+}
+
+async function ensureSteamClosed(action) {
+  try {
+    if (!await invoke("steam_running")) return true;
+  } catch (error) {
+    status(String(error), true);
+    return false;
+  }
+  showSteamRunningDialog(action);
+  return false;
+}
+
 function status(message, error = false) {
+  if (error) {
+    showErrorDialog(message);
+    return;
+  }
   const node = detailEl.querySelector(".status");
-  if (!node) return;
-  node.textContent = message;
-  node.classList.toggle("error", error);
+  if (node) {
+    node.textContent = message;
+    node.classList.remove("error");
+  }
 }
 
 const authGate = document.querySelector("#auth-gate");
@@ -272,9 +325,13 @@ gateSignin.onclick = async () => {
 
 let toastTimer = null;
 function showToast(message, error = false) {
+  if (error) {
+    showErrorDialog(message);
+    return;
+  }
   const node = document.querySelector("#toast");
   node.textContent = message;
-  node.classList.toggle("error", error);
+  node.classList.remove("error");
   node.classList.add("show");
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
@@ -398,25 +455,303 @@ function renderDetail(game, tab = "general") {
   detailTab = tab;
   const current = fixes.get(game.appid);
   const tabs = [["general", "General"]];
+  // Launch targets are independent of fixes: a game may need a specific
+  // executable/arguments even when the fixes overlay is not involved.
+  if (game.installed) tabs.push(["launch", "Launch options"]);
   if (game.installed) tabs.push(["fixes", "Fixes"]);
   if (game.managed) tabs.push(["updates", "Updates"]);
   if (game.managed || game.installed) tabs.push(["activity", "Activity"]);
   const active = tabs.some(([key]) => key === tab) ? tab : "general";
   const hero = game.hero || game.cover || "";
-  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="quicklooks">${quicklookMarkup(game)}</div></div></div><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === active ? " active" : ""}" data-tab="${key}">${label}</button>`).join("")}</div><div class="game-panel"></div>`;
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="quicklooks">${quicklookMarkup(game)}</div><div class="detail-hero-actions"><button id="hero-play" class="primary">Play</button></div></div></div><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === active ? " active" : ""}" data-tab="${key}">${label}</button>`).join("")}</div><div class="game-panel"></div>`;
   const panel = detailEl.querySelector(".game-panel");
   for (const button of detailEl.querySelectorAll(".game-tab")) button.onclick = () => renderDetail(game, button.dataset.tab);
+  setupHeroPlay(game);
   if (active === "updates" && game.managed) { renderUpdatesPanel(panel, game); return; }
+  if (active === "launch") { renderLaunchOptionsPanel(panel, game, current); return; }
   if (active === "fixes") { renderFixesPanel(panel, game, current); return; }
   if (active === "activity") { renderActivityPanel(panel, game); return; }
   renderGeneralPanel(panel, game);
+}
+
+function parseLaunchArguments(value) {
+  const result = [];
+  const regex = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = regex.exec(value || ""))) {
+    const part = match[1] ?? match[2] ?? match[3];
+    if (part) result.push(part);
+  }
+  return result;
+}
+
+function targetLabel(target) {
+  const name = (target?.name || "").trim();
+  if (name) return name;
+  const path = target?.executable || "";
+  return path.split(/[\\/]/).pop() || "Launcher";
+}
+
+function showLaunchChooser(game, targets) {
+  if (!targets.length) return Promise.resolve(null);
+  if (targets.length === 1) return Promise.resolve(targets[0].id);
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Choose launcher</h2><button class="modal-close" aria-label="Close">×</button></div><p class="muted">More than one launch target is configured for ${escape(game.name)}.</p><div class="launch-choice-list"></div><div class="modal-actions"><button class="secondary" id="launch-choice-cancel">Cancel</button></div></div>`;
+    document.body.appendChild(backdrop);
+    const list = backdrop.querySelector(".launch-choice-list");
+    for (const target of targets) {
+      const button = document.createElement("button");
+      button.className = "launch-choice";
+      const args = target.arguments?.length ? ` · ${target.arguments.join(" ")}` : "";
+      button.innerHTML = `<strong>${escape(targetLabel(target))}</strong><small>${escape(target.executable || "")}${escape(args)}</small>`;
+      button.onclick = () => { backdrop.remove(); resolve(target.id); };
+      list.appendChild(button);
+    }
+    const close = () => { backdrop.remove(); resolve(null); };
+    backdrop.querySelector(".modal-close").onclick = close;
+    backdrop.querySelector("#launch-choice-cancel").onclick = close;
+    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  });
+}
+
+async function playSelected(game) {
+  const current = fixes.get(game.appid);
+  const targets = current?.launch_targets || [];
+  if (!targets.length) {
+    if (!current?.enabled || current?.launch_only) {
+      try {
+        await invoke("play_steam_game", { appid: game.appid });
+        status("Game started through Steam.");
+        return true;
+      } catch (error) { status(String(error), true); return false; }
+    }
+    try {
+      // Fixes are enabled but no explicit target is configured. Steam will
+      // use the managed launch-option wrapper and its original %command%.
+      await invoke("play_game", { appid: game.appid });
+      status("Game started through Steam with fixes.");
+      return true;
+    } catch (error) { status(String(error), true); return false; }
+  }
+  const targetId = await showLaunchChooser(game, targets);
+  if (!targetId) return false;
+  try {
+    await invoke("play_game", { appid: game.appid, targetId });
+    status("Game started through SteamTron.");
+    return true;
+  } catch (error) { status(String(error), true); return false; }
+}
+
+function showLaunchEditor(game, target, onSaved, executableOverride = "") {
+  const editing = Boolean(target);
+  const executablePath = target?.executable || executableOverride;
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal launch-editor"><div class="modal-head"><h2>${editing ? "Edit launcher" : "Add launcher"}</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <label for="launch-name">Launcher name</label>
+    <input id="launch-name" placeholder="Optional; defaults to the executable name" value="${escape(target?.name || "")}">
+    <label>Executable</label>
+    <div class="launch-editor-path">${escape(executablePath)}</div>
+    <label for="launch-arguments">Launch arguments</label>
+    <input id="launch-arguments" placeholder="Optional, for example -nolauncher" value="${escape((target?.arguments || []).join(" "))}">
+    <div class="modal-status" id="launch-editor-status"></div>
+    <div class="modal-actions"><button id="launch-cancel">Cancel</button><button class="primary" id="launch-save">Save</button></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const statusNode = backdrop.querySelector("#launch-editor-status");
+  const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
+  const close = () => backdrop.remove();
+  backdrop.querySelector(".modal-close").onclick = close;
+  backdrop.querySelector("#launch-cancel").onclick = close;
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  backdrop.querySelector("#launch-save").onclick = async () => {
+    if (!executablePath.trim()) { setStatus("Choose an executable.", true); return; }
+    const name = backdrop.querySelector("#launch-name").value;
+    const arguments = parseLaunchArguments(backdrop.querySelector("#launch-arguments").value);
+    const button = backdrop.querySelector("#launch-save");
+    const stop = busy(button, "Saving…");
+    try {
+      const result = editing
+        ? await invoke("update_launch_target", { appid: game.appid, id: target.id, name, arguments })
+        : await invoke("add_launch_target", { appid: game.appid, executable: executablePath, name, arguments });
+      stop();
+      close();
+      onSaved(result);
+    } catch (error) { stop(); setStatus(String(error), true); }
+  };
+}
+
+function renderLaunchOptionsPanel(panel, game, current) {
+  const targets = current?.launch_targets || [];
+  const rows = targets.map((target) => {
+    const args = target.arguments?.length ? target.arguments.join(" ") : "No arguments";
+    return `<div class="launch-option-row" data-id="${escape(target.id)}">
+      <div class="launch-option-copy">
+        <strong>${escape(targetLabel(target))}${target.primary ? ' <span class="badge ok">Primary</span>' : ""}</strong>
+        <small>${escape(target.executable)}</small>
+        <small>${escape(args)}</small>
+      </div>
+      <div class="actions"><button data-edit="${escape(target.id)}">Edit</button><button class="danger" data-delete="${escape(target.id)}">Delete</button></div>
+    </div>`;
+  }).join("");
+  const needsFixes = Boolean(current?.enabled);
+  const note = current?.launch_only
+    ? "This game has no fixes. Play launches it through Steam and its native launcher."
+    : "Launches through the SteamTron overlay and existing Proton prefix.";
+  panel.innerHTML = `<div class="fixes-section">
+    <div class="row"><div class="label">Launch options</div><div class="value">${targets.length} configured</div></div>
+    <p class="muted">Add one or more executables. Play asks which launcher to use when more than one is configured. Arguments such as <code>-nolauncher</code> are passed only to that launcher.</p>
+    <div class="launch-options-list">${rows || '<div class="status">No launch options configured. Add the game executable, or a launcher executable you want to use.</div>'}</div>
+    <div class="actions"><button class="primary" id="add-launch-option">Add launcher…</button></div>
+    <div class="status" id="launch-options-status">${note}</div>
+  </div>`;
+  const statusNode = panel.querySelector("#launch-options-status");
+  const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
+  const refresh = (result) => {
+    fixes.set(game.appid, result);
+    renderDetail(game, "launch");
+  };
+  const add = panel.querySelector("#add-launch-option");
+  if (add) add.onclick = async () => {
+    try {
+      const path = await invoke("pick_launch_executable", { appid: game.appid });
+      if (!path) return;
+      showLaunchEditor(game, null, (result) => {
+        recordActivity("Added launch option", { appid: game.appid, title: game.name });
+        refresh(result);
+      }, path);
+    } catch (error) { setStatus(String(error), true); }
+  };
+  for (const button of panel.querySelectorAll("[data-edit]")) {
+    button.onclick = () => {
+      const target = targets.find((item) => item.id === button.dataset.edit);
+      if (target) showLaunchEditor(game, target, refresh);
+    };
+  }
+  for (const button of panel.querySelectorAll("[data-delete]")) {
+    button.onclick = async () => {
+      if (!window.confirm("Delete this launch option?")) return;
+      const stop = busy(button, "Deleting…");
+      try {
+        const result = await invoke("remove_launch_target", { appid: game.appid, id: button.dataset.delete });
+        stop();
+        refresh(result);
+      } catch (error) { stop(); setStatus(String(error), true); }
+    };
+  }
+}
+
+function setupHeroPlay(game) {
+  if (heroPlayTimer) { clearInterval(heroPlayTimer); heroPlayTimer = null; }
+  const button = detailEl.querySelector("#hero-play");
+  if (!button) return;
+  let running = Boolean(playStates.get(game.appid)?.running);
+  let pending = null;
+  let transitionedAt = 0;
+
+  const render = (isRunning, targets, current) => {
+    playStates.set(game.appid, { running: isRunning });
+    button.classList.toggle("danger", isRunning);
+    if (isRunning) {
+      button.textContent = "Stop";
+      button.disabled = false;
+      button.title = "Stop the game";
+    } else if (!targets.length && (!current?.enabled || current?.launch_only)) {
+      button.textContent = "Play";
+      button.disabled = false;
+      button.title = "Launch through Steam. No SteamTron fixes are required.";
+    } else if (!targets.length) {
+      button.textContent = "Play";
+      button.disabled = false;
+      button.title = current?.enabled
+        ? "Launch through Steam using the configured fixes launch option."
+        : "Launch through Steam.";
+    } else {
+      button.textContent = "Play";
+      button.disabled = false;
+      button.title = targets.length > 1 ? "Choose a launcher and start through SteamTron." : "Launch with the fixes overlay and existing Proton prefix.";
+    }
+  };
+
+  const update = async () => {
+    if (!button.isConnected || pending) return;
+    const current = fixes.get(game.appid);
+    const targets = current?.launch_targets || [];
+    let actual = false;
+    try { actual = await invoke("game_running", { appid: game.appid }); } catch (_error) { return; }
+    if (!button.isConnected || pending) return;
+    if (Date.now() - transitionedAt < 1200) return;
+    running = Boolean(actual);
+    render(running, targets, current);
+  };
+
+  button.onclick = async () => {
+    if (pending) return;
+    if (running) {
+      // Stop immediately in the UI; reconcile with the backend afterwards.
+      running = false;
+      transitionedAt = Date.now();
+      pending = "stopping";
+      render(false, fixes.get(game.appid)?.launch_targets || [], fixes.get(game.appid));
+      button.disabled = true;
+      try {
+        await invoke("stop_game", { appid: game.appid });
+        status("Game stopped.");
+      } catch (error) {
+        status(String(error), true);
+      } finally {
+        pending = null;
+        transitionedAt = Date.now();
+        render(false, fixes.get(game.appid)?.launch_targets || [], fixes.get(game.appid));
+      }
+      return;
+    }
+
+    // Steam must be running before a SteamTron/Steam launch. Do not start it
+    // silently; report the requirement and let the user start Steam.
+    transitionedAt = Date.now();
+    pending = "starting";
+    const current = fixes.get(game.appid);
+    button.textContent = "Checking Steam…";
+    button.disabled = true;
+    try {
+      await invoke("ensure_steam_running");
+    } catch (error) {
+      pending = null;
+      running = false;
+      render(false, current?.launch_targets || [], current);
+      status(String(error), true);
+      return;
+    }
+    render(true, current?.launch_targets || [], current);
+    button.disabled = true;
+    const started = await playSelected(game);
+    pending = null;
+    transitionedAt = Date.now();
+    if (started) {
+      running = true;
+      render(true, fixes.get(game.appid)?.launch_targets || [], fixes.get(game.appid));
+    } else {
+      running = false;
+      render(false, fixes.get(game.appid)?.launch_targets || [], fixes.get(game.appid));
+      button.disabled = false;
+    }
+  };
+
+  render(running, fixes.get(game.appid)?.launch_targets || [], fixes.get(game.appid));
+  update();
+  heroPlayTimer = setInterval(update, 2000);
 }
 
 function renderGeneralPanel(panel, game) {
   panel.innerHTML = `
     <div class="row"><div class="label">Game directory</div><div class="value">${escape(game.common)}</div></div>
     <div class="row"><div class="label">Library status</div><div class="value">${game.managed ? "Managed through SteamTron" : "Managed by Steam"} · ${game.installed ? "content installed" : "content not installed"}</div></div>
-    <div class="actions"><button class="danger" id="remove-library" ${game.managed ? "" : "disabled"}>Remove from library</button></div>
+    <div class="actions">
+      <button class="danger" id="remove-library" ${game.managed ? "" : "disabled"}>Remove from library</button>
+    </div>
     <div class="status">${game.managed ? "Removing this entry deletes the Lua, appmanifest, manifests, and managed symlink. Game content is left intact." : "This game is not managed by SteamTron."}</div>`;
   const removeLibrary = panel.querySelector("#remove-library");
   if (removeLibrary && game.managed) removeLibrary.onclick = async () => {
@@ -437,30 +772,111 @@ function renderGeneralPanel(panel, game) {
 }
 
 function renderFixesPanel(panel, game, current) {
+  const hasFixes = Boolean(current && !current.launch_only);
   panel.innerHTML = `
+    <div class="fixes-section security-block" id="security-block" hidden>
+      <div class="row"><div class="label">Windows Security</div><div class="value" id="security-value">Checking…</div></div>
+      <div class="actions">
+        <button id="security-apply">Add exception</button>
+        <button id="security-remove" disabled>Remove exception</button>
+        <button id="security-repair">Repair</button>
+      </div>
+      <div class="status" id="security-status"></div>
+    </div>
+    <div class="fixes-separator"></div>
     <div class="fixes-section">
       <div class="actions">
         <button class="primary" id="install">Import fixes ZIP</button>
-        <button id="export" ${current ? "" : "disabled"}>Export fixes ZIP</button>
+        <button id="export" ${hasFixes ? "" : "disabled"}>Export fixes ZIP</button>
       </div>
     </div>
     <div class="fixes-separator"></div>
     <div class="fixes-section">
-      <div class="row"><div class="label">Current fixes location</div><div class="value">${current ? escape(current.fixes) : "No fixes installed"}</div></div>
-      <div class="actions"><button id="open-folder" ${current ? "" : "disabled"}>Open fixes folder</button><button id="use-folder">Change fixes folder…</button></div>
+      <div class="row"><div class="label">Current fixes location</div><div class="value">${hasFixes ? escape(current.fixes) : "No fixes installed"}</div></div>
+      <div class="actions"><button id="open-folder" ${hasFixes ? "" : "disabled"}>Open fixes folder</button><button id="use-folder">Change fixes folder…</button></div>
     </div>
     <div class="fixes-separator"></div>
     <div class="fixes-section">
       <div class="row"><div class="label">Steam launch option</div><div class="value">${current?.launch_option_set ? "Set" : "Not set"}</div></div>
       <div class="actions">
-        <button id="toggle" ${current ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
-        <button class="danger" id="remove" ${current ? "" : "disabled"}>Remove fixes entry</button>
-        <button id="launch-option" ${current ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
+        <button id="toggle" ${hasFixes ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
+        <button class="danger" id="remove" ${hasFixes ? "" : "disabled"}>Remove fixes entry</button>
+        <button id="launch-option" ${hasFixes ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
       </div>
     </div>
-    <div class="status${current && current.enabled && !current.launch_option_set ? " error" : ""}">${current?.launch_option_error ? escape(current.launch_option_error) : current ? (current.enabled && !current.launch_option_set ? "Fixes are enabled, but the Steam launch option is not set. Click Set launch option, then fully restart Steam." : current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "Import a ZIP or choose an existing fixes folder."}</div>`;
+    <div class="status${hasFixes && current.enabled && !current.launch_option_set ? " error" : ""}">${current?.launch_option_error ? escape(current.launch_option_error) : hasFixes ? (current.enabled && !current.launch_option_set ? "Fixes are enabled, but the Steam launch option is not set. Click Set launch option, then fully restart Steam." : current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "No fixes installed. Launch options are available independently."}</div>`;
+  const securityBlock = panel.querySelector("#security-block");
+  const securityValue = panel.querySelector("#security-value");
+  const securityStatus = panel.querySelector("#security-status");
+  const securityApply = panel.querySelector("#security-apply");
+  const securityRemove = panel.querySelector("#security-remove");
+  const securityRepair = panel.querySelector("#security-repair");
+  const loadSecurity = async () => {
+    try {
+      const state = await invoke("windows_security_status", { appid: game.appid });
+      securityBlock.hidden = false;
+      securityValue.textContent = state.missing ? `${state.missing} path(s) not excluded` : "Active";
+      securityStatus.textContent = state.message + (state.detections.length ? ` Detections: ${state.detections.map((item) => item.threat).join(", ")}.` : "");
+      securityStatus.classList.toggle("error", state.missing > 0 || !state.defender);
+      securityApply.disabled = state.missing === 0;
+      securityRemove.disabled = state.missing === state.paths.length;
+    } catch (error) {
+      securityBlock.hidden = false;
+      securityValue.textContent = "Unavailable";
+      securityStatus.textContent = String(error);
+      securityStatus.classList.add("error");
+    }
+  };
+  const ensureSecurity = async () => {
+    try {
+      if (!await invoke("windows_security_supported")) return true;
+      const state = await invoke("windows_security_status", { appid: game.appid });
+      if (state.defender && state.realtime && state.missing > 0) {
+        status("Add the Windows Security exception for this game before applying fixes.", true);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      status(String(error), true);
+      return false;
+    }
+  };
+  invoke("windows_security_supported").then((supported) => { if (supported) loadSecurity(); }).catch(() => {});
+  securityApply.onclick = async () => {
+    if (!window.confirm(`Add scoped Microsoft Defender exclusions for ${game.name}? This does not disable antivirus. It requires Windows admin approval.`)) return;
+    const stop = busy(securityApply, "Adding…");
+    try {
+      await invoke("windows_security_apply", { appid: game.appid, includeGame: true });
+      await loadSecurity();
+      recordActivity("Added Windows Security exception", { appid: game.appid, title: game.name });
+      status("Windows Security exception added for this game.");
+    } catch (error) { status(String(error), true); }
+    finally { stop(); }
+  };
+  securityRemove.onclick = async () => {
+    if (!window.confirm(`Remove the Windows Security exclusions for ${game.name}?`)) return;
+    const stop = busy(securityRemove, "Removing…");
+    try {
+      await invoke("windows_security_remove", { appid: game.appid });
+      await loadSecurity();
+      recordActivity("Removed Windows Security exception", { appid: game.appid, title: game.name });
+      status("Windows Security exception removed.");
+    } catch (error) { status(String(error), true); }
+    finally { stop(); }
+  };
+  securityRepair.onclick = async () => {
+    const stop = busy(securityRepair, "Repairing…");
+    try {
+      await invoke("windows_security_repair", { appid: game.appid });
+      await loadSecurity();
+      status("Windows Security exception repaired.");
+    } catch (error) { status(String(error), true); }
+    finally { stop(); }
+  };
   panel.querySelector("#install").onclick = async () => {
     const button = panel.querySelector("#install");
+    if (!await ensureSteamClosed("import fixes")) return;
+    if (!await ensureSecurity()) return;
     const stop = busy(button, "Installing…");
     try {
       status("Choose a fixes ZIP…");
@@ -487,6 +903,8 @@ function renderFixesPanel(panel, game, current) {
   };
   panel.querySelector("#use-folder").onclick = async () => {
     const button = panel.querySelector("#use-folder");
+    if (!await ensureSteamClosed("change the fixes folder")) return;
+    if (!await ensureSecurity()) return;
     const stop = busy(button, "Opening…");
     try {
       const result = await invoke("use_fixes_folder", { appid: game.appid });
@@ -505,6 +923,7 @@ function renderFixesPanel(panel, game, current) {
   };
   panel.querySelector("#export").onclick = async () => {
     const button = panel.querySelector("#export");
+    if (!await ensureSteamClosed("export fixes")) return;
     const stop = busy(button, "Exporting…");
     try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid, title: game.name }); status(result ? `Exported ${result}` : "Export cancelled."); }
     catch (error) { status(String(error), true); }
@@ -512,6 +931,7 @@ function renderFixesPanel(panel, game, current) {
   };
   panel.querySelector("#toggle").onclick = async () => {
     const button = panel.querySelector("#toggle");
+    if (!await ensureSteamClosed(current.enabled ? "disable fixes" : "enable fixes")) return;
     const stop = busy(button, current.enabled ? "Disabling…" : "Enabling…");
     try {
       const message = await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled });
@@ -529,13 +949,16 @@ function renderFixesPanel(panel, game, current) {
   };
   panel.querySelector("#launch-option").onclick = async () => {
     const button = panel.querySelector("#launch-option");
+    if (!await ensureSteamClosed(current?.launch_option_set ? "clear the launch option" : "set the launch option")) return;
     const enabled = !current?.launch_option_set;
     const stop = busy(button, enabled ? "Setting…" : "Clearing…");
     try { const message = await invoke("apply_launch_option", { appid: game.appid, enabled }); await loadFixes(); recordActivity(enabled ? "Set launch option" : "Cleared launch option", { appid: game.appid, title: game.name }); markRestartRequired(`${game.name} launch option changed. Restart Steam to apply.`); stop(); renderDetail(game, "fixes"); status(message); }
     catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#remove").onclick = async () => {
+    if (!window.confirm("Remove this fixes entry and delete its fixes folder from disk?")) return;
     const button = panel.querySelector("#remove");
+    if (!await ensureSteamClosed("remove fixes")) return;
     const stop = busy(button, "Removing fixes…");
     try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); recordActivity("Removed fixes", { appid: game.appid, title: game.name }); markRestartRequired(`${game.name} fixes removed. Restart Steam to apply.`); stop(); renderDetail(game, "fixes"); renderGames(); status("Fixes entry removed."); }
     catch (error) { stop(); status(String(error), true); }
@@ -648,6 +1071,11 @@ async function load() {
   try {
     games = await invoke("list_games");
     await loadFixes();
+    try {
+      const added = await invoke("auto_launch_targets");
+      if (added.length) await loadFixes();
+    } catch (_error) { /* non-fatal */ }
+    try { await invoke("auto_pin_installed"); } catch (_error) { /* non-fatal */ }
     if (!games.some((game) => game.appid === selected)) {
       selected = games[0]?.appid || null;
       detailTab = "general";
@@ -810,7 +1238,7 @@ function renderSettings() {
 function showAddGame() {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="modal-actions" id="add-actions" hidden><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="security-option" id="add-security-option" hidden><label><input type="checkbox" id="add-security"> Add a Windows Security exception before fixes</label><div class="muted">Adds scoped Microsoft Defender exclusions for SteamTron's fix, upper-layer, and mounted-overlay paths, plus the game folder. It does not disable antivirus. Requires Windows admin approval.</div></div><div class="modal-actions" id="add-actions" hidden><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
   document.body.appendChild(backdrop);
   const queryInput = backdrop.querySelector("#add-search");
   const searchButton = backdrop.querySelector("#add-search-button");
@@ -820,7 +1248,10 @@ function showAddGame() {
   const submit = backdrop.querySelector("#add-submit");
   const importButton = backdrop.querySelector("#add-import");
   const actionRow = backdrop.querySelector("#add-actions");
+  const securityOption = backdrop.querySelector("#add-security-option");
+  const securityCheck = backdrop.querySelector("#add-security");
   let selected = null;
+  invoke("windows_security_supported").then((supported) => { if (supported) securityOption.hidden = false; }).catch(() => {});
   const close = () => backdrop.remove();
   const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
   const clearSelected = () => {
@@ -887,8 +1318,19 @@ function showAddGame() {
     try {
       const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name });
       updateActivity(operationId, { status: "success", detail: "Library entry added." });
+      let securityWarning = "";
+      if (securityCheck.checked) {
+        setStatus(`Approve the Windows Security exception for ${selected.name}…`);
+        await nextPaint();
+        try {
+          await invoke("windows_security_apply", { appid: result.appid, includeGame: true });
+        } catch (error) {
+          securityWarning = `Game added, but the Windows Security exception was not applied: ${error}`;
+        }
+      }
       stop();
       await finish(result);
+      if (securityWarning) setStatus(securityWarning, true);
     } catch (error) {
       updateActivity(operationId, { status: "error", detail: String(error) });
       stop();

@@ -151,6 +151,20 @@ pub fn install_zip(appid: &str, zip_path: &Path) -> Result<PathBuf, FixesError> 
                 fs::File::create(&destination).map_err(|error| FixesError::io(&destination, error))?;
             std::io::copy(&mut entry, &mut output)
                 .map_err(|error| FixesError::io(&destination, error))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut mode = entry.unix_mode().unwrap_or(0o644);
+                if destination
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| value.eq_ignore_ascii_case("exe"))
+                {
+                    mode |= 0o111;
+                }
+                fs::set_permissions(&destination, fs::Permissions::from_mode(mode))
+                    .map_err(|error| FixesError::io(&destination, error))?;
+            }
         }
         if count == 0 {
             return Err(FixesError::Invalid("ZIP is empty".into()));

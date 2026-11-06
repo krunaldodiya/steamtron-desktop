@@ -61,6 +61,19 @@ struct Entry {
 }
 
 fn data_home() -> PathBuf {
+    if let Some(value) = std::env::var_os("STEAMTRON_DATA_HOME") {
+        let path = PathBuf::from(value);
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(value) = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA")) {
+        let path = PathBuf::from(value);
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
     if let Some(value) = std::env::var_os("XDG_DATA_HOME") {
         let path = PathBuf::from(value);
         if !path.as_os_str().is_empty() {
@@ -74,6 +87,13 @@ fn data_home() -> PathBuf {
 }
 
 fn config_home() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    if let Some(value) = std::env::var_os("APPDATA") {
+        let path = PathBuf::from(value);
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
     if let Some(value) = std::env::var_os("XDG_CONFIG_HOME") {
         let path = PathBuf::from(value);
         if !path.as_os_str().is_empty() {

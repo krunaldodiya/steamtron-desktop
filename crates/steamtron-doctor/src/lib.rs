@@ -1,6 +1,8 @@
-use std::path::Path;
 use std::collections::BTreeSet;
+#[cfg(target_os = "linux")]
 use std::fs;
+#[cfg(target_os = "linux")]
+use std::path::Path;
 use std::process::Command;
 
 use serde::Serialize;
@@ -71,30 +73,38 @@ pub fn run() -> DoctorReport {
                 "Steam is not running; start it manually after repairs.".to_string()
             },
         ));
-        let injected = running && steam_injected();
-        checks.push(check(
-            "steam-injection",
-            "SLSsteam injection",
-            if !running {
-                CheckStatus::Warning
-            } else if injected {
-                CheckStatus::Ok
-            } else {
-                CheckStatus::Warning
-            },
-            if !running {
-                "Steam is not running; start it through the SLSsteam wrapper.".to_string()
-            } else if injected {
-                "Steam is running with SLSsteam LD_AUDIT injection.".to_string()
-            } else {
-                "Steam is running without SLSsteam injection. Exit Steam and start it through the SLSsteam wrapper.".to_string()
-            },
-        ));
+        #[cfg(target_os = "linux")]
+        {
+            let injected = running && steam_injected();
+            checks.push(check(
+                "steam-injection",
+                "SLSsteam injection",
+                if !running {
+                    CheckStatus::Warning
+                } else if injected {
+                    CheckStatus::Ok
+                } else {
+                    CheckStatus::Warning
+                },
+                if !running {
+                    "Steam is not running; start it through the SLSsteam wrapper.".to_string()
+                } else if injected {
+                    "Steam is running with SLSsteam LD_AUDIT injection.".to_string()
+                } else {
+                    "Steam is running without SLSsteam injection. Exit Steam and start it through the SLSsteam wrapper.".to_string()
+                },
+            ));
+        }
+        let lua_dir = if root.join("config/stplug-in").is_dir() {
+            root.join("config/stplug-in")
+        } else {
+            root.join("config/lua")
+        };
         checks.push(check(
             "stplug-in",
             "Lua manifest directory",
-            if root.join("config/stplug-in").is_dir() { CheckStatus::Ok } else { CheckStatus::Warning },
-            root.join("config/stplug-in").display().to_string(),
+            if lua_dir.is_dir() { CheckStatus::Ok } else { CheckStatus::Warning },
+            lua_dir.display().to_string(),
         ));
     }
 
@@ -190,10 +200,26 @@ pub fn run() -> DoctorReport {
         ));
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        let winfsp = winfsp_installed();
+        checks.push(check(
+            "overlay-tools",
+            "WinFsp overlay runtime",
+            if winfsp { CheckStatus::Ok } else { CheckStatus::Error },
+            if winfsp {
+                "WinFsp is installed."
+            } else {
+                "Install WinFsp before launching games through the fixes overlay."
+            },
+        ));
+    }
+
     let healthy = checks.iter().all(|item| item.status != CheckStatus::Error);
     DoctorReport { healthy, checks }
 }
 
+#[cfg(target_os = "linux")]
 pub fn steam_injected() -> bool {
     let Ok(entries) = fs::read_dir("/proc") else {
         return false;
@@ -221,6 +247,7 @@ pub fn steam_injected() -> bool {
     false
 }
 
+#[cfg(target_os = "linux")]
 fn steam_running() -> bool {
     let Ok(entries) = fs::read_dir("/proc") else {
         return false;
@@ -239,6 +266,44 @@ fn steam_running() -> bool {
     false
 }
 
+#[cfg(target_os = "windows")]
+fn steam_running() -> bool {
+    Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq steam.exe", "/NH"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains("steam.exe"))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn winfsp_installed() -> bool {
+    let mut candidates = Vec::new();
+    for variable in ["ProgramFiles(x86)", "ProgramFiles"] {
+        if let Some(value) = std::env::var_os(variable) {
+            candidates.push(std::path::PathBuf::from(value).join("WinFsp/bin/winfsp-x64.dll"));
+        }
+    }
+    for key in ["HKLM\\SOFTWARE\\WOW6432Node\\WinFsp", "HKLM\\SOFTWARE\\WinFsp"] {
+        if let Ok(output) = Command::new("reg")
+            .args(["query", key, "/v", "InstallDir"])
+            .output()
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                if let Some(value) = text
+                    .lines()
+                    .find(|line| line.contains("InstallDir"))
+                    .and_then(|line| line.split_once("REG_SZ"))
+                    .map(|(_, value)| value.trim().trim_matches('"'))
+                {
+                    candidates.push(std::path::PathBuf::from(value).join("bin/winfsp-x64.dll"));
+                }
+            }
+        }
+    }
+    candidates.into_iter().any(|path| path.is_file())
+}
+
 #[cfg(target_os = "linux")]
 fn which(name: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
@@ -249,6 +314,7 @@ fn which(name: &str) -> Option<std::path::PathBuf> {
 
 /// Launch the platform helper installer. The caller must present this as a
 /// user-consented repair, never as an automatic background action.
+#[cfg(target_os = "linux")]
 fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
 }

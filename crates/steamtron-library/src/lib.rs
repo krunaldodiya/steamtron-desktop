@@ -1,4 +1,4 @@
-//! Add Steam library entries from a Lua/manifest ZIP or the public SteamML bundle.
+//! Add Steam library entries from a Lua/manifest ZIP or a provider bundle.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -18,7 +18,6 @@ pub mod updates;
 pub mod backup;
 
 const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;
-const STEAMML_URL: &str = "https://pub-5b6d3b7c03fd4ac1afb5bd3017850e20.r2.dev/{appid}.zip";
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
@@ -213,8 +212,31 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
     }
-    let response = reqwest::blocking::Client::new()
-        .get(STEAMML_URL.replace("{appid}", appid))
+
+    // The signed-in UMUTron API owns provider priority: Ryuu first, then
+    // Luie, then SteamML. Do not silently use the old public SteamML archive
+    // here; it can point at a different game build than the selected fix.
+    download_from_api(appid)
+}
+
+fn download_from_api(appid: &str) -> Result<Bundle, LibraryError> {
+    let token = steamtron_auth::access_token();
+    if token.is_empty() {
+        return Err(LibraryError::Download(
+            "sign in to use the UMUTron manifest providers".into(),
+        ));
+    }
+    let base = steamtron_auth::api_base();
+    // Vercel can take tens of seconds to assemble a full manifest archive.
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| LibraryError::Download(error.to_string()))?;
+    let response = client
+        .get(format!("{base}/api/download/{appid}"))
+        .query(&[("file_type", "manifest")])
+        .bearer_auth(token)
         .header("Accept", "application/zip")
         .header("User-Agent", "steamtron-desktop")
         .send()
@@ -228,7 +250,9 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     if bytes.len() as u64 > MAX_ARCHIVE {
         return Err(LibraryError::Archive("archive is too large".into()));
     }
-    parse_bundle(&bytes)
+    let mut bundle = parse_bundle(&bytes)?;
+    bundle.lua = canonical_lua(&bundle.lua);
+    Ok(bundle)
 }
 
 fn choose_library(libraries: &[PathBuf]) -> Result<PathBuf, LibraryError> {
@@ -301,7 +325,12 @@ pub fn repair_missing_appmanifests() -> Result<Vec<RepairedGame>, LibraryError> 
         if acf.exists() {
             continue;
         }
-        let text = acf_text(&appid, &sanitize_title(&title), &depots);
+        let text = acf_text(
+            &appid,
+            &sanitize_title(&title),
+            &depots,
+            &library.join("common").join(sanitize_title(&title)),
+        );
         let temporary = acf.with_extension("acf.steamtron.tmp");
         fs::write(&temporary, text).map_err(|error| LibraryError::io(&temporary, error))?;
         fs::rename(&temporary, &acf).map_err(|error| LibraryError::io(&acf, error))?;
@@ -466,6 +495,34 @@ pub fn bundle_from_zip(path: &Path) -> Result<Bundle, LibraryError> {
     parse_bundle(&bytes)
 }
 
+/// SteamTools expects keyed addappid entries to use index 1. Ryuu's
+/// archive keeps its raw `addappid(app, 0, key)` form, while lua.tools and
+/// the canonical Lua endpoint use `addappid(app, 1, key)`.
+pub fn canonical_lua(content: &str) -> String {
+    let keyed = Regex::new(r"addappid\(\s*(\d+)\s*,\s*0\s*,").unwrap();
+    let manifest = Regex::new(
+        r#"^(\s*)(--\s*)?setManifestid\(\s*(\d+)\s*,\s*["'](\d+)["'](?:\s*,\s*(\d+))?\s*\)"#,
+    )
+    .unwrap();
+    let mut out = String::with_capacity(content.len());
+    for line in content.lines() {
+        if let Some(captures) = manifest.captures(line) {
+            let indent = &captures[1];
+            let depot = &captures[3];
+            let manifest_id = &captures[4];
+            let size = captures.get(5).map(|value| value.as_str());
+            out.push_str(&format!(
+                "{indent}setManifestid({depot}, \"{manifest_id}\"{})\n",
+                size.map(|size| format!(", {size}")).unwrap_or_default()
+            ));
+            continue;
+        }
+        out.push_str(&keyed.replace(line, "addappid(${1}, 1,"));
+        out.push('\n');
+    }
+    out
+}
+
 pub fn parse_bundle(bytes: &[u8]) -> Result<Bundle, LibraryError> {
     let mut archive = ZipArchive::new(Cursor::new(bytes))
         .map_err(|error| LibraryError::Archive(error.to_string()))?;
@@ -536,23 +593,17 @@ pub fn add_bundle(
         .map_err(|error| LibraryError::Archive(error.to_string()))?;
 
     let depots = parse_depots(&bundle.lua)?;
-    let text = acf_text(appid, &title, &depots);
+    let text = acf_text(appid, &title, &depots, &steamapps.join("common").join(&title));
     let temporary = acf.with_extension("acf.steamtron.tmp");
     fs::write(&temporary, text).map_err(|error| LibraryError::io(&temporary, error))?;
     fs::rename(&temporary, &acf).map_err(|error| LibraryError::io(&acf, error))?;
 
-    let mut pinned = None;
-    let mut pin_error = None;
-    if !existing_pin {
-        if let Ok(updates) = updates::available_updates(appid) {
-            if !updates.latest.is_empty() {
-                match updates::pin_update(appid, &updates.latest) {
-                    Ok(_) => pinned = Some(updates.latest),
-                    Err(error) => pin_error = Some(error.to_string()),
-                }
-            }
-        }
-    }
+    // Do not pin the archived latest here. The game has not downloaded yet,
+    // so there is no installed build to lock. The desktop calls
+    // auto_pin_installed after Steam reports complete installed content.
+    let pinned = None;
+    let pin_error = None;
+    let _ = existing_pin;
 
     Ok(AddedGame {
         appid: appid.to_owned(),
@@ -612,21 +663,56 @@ fn sanitize_title(title: &str) -> String {
     }
 }
 
-fn acf_text(appid: &str, title: &str, depots: &BTreeMap<String, (String, u64)>) -> String {
+fn content_size(path: &Path) -> u64 {
+    if !path.is_dir() {
+        return 0;
+    }
+    let mut total = 0u64;
+    let mut pending = vec![path.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                pending.push(path);
+            } else if metadata.is_file() {
+                total = total.saturating_add(metadata.len());
+            }
+        }
+    }
+    total
+}
+
+fn acf_text(
+    appid: &str,
+    title: &str,
+    depots: &BTreeMap<String, (String, u64)>,
+    common: &Path,
+) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+    let size_on_disk = content_size(common);
+    let state = if size_on_disk > 0 { 4 } else { 2 };
     let mut lines = vec![
         "\"AppState\"".to_owned(),
         "{".to_owned(),
         format!("\t\"appid\"\t\t\"{appid}\""),
         "\t\"Universe\"\t\t\"1\"".to_owned(),
         format!("\t\"name\"\t\t\"{title}\""),
-        "\t\"StateFlags\"\t\t\"2\"".to_owned(),
+        format!("\t\"StateFlags\"\t\t\"{state}\""),
         format!("\t\"installdir\"\t\t\"{title}\""),
         format!("\t\"LastUpdated\"\t\t\"{now}\""),
-        "\t\"SizeOnDisk\"\t\t\"0\"".to_owned(),
+        format!("\t\"SizeOnDisk\"\t\t\"{size_on_disk}\""),
         "\t\"StagingSize\"\t\t\"0\"".to_owned(),
         "\t\"buildid\"\t\t\"0\"".to_owned(),
         "\t\"LastOwner\"\t\t\"0\"".to_owned(),
@@ -668,6 +754,38 @@ fn acf_text(appid: &str, title: &str, depots: &BTreeMap<String, (String, u64)>) 
 
 #[cfg(test)]
 mod tests {
+    use super::canonical_lua;
+
+    #[test]
+    fn appmanifest_marks_existing_content_installed() {
+        let temp = tempfile::tempdir().unwrap();
+        let common = temp.path().join("Game");
+        std::fs::create_dir_all(&common).unwrap();
+        std::fs::write(common.join("data.bin"), b"abc").unwrap();
+        let depots = std::collections::BTreeMap::new();
+        let text = acf_text("42", "Game", &depots, &common);
+        assert!(text.contains("\t\"StateFlags\"\t\t\"4\""));
+        assert!(text.contains("\t\"SizeOnDisk\"\t\t\"3\""));
+    }
+
+    #[test]
+    fn canonicalizes_ryuu_keyed_addappid() {
+        let lua = "addappid(204104,0,\"abc\")\naddappid(204100)\n";
+        assert_eq!(
+            canonical_lua(lua),
+            "addappid(204104, 1,\"abc\")\naddappid(204100)\n"
+        );
+    }
+
+    #[test]
+    fn canonicalizes_manifest_lines() {
+        let lua = "setManifestid(204104,\"123\")\n--setManifestid(204105, \"456\", 789)\n";
+        assert_eq!(
+            canonical_lua(lua),
+            "setManifestid(204104, \"123\")\nsetManifestid(204105, \"456\", 789)\n"
+        );
+    }
+
     use super::*;
     use std::io::Write;
     use zip::write::SimpleFileOptions;

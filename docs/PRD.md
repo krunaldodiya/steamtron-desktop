@@ -124,7 +124,7 @@ docs/                   PRD and engineering documentation
 - Fallback: OpenSteamTool
 - Steam discovery: `STEAM_PATH`, Program Files, registry-backed install path
 - Lua directory: `<Steam>/config/stplug-in`, falling back to `<Steam>/config/lua`
-- Backend files: `OpenSteamTool.dll`, `dwmapi.dll`, `opensteamtool.toml`
+- Backend files: `OpenSteamTool.dll`, `dwmapi.dll`, `xinput1_4.dll`, `opensteamtool.toml`
 - Fixes-only operation must work without the unlock backend.
 
 ### Dependency policy
@@ -160,6 +160,46 @@ merged path: read-only-looking game view with copy-up writes
 - Windows parity requires WinFsp copy-up, whiteouts, opaque directories,
   directory merge, rename/delete, locking, and memory-mapped file support.
 
+### Windows Security exceptions
+
+Windows only. Linux has no equivalent antivirus quarantine problem and hides
+this UI.
+
+- Per-game, opt-in: a checkbox during Add game and an action in Fixes.
+- The exception is applied before any fixes ZIP is installed; the fixes install
+  command refuses to continue while required exclusions are missing.
+- Scope is the game's SteamTron fixes directory, the per-game upper layer, the
+  mounted WinFsp path, and the game folder. No whole-drive or whole-Steam
+  exclusion is created.
+- The elevated PowerShell helper only calls `Add-MpPreference` /
+  `Remove-MpPreference`. It never disables real-time protection or tamper
+  protection.
+- Status reads `Get-MpComputerStatus`, `Get-MpPreference`, and
+  `Get-MpThreatDetection`; quarantine detections are shown in the game's Fixes
+  panel.
+- The exception is removed on explicit request. Quarantined files must be
+  re-imported after the exception is restored.
+
+This is a scoped security tradeoff, not a way to bypass antivirus. Third-party
+antivirus products still need their own exclusions.
+
+### Windows WinFsp implementation
+
+The first Windows backend is implemented in `steamtron-overlay/src/windows.rs`:
+
+- Mounts a WinFsp union as the first free drive from `S:` through `Z:`.
+- Read order is `upper`, `fixes`, then the Steam common directory.
+- Fixed files are copied into the persistent upper layer on first write.
+- Deletions create per-file whiteouts under `upper/.steamtron-whiteouts`.
+- Directory listings merge all three layers and hide whiteouts.
+- Rename and basic metadata changes force copy-up before mutating.
+- The wrapper and CLI select `PlatformOverlay`, so the same Steam launch option
+  drives Linux `fuse-overlayfs` and Windows WinFsp.
+
+WinFsp must be installed on the Windows host. The current prototype does not
+yet install WinFsp itself, does not implement opaque-directory markers, and has
+not passed the WinFsp filesystem test suite.
+
 ## 9. Feature parity checklist
 
 | Feature | Desktop status |
@@ -181,7 +221,8 @@ merged path: read-only-looking game view with copy-up writes
 | Steam launch-option setup | Implemented through `localconfig.vdf` and the dual-mode overlay wrapper |
 | Managed library removal | Implemented with appmanifest/Lua/manifest/symlink cleanup |
 | Linux deb/AppImage packaging | Implemented; deb and AppImage built |
-| Windows WinFsp overlay | Pending |
+| Windows WinFsp overlay | Prototype implemented; WinFsp test suite pending |
+| Windows Security exceptions | Implemented per game, opt-in, before fixes |
 | Plugin retirement | Pending |
 
 ## 10. Add game UX
@@ -251,9 +292,13 @@ The launch wrapper/overlay backend remains even after plugin removal.
 ## 13. Risks and constraints
 
 - Steam client updates can break SLSsteam and BetterSteamTools.
-- Windows WinFsp overlay is a substantial custom filesystem project.
+- Windows WinFsp overlay is a substantial custom filesystem project. The initial
+  implementation still needs WinFsp test-suite coverage, opaque directories,
+  and packaging of the WinFsp runtime.
 - Anti-cheat and protected launchers may reject virtualized files.
-- Third-party helper licenses must be reviewed before bundling.
+- Third-party helper licenses must be reviewed before bundling. The Rust WinFsp
+  bindings are GPL-3.0, so the Windows overlay dependency needs a licensing
+  decision before distribution.
 - Automatic helper installation changes the user's Steam installation and needs
   clear consent and recovery.
 - Steam launch options and manifest data are not official public APIs.
@@ -268,3 +313,4 @@ The launch wrapper/overlay backend remains even after plugin removal.
 | 2026-11-03 | Linux unlock: SLSsteam (Lumen optional) |
 | 2026-11-03 | Windows unlock: BetterSteamTools primary, OpenSteamTool fallback |
 | 2026-11-03 | Do not use LuaTools, SteamTools-only, rclone, or ProjFS as the exact unified solution |
+| 2026-11-05 | Windows WinFsp prototype, Windows Steam lifecycle, and Windows data paths implemented |

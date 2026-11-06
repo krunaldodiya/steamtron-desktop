@@ -15,6 +15,18 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::LinuxOverlay;
 
+#[cfg(target_os = "windows")]
+mod windows;
+
+#[cfg(target_os = "windows")]
+pub use windows::WindowsOverlay;
+
+#[cfg(target_os = "linux")]
+pub type PlatformOverlay = LinuxOverlay;
+
+#[cfg(target_os = "windows")]
+pub type PlatformOverlay = WindowsOverlay;
+
 /// Overlay failures that must be surfaced to the desktop UI or launcher.
 #[derive(Debug, Error)]
 pub enum OverlayError {
@@ -71,10 +83,8 @@ impl OverlayGame {
             }
         }
 
-        let common = fs::canonicalize(&common)
-            .map_err(|error| OverlayError::io(&common, error))?;
-        let fixes = fs::canonicalize(&fixes)
-            .map_err(|error| OverlayError::io(&fixes, error))?;
+        let common = fs::canonicalize(&common).map_err(|error| OverlayError::io(&common, error))?;
+        let fixes = fs::canonicalize(&fixes).map_err(|error| OverlayError::io(&fixes, error))?;
         if !common.is_dir() {
             return Err(OverlayError::InvalidGame(format!(
                 "game directory is not a directory: {}",
@@ -145,6 +155,19 @@ impl OverlayGame {
 
 /// Per-user data root, matching the existing Python SteamTron layout.
 pub fn default_data_home() -> PathBuf {
+    if let Some(value) = std::env::var_os("STEAMTRON_DATA_HOME") {
+        let path = PathBuf::from(value);
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(value) = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA")) {
+        let path = PathBuf::from(value);
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
     if let Some(value) = std::env::var_os("XDG_DATA_HOME") {
         let path = PathBuf::from(value);
         if !path.as_os_str().is_empty() {
@@ -196,9 +219,7 @@ impl OverlayLayout {
         let runtime = runtime_base().join(format!("{short_key}-{id}"));
         Self {
             upper: data_home.join("steamtron/upper").join(&key),
-            work: data_home
-                .join("steamtron/work")
-                .join(format!("{key}-{id}")),
+            work: data_home.join("steamtron/work").join(format!("{key}-{id}")),
             merged: runtime.join("merged"),
             runtime,
         }

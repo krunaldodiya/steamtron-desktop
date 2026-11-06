@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::{
-    validate_appid, write_atomic, BackendStatus, InstalledLua, UnlockBackend, UnlockError,
+    BackendStatus, InstalledLua, UnlockBackend, UnlockError, validate_appid, write_atomic,
 };
 
 #[derive(Clone, Debug)]
@@ -15,20 +15,9 @@ pub struct WindowsUnlock {
 
 impl WindowsUnlock {
     pub fn discover() -> Result<Self, UnlockError> {
-        let candidates = [
-            std::env::var_os("STEAM_PATH").map(PathBuf::from),
-            std::env::var_os("ProgramFiles(x86)").map(|value| PathBuf::from(value).join("Steam")),
-            std::env::var_os("ProgramFiles").map(|value| PathBuf::from(value).join("Steam")),
-            Some(PathBuf::from("C:/Program Files (x86)/Steam")),
-        ];
-        for candidate in candidates.into_iter().flatten() {
-            if candidate.join("steamapps").is_dir() {
-                return Ok(Self {
-                    steam_root: candidate,
-                });
-            }
-        }
-        Err(UnlockError::SteamNotFound)
+        let steam_root = steamtron_core::steam::steam_root()
+            .map_err(|_| UnlockError::SteamNotFound)?;
+        Ok(Self { steam_root })
     }
 
     pub fn with_steam_root(steam_root: impl Into<PathBuf>) -> Self {
@@ -50,10 +39,11 @@ impl WindowsUnlock {
         self.steam_root.join("steamapps/depotcache")
     }
 
-    fn backend_files(&self) -> [PathBuf; 3] {
+    fn backend_files(&self) -> [PathBuf; 4] {
         [
             self.steam_root.join("OpenSteamTool.dll"),
             self.steam_root.join("dwmapi.dll"),
+            self.steam_root.join("xinput1_4.dll"),
             self.steam_root.join("opensteamtool.toml"),
         ]
     }
@@ -62,7 +52,7 @@ impl WindowsUnlock {
 impl UnlockBackend for WindowsUnlock {
     fn status(&self) -> Result<BackendStatus, UnlockError> {
         let files = self.backend_files();
-        let installed = files.iter().all(|path| path.exists());
+        let installed = files[0].exists() && files[1].exists() && files[3].exists();
         let lua_dir = self.lua_dir();
         Ok(BackendStatus {
             platform: "windows",
