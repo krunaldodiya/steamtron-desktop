@@ -176,12 +176,87 @@ function hideAuthGate() {
   for (const node of appSections) { node.inert = false; node.removeAttribute("aria-hidden"); }
 }
 
+
+async function checkMigration() {
+  try {
+    const status = await invoke("library_migration_status");
+    if (!status || status.library.games > 0 || !status.sources?.length) return;
+    showMigration(status.sources);
+  } catch (error) {
+    console.warn("Migration check failed", error);
+  }
+}
+
+function migrationSummary(plan) {
+  const actions = plan?.actions || [];
+  const kind = (action) => Object.keys(action)[0];
+  const count = (name) => actions.filter((action) => kind(action) === name).length;
+  return {
+    games: count("AddGame"),
+    drives: count("AddDrive"),
+    registrations: count("RegisterSteam"),
+    moves: count("MoveFixes"),
+    needs: count("NeedsInput"),
+  };
+}
+
+function showMigration(sources) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  const rows = sources.map((source) => {
+    const title = source.kind === "umutron" ? "UmuTron library" : "SteamTron config";
+    if (source.error) {
+      return `<div class="row"><strong>${escape(title)}</strong><div class="muted">${escape(source.path)}</div><div class="status error">${escape(source.error)}</div></div>`;
+    }
+    const summary = migrationSummary(source.plan);
+    const parts = [`${summary.games} game${summary.games === 1 ? "" : "s"}`];
+    if (summary.drives) parts.push(`${summary.drives} drive${summary.drives === 1 ? "" : "s"}`);
+    if (summary.registrations) parts.push(`${summary.registrations} Steam registration${summary.registrations === 1 ? "" : "s"}`);
+    if (summary.moves) parts.push(`${summary.moves} fixes move${summary.moves === 1 ? "" : "s"}`);
+    if (summary.needs) parts.push(`${summary.needs} needing a folder`);
+    const warnings = (source.plan.warnings || []).length;
+    return `<div class="row"><strong>${escape(title)}</strong><div class="muted">${escape(source.path)}</div><div>${escape(parts.join(" · "))}</div>${warnings ? `<div class="muted">${warnings} warning${warnings === 1 ? "" : "s"}</div>` : ""}</div>`;
+  }).join("");
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Bring your library over</h2><button class="modal-close" id="migrate-close" aria-label="Close">×</button></div><p class="muted">SteamTron keeps games in its own library. Existing entries are imported once; files move only when the destination is absent, and Steam registrations stay pending until the backend is available.</p><div class="migration-sources">${rows}</div><div class="modal-status"></div><div class="modal-actions"><button id="migrate-later">Not now</button><button id="migrate-import" class="primary">Import</button></div></div>`;
+  document.body.appendChild(backdrop);
+  const statusNode = backdrop.querySelector(".modal-status");
+  const close = () => backdrop.remove();
+  backdrop.querySelector("#migrate-close").onclick = close;
+  backdrop.querySelector("#migrate-later").onclick = close;
+  backdrop.querySelector("#migrate-import").onclick = async () => {
+    const button = backdrop.querySelector("#migrate-import");
+    const stop = busy(button, "Importing…");
+    const reports = [];
+    try {
+      for (const source of sources) {
+        if (source.error) continue;
+        const result = await invoke("library_import_commit", { path: source.path });
+        reports.push(result.report || {});
+      }
+      stop();
+      const games = reports.reduce((sum, report) => sum + (report.games_added?.length || 0), 0);
+      const skipped = reports.reduce((sum, report) => sum + (report.games_skipped?.length || 0), 0);
+      const pending = reports.reduce((sum, report) => sum + (report.pending_registrations?.length || 0), 0);
+      statusNode.textContent = `Imported ${games} game${games === 1 ? "" : "s"}` +
+        (skipped ? `, skipped ${skipped} existing` : "") +
+        (pending ? `; ${pending} Steam registration${pending === 1 ? "" : "s"} pending.` : ".");
+      button.disabled = true;
+      await load();
+    } catch (error) {
+      stop();
+      statusNode.textContent = String(error);
+      statusNode.classList.add("error");
+    }
+  };
+}
+
 async function boot() {
   try {
     const auth = await invoke("profile_status");
     if (!auth.authenticated) { showAuthGate("Sign in to continue."); return; }
     hideAuthGate();
     await load();
+    await checkMigration();
   } catch (error) {
     showAuthGate(`Could not check sign-in: ${error}`);
   }

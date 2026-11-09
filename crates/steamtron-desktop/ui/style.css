@@ -262,3 +262,6 @@ button.primary:hover { filter: brightness(1.05); }
 .search { background: var(--surface-inset); color: var(--text); border-bottom-color: var(--border); }
 .game { border-bottom-color: var(--border); }
 .game:hover, .game.active { background: var(--accent-soft); }
+
+.migration-sources { margin: 12px 0; max-height: 320px; overflow: auto; }
+.migration-sources .row { border-top: 1px solid var(--border); padding: 10px 0; }

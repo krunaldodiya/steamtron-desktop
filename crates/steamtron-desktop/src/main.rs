@@ -1705,6 +1705,44 @@ fn library_remember_picker(key: String, folder: String) -> Result<(), String> {
     library.save().map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn library_migration_status() -> Result<serde_json::Value, String> {
+    use std::path::PathBuf;
+    use steamtron_core::library::Library;
+
+    let library_path = Library::default_path();
+    let library = Library::open(&library_path).map_err(|error| error.to_string())?;
+    let mut sources = Vec::new();
+    let umutron = std::env::var_os("STEAMTRON_UMUTRON_LIBRARY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| steamtron_core::data_home().join("umutron").join("library.json"));
+    let legacy = steamtron_core::steamtron_home().join("config.json");
+    for (kind, path) in [("umutron", umutron), ("steamtron", legacy)] {
+        if !path.is_file() {
+            continue;
+        }
+        match steamtron_core::import::plan_path(&path) {
+            Ok(plan) => sources.push(serde_json::json!({
+                "kind": kind,
+                "path": path.display().to_string(),
+                "plan": plan,
+            })),
+            Err(error) => sources.push(serde_json::json!({
+                "kind": kind,
+                "path": path.display().to_string(),
+                "error": error.to_string(),
+            })),
+        }
+    }
+    Ok(serde_json::json!({
+        "library": {
+            "path": library_path.display().to_string(),
+            "games": library.games().len(),
+        },
+        "sources": sources,
+    }))
+}
+
 fn main() {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if let Some(code) = try_overlay_wrapper() {
@@ -1770,7 +1808,8 @@ fn main() {
             library_snapshot,
             library_import_preview,
             library_import_commit,
-            library_remember_picker
+            library_remember_picker,
+            library_migration_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running SteamTron");
