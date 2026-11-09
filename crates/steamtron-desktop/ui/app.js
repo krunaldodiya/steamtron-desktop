@@ -925,19 +925,39 @@ function moveNavigation(action) {
     const rect = node.getBoundingClientRect();
     return [rect.left + rect.width / 2, rect.top + rect.height / 2];
   };
+  const regionOf = (node) => node.closest(".store-content")
+    ? "content"
+    : node.closest(".store-sidebar")
+      ? "sidebar"
+      : node.closest(".topbar")
+        ? "header"
+        : node.closest("#settings-page")
+          ? "settings"
+          : node.closest(".modal-backdrop")
+            ? "modal"
+            : "page";
   const [x, y] = center(current);
-  let best = null;
-  for (const node of controls) {
-    if (node === current) continue;
-    const [cx, cy] = center(node);
-    const dx = cx - x;
-    const dy = cy - y;
-    const along = action === "right" ? dx : action === "left" ? -dx : action === "down" ? dy : -dy;
-    const across = action === "left" || action === "right" ? Math.abs(dy) : Math.abs(dx);
-    if (along <= 1) continue;
-    const score = along + across * 3;
-    if (!best || score < best.score) best = { score, node };
-  }
+  const bestIn = (nodes) => {
+    let best = null;
+    for (const node of nodes) {
+      if (node === current) continue;
+      const [cx, cy] = center(node);
+      const dx = cx - x;
+      const dy = cy - y;
+      const along = action === "right" ? dx : action === "left" ? -dx : action === "down" ? dy : -dy;
+      const across = action === "left" || action === "right" ? Math.abs(dy) : Math.abs(dx);
+      if (along <= 1) continue;
+      const score = along + across * 3;
+      if (!best || score < best.score) best = { score, node };
+    }
+    return best;
+  };
+  // Keep focus inside the current region first (store sidebar vs catalogue),
+  // so pressing Down at the end of the grid reaches the pager instead of the
+  // sidebar. Cross-region moves only happen when the region has no candidate.
+  const region = regionOf(current);
+  const regional = controls.filter((node) => regionOf(node) === region);
+  const best = bestIn(regional) || bestIn(controls);
   if (best) {
     focusControl(best.node);
     return true;
