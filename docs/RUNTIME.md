@@ -78,3 +78,14 @@ steamtron-overlay managed play 3468650 --target t2
 - The overlay requires `fuse-overlayfs` and `fusermount3`; without them managed
   Play falls back to the direct Proton plan only when fixes are disabled or the
   fixes folder is empty.
+
+## Supervision and Stop
+
+- Managed launches start a new process group on Unix (`process_group(0)`), are
+  registered by game id, and are removed when the child exits.
+- `Stop` sends SIGTERM to the group, waits up to 8 seconds for the exit, then
+  escalates to SIGKILL. Windows uses `taskkill /T /F`.
+- The UI shows Stop while the game is running, refreshes state on window focus,
+  and refuses a second Play for the same game.
+- Verified: process-group SIGTERM test in `steamtron-core`; Stop wiring builds
+  and parses.

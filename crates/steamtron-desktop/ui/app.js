@@ -11,6 +11,7 @@ let detailTab = "general";
 let artworkLoading = false;
 let managedLibrary = null;
 let managedSelectedId = null;
+let runningManaged = new Set();
 let appView = "library";
 let pendingRestart = loadPendingRestart();
 
@@ -254,6 +255,11 @@ function showMigration(sources) {
 }
 
 
+async function refreshManagedRunning() {
+  try { runningManaged = new Set(await invoke("running_managed")); }
+  catch (_error) { runningManaged = new Set(); }
+}
+
 function hasManagedLibrary() {
   return Boolean(managedLibrary?.games?.length);
 }
@@ -322,18 +328,37 @@ function renderManagedPreview(game) {
   const hero = appId ? headerUrl(appId) : "";
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
   const canPlay = managedReady(game) && Boolean(target);
-  const play = `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
-  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${play}${target ? "" : '<span class="muted">No launch target yet.</span>'}</div></div></div>${managedDetails(game)}`;
-  const button = detailEl.querySelector("#managed-play");
-  if (button && canPlay) {
-    button.onclick = async () => {
-      const stop = busy(button, "Starting…");
+  const running = runningManaged.has(game.id);
+  const action = running
+    ? '<button id="managed-stop" class="primary">Stop</button>'
+    : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target ? "" : '<span class="muted">No launch target yet.</span>'}</div></div></div>${managedDetails(game)}`;
+  const play = detailEl.querySelector("#managed-play");
+  if (play && canPlay) {
+    play.onclick = async () => {
+      const stop = busy(play, "Starting…");
       try {
         const result = await invoke("play_managed", { gameId: game.id });
+        runningManaged.add(game.id);
         showToast(`Started ${game.title} · ${result.log}`);
+        renderManagedMode();
       } catch (error) {
         showToast(String(error), true);
-      } finally {
+        stop();
+      }
+    };
+  }
+  const stopButton = detailEl.querySelector("#managed-stop");
+  if (stopButton) {
+    stopButton.onclick = async () => {
+      const stop = busy(stopButton, "Stopping…");
+      try {
+        await invoke("stop_managed", { gameId: game.id });
+        runningManaged.delete(game.id);
+        showToast(`Stopped ${game.title}`);
+        renderManagedMode();
+      } catch (error) {
+        showToast(String(error), true);
         stop();
       }
     };
@@ -1163,6 +1188,7 @@ async function load() {
     try { await invoke("auto_pin_installed"); } catch (_error) { /* non-fatal */ }
     try { await invoke("reconcile_registrations"); } catch (_error) { /* keep stored states */ }
     try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { managedLibrary = null; }
+    await refreshManagedRunning();
     if (hasManagedLibrary()) {
       renderManagedMode();
       void loadArtwork();
@@ -1508,6 +1534,11 @@ function showAddGame() {
 
 document.querySelector("#nav-library").onclick = () => { setView("library"); if (searchEl) searchEl.focus(); };
 document.querySelector("#nav-home").onclick = () => setView("home");
+window.addEventListener("focus", async () => {
+  if (!hasManagedLibrary()) return;
+  await refreshManagedRunning();
+  if (appView === "library" || appView === "home") renderManagedMode();
+});
 document.querySelector("#add-game").onclick = () => { if (hasManagedLibrary()) showManagedAddGame(); else showAddGame(); };
 document.querySelector("#settings").onclick = renderSettings;
 document.querySelector("#refresh").onclick = refreshLibrary;

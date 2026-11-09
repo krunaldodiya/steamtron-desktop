@@ -147,6 +147,11 @@ fn running_games() -> &'static Mutex<HashMap<String, std::process::Child>> {
     RUNNING_GAMES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn managed_runs() -> &'static Mutex<HashMap<String, u32>> {
+    static RUNS: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+    RUNS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn artwork_for_appid(appid: &str) -> (String, String) {
     static CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -1773,6 +1778,18 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     } else {
         plan.command()
     };
+    if managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .contains_key(&game.id)
+    {
+        return Err("This game is already running.".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let child = command
         .stdin(Stdio::null())
         .stdout(stdout)
@@ -1780,9 +1797,19 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .spawn()
         .map_err(|error| format!("Could not start the game: {error}"))?;
     let pid = child.id();
+    managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .insert(game.id.clone(), pid);
+    let tracked = game.id.clone();
     std::thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
+        if let Ok(mut runs) = managed_runs().lock() {
+            if runs.get(&tracked) == Some(&pid) {
+                runs.remove(&tracked);
+            }
+        }
     });
     Ok(serde_json::json!({
         "pid": pid,
@@ -1794,6 +1821,56 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     }))
 }
 
+
+#[tauri::command]
+fn running_managed() -> Result<Vec<String>, String> {
+    let runs = managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?;
+    let mut games: Vec<String> = runs.keys().cloned().collect();
+    games.sort();
+    Ok(games)
+}
+
+#[tauri::command]
+fn stop_managed(game_id: String) -> Result<(), String> {
+    let pid = managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .get(&game_id)
+        .copied()
+        .ok_or_else(|| "This game is not running.".to_string())?;
+    #[cfg(unix)]
+    {
+        steamtron_core::runtime::terminate_process_group(pid, false)
+            .map_err(|error| error.to_string())?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while std::time::Instant::now() < deadline {
+            let running = managed_runs()
+                .lock()
+                .map_err(|_| "Game state lock failed.".to_string())?
+                .contains_key(&game_id);
+            if !running {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        steamtron_core::runtime::terminate_process_group(pid, true)
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let status = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status()
+            .map_err(|error| format!("Could not stop the game: {error}"))?;
+        if !status.success() {
+            return Err(format!("taskkill exited with {status}"));
+        }
+        Ok(())
+    }
+}
 
 #[tauri::command]
 fn reconcile_registrations() -> Result<steamtron_library::managed::ReconcileReport, String> {
@@ -1983,6 +2060,8 @@ fn main() {
             add_managed_game,
             play_managed,
             reconcile_registrations,
+            running_managed,
+            stop_managed,
             registration_verify,
             library_import_preview,
             library_import_commit,

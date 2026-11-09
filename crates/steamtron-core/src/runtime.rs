@@ -122,6 +122,32 @@ pub fn managed_launch_plan(
     })
 }
 
+
+/// Send SIGTERM (or SIGKILL) to the process group started for a game.
+#[cfg(unix)]
+pub fn terminate_process_group(pid: u32, force: bool) -> Result<(), RuntimeError> {
+    let signal = if force { "-KILL" } else { "-TERM" };
+    let status = std::process::Command::new("kill")
+        .args([signal, &format!("-{pid}")])
+        .status()
+        .map_err(|error| RuntimeError::Io {
+            path: PathBuf::from("kill"),
+            source: error,
+        })?;
+    if !status.success() {
+        return Err(RuntimeError::Io {
+            path: PathBuf::from("kill"),
+            source: std::io::Error::other(format!("kill {signal} exited with {status}")),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn terminate_process_group(_pid: u32, _force: bool) -> Result<(), RuntimeError> {
+    Err(RuntimeError::MissingRuntime("process supervision"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +179,22 @@ mod tests {
             fixes_enabled: true,
             artwork: Artwork::default(),
         }
+    }
+
+
+    #[cfg(unix)]
+    #[test]
+    fn terminates_a_process_group() {
+        use std::os::unix::process::CommandExt;
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        terminate_process_group(child.id(), false).unwrap();
+        let status = child.wait().unwrap();
+        assert!(!status.success(), "SIGTERM ends the sleep");
     }
 
     #[test]
