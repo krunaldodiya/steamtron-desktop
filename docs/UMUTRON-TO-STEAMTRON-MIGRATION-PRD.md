@@ -52,6 +52,10 @@ Steam-free path as the default.
 - Wine/Proton on Windows.
 - Mac support.
 - Auto-starting the Steam client. The app may ask the user to start it.
+- **Activity history.** No global Activity screen and no per-game Activity tab.
+  Run evidence, logs, and failure explanations live in Debug and Doctor; the
+  existing SteamTron localStorage activity log and UmuTron's Activity button are
+  not carried over.
 
 ## 4. Current state (audit)
 
@@ -350,6 +354,9 @@ struct DoctorCheck {
   per-game Doctor reachable from the detail page.
 - Controller navigation (SDL polling, reconnect on focus), picker memory,
   TV/fullscreen parity.
+- No Activity tab in the detail page and no global Activity screen. The Debug
+  page carries run logs and evidence; Doctor carries problems and repairs, so
+  both jobs already exist once.
 
 ## 15. Migration and import
 
@@ -360,6 +367,8 @@ struct DoctorCheck {
 4. **Fixes ZIPs** import into the canonical folder.
 5. Every import is dry-run first and reports planned moves and registrations.
 6. No automatic deletion; removal requires confirmation and reports what is kept.
+7. Existing SteamTron activity history is not imported and no new history store
+   is written; Debug logs and Doctor checks replace it.
 
 ## 16. Phases and acceptance
 
