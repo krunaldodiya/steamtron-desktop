@@ -1,4 +1,5 @@
 const invoke = (command, args = {}) => window.__TAURI__.core.invoke(command, args);
+const convertFileSrc = (path) => window.__TAURI__.core.convertFileSrc(path);
 const gamesEl = document.querySelector("#games");
 const detailEl = document.querySelector("#detail");
 const searchEl = document.querySelector("#search");
@@ -284,14 +285,73 @@ function managedReady(game) {
   return Boolean(game.installation?.root);
 }
 
+const artworkCache = new Map();
+
+async function artworkFor(gameId) {
+  if (!gameId) return null;
+  if (artworkCache.has(gameId)) return artworkCache.get(gameId);
+  let artwork = null;
+  try { artwork = await invoke("managed_artwork", { gameId }); }
+  catch (_error) { artwork = null; }
+  artworkCache.set(gameId, artwork);
+  return artwork;
+}
+
+function markCoverMissing(img) {
+  const frame = img.parentElement;
+  img.remove();
+  if (frame && !frame.classList.contains("cover-missing")) {
+    frame.classList.add("cover-missing");
+  }
+}
+
+async function hydrateCovers(host) {
+  const images = [...host.querySelectorAll("img[data-cover-game]")].filter((img) => !img.dataset.started);
+  await Promise.all(images.map(async (img) => {
+    img.dataset.started = "1";
+    const game = managedLibrary?.games.find((item) => item.id === img.dataset.coverGame);
+    if (!game?.metadata_app_id) { markCoverMissing(img); return; }
+    let artwork = null;
+    try { artwork = await artworkFor(game.id); } catch (_error) { artwork = null; }
+    if (!img.isConnected) return;
+    if (artwork?.cover) {
+      img.src = convertFileSrc(artwork.cover);
+    } else {
+      img.src = coverUrl(game.metadata_app_id);
+    }
+    img.addEventListener("error", () => {
+      if (!img.isConnected) return;
+      if (img.dataset.remoteFallback !== "1") {
+        img.dataset.remoteFallback = "1";
+        img.src = headerUrl(game.metadata_app_id);
+        return;
+      }
+      markCoverMissing(img);
+    });
+  }));
+}
+
+async function hydrateHero(game) {
+  if (!game?.metadata_app_id) return;
+  try {
+    const artwork = await artworkFor(game.id);
+    if (!artwork?.hero) return;
+    const node = document.querySelector("#home-hero, .game-page .detail-hero");
+    if (node && managedSelectedId === game.id) {
+      node.style.backgroundImage = `url('${convertFileSrc(artwork.hero)}')`;
+    }
+  } catch (_error) {
+    // The CDN background stays when the local cache is unavailable.
+  }
+}
+
 function coverCard(game, section) {
   const appId = game.metadata_app_id;
-  const cover = appId ? coverUrl(appId) : "";
   const selected = game.id === managedSelectedId
     && (!section || section === homeFocusSection);
   const active = selected ? " active" : "";
   return `<button class="cover-card${active}" data-managed="${escape(game.id)}" title="${escape(game.title)}">
-    <span class="cover">${cover ? `<img loading="lazy" src="${escape(cover)}" alt="">` : ""}<span class="play-glyph" aria-hidden="true">▶</span></span>
+    <span class="cover">${appId ? `<img loading="lazy" data-cover-game="${escape(game.id)}" alt="">` : ""}<span class="play-glyph" aria-hidden="true">▶</span></span>
     <span class="cover-title">${escape(game.title)}</span>
   </button>`;
 }
@@ -333,6 +393,7 @@ function renderManagedLibrary() {
     libraryPage = 1;
     renderManagedLibrary();
   };
+  void hydrateCovers(detailEl);
   detailEl.querySelector("#managed-search-button").onclick = run;
   input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
   for (const button of detailEl.querySelectorAll("[data-page]")) {
@@ -471,6 +532,7 @@ function renderManagedPreview(game) {
     <div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target || steamMode ? "" : '<span class="muted">No launch target yet.</span>'}${steamMode ? '<span class="muted">Steam client required</span>' : ""}</div></div></div>${managedDetails(game)}${target ? "" : managedSetupMarkup(game)}<div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>
   </div>`;
   detailEl.querySelector("#managed-back").onclick = () => setView("library");
+  void hydrateHero(game);
   void loadManagedFixes(game.id);
   void wireManagedSetup(game);
   const play = detailEl.querySelector("#managed-play");
@@ -522,6 +584,8 @@ function renderManagedHome() {
   const view = detailEl.querySelector("#home-view");
   if (view && featured) view.onclick = () => openManagedGame(featured.id);
   if (featured) void applyHeroDetails(featured);
+  void hydrateCovers(detailEl);
+  void hydrateHero(featured);
 }
 
 function renderManagedMode() {

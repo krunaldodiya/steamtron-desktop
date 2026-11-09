@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+mod artwork;
+
 use serde::Serialize;
 #[cfg(target_os = "linux")]
 use tauri::Manager;
@@ -2332,6 +2334,16 @@ async fn app_details(appid: u32) -> Result<serde_json::Value, String> {
     Ok(value)
 }
 
+
+#[tauri::command]
+async fn managed_artwork(game_id: String) -> Result<serde_json::Value, String> {
+    let paths = artwork::ensure(&game_id).await?;
+    Ok(serde_json::json!({
+        "cover": paths.cover.map(|path| path.display().to_string()),
+        "hero": paths.hero.map(|path| path.display().to_string()),
+    }))
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2526,6 +2538,7 @@ fn main() {
             play_managed,
             reconcile_registrations,
             quit_app,
+            managed_artwork,
             app_details,
             app_version,
             update_library_settings,
