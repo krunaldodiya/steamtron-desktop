@@ -66,7 +66,7 @@ Steam-free path as the default.
 |---|---|---|
 | Game identity | `appid` key in `config.json` | `Game.id` + optional `metadata_app_id` |
 | Add game | Steam Lua/manifest entry only | Managed entry **and** Steam registration |
-| Content | Steam `steamapps/common` | Managed drives (`UmuLibrary/umuapps`) |
+| Content | Steam `steamapps/common` | Managed drives (`SteamTronLibrary/steamtronapps`) |
 | Registration | SLSsteam / BetterSteamTools (only path) | Registration backends behind a trait, mandatory on add |
 | Launch | `steam://rungameid` / launch options | Own supervisor + runtime adapters; Steam client mode optional per game |
 | Fixes | ZIP + fuse/WinFsp keyed by appid | Same backends, canonical folder, GoldBerg + Steamless sections |
@@ -148,7 +148,7 @@ Invariants:
 
 - Never write inside an installed game tree; the overlay is the writable view.
 - Never start Steam; only verify and ask.
-- One fixes location per game: `<drive>/<Library>/umuapps/fixes/<Game>`.
+- One fixes location per game: `<drive>/SteamTronLibrary/steamtronapps/fixes/<Game>`.
 - Registration and content are independent: a failed registration never blocks
   editing, importing fixes, or removing content.
 - Tools are downloaded once, verified, and shared.
@@ -183,8 +183,8 @@ crates/
       "id": "uuid",
       "title": "Cricket 26",
       "metadata_app_id": 3468650,
-      "installation": { "mode": "managed", "root": ".../umuapps/common/Cricket 26",
-                        "prefix": ".../compatdata/Cricket 26", "proton": ".../runners/valve-experimental" },
+      "installation": { "mode": "managed", "root": ".../steamtronapps/common/Cricket 26",
+                        "prefix": ".../steamtronapps/compatdata/Cricket 26", "proton": ".../runners/valve-experimental" },
       "steam": { "app_id": 3468650, "registered": true, "backend": "slssteam-moon",
                  "state": "registered", "registered_at": 0, "launch_mode": "steam_client" },
       "launch": { "prefix_mode": "steam", "requires_steam": true, "environment": {} },
@@ -198,9 +198,9 @@ crates/
 Per drive:
 
 ```text
-<drive>/UmuLibrary/umuapps/
+<drive>/SteamTronLibrary/steamtronapps/
   common/<Game>/      installed content (ours)
-  compatdata/<Game>/  UmuTron prefix
+  compatdata/<Game>/  prefix
   fixes/<Game>/       single fixes location
   appmanifest_<App ID>.json   managed manifest (optional)
 ```
@@ -358,8 +358,10 @@ That document is the source of truth for anything the user sees.
 ## 15. Migration and import
 
 1. **SteamTron `config.json`** → managed games; register missing entries.
-2. **UmuTron library + drives** → drives, games, prefixes, fixes; register
-   missing Steam entries for games with an App ID; never move differing trees.
+2. **UmuTron library + drives** → drives, games, prefixes, fixes; games stay
+   linked to their existing UmuLibrary content, fixes are **copied** into
+   `SteamTronLibrary/steamtronapps/fixes/<Game>` and the UmuTron source is kept;
+   register missing Steam entries for games with an App ID.
 3. **Steam library scan** → linked candidates; content stays where it is.
 4. **Fixes ZIPs** import into the canonical folder.
 5. Every import is dry-run first and reports planned moves and registrations.
@@ -390,7 +392,7 @@ That document is the source of truth for anything the user sees.
 | Client restart needed after registration | Explicit `pending_restart` state and re-verify on focus |
 | WinFsp overlay fidelity | Conformance tests before UI wiring |
 | Windows Steamless source/licensing | Decide in phase 0; Linux-only gating if unresolved |
-| Sharing `UmuLibrary` with UmuTron | No-merge rule, dry-run imports, never delete |
+| Sharing a drive with UmuTron | Separate roots (`SteamTronLibrary/steamtronapps` vs `UmuLibrary/umuapps`), no-merge rule, dry-run imports, never delete |
 | Steamworks titles that still need the real client | Launch mode switch without re-adding; documented ownership caveat |
 | Antivirus/signing on Windows | Signed binaries, quarantine-first writes |
 
@@ -410,7 +412,7 @@ That document is the source of truth for anything the user sees.
 
 ## 19. Open questions
 
-1. Library folder name: shared `UmuLibrary` or `SteamTronLibrary`?
+1. ~~Library folder name~~ — **decided**: `<drive>/SteamTronLibrary/steamtronapps` (same structure as UmuTron, separate folders).
 2. Windows Steamless: bundle, download, or Linux-only for v1?
 3. Should removing a game always unregister from Steam, or ask (recommend ask)?
 4. Keep Lua/manifest and update pinning as optional features?

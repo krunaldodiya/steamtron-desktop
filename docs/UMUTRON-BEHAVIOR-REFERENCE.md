@@ -39,6 +39,11 @@ These are product decisions for SteamTron, not UmuTron behavior:
 6. **Rust supervisor** replaces the Python supervisor; process identity, state
    strings, evidence rules, and timing constants are preserved.
 7. **Windows runtime is native**: no Wine/Proton; WinFsp provides the overlay.
+8. **Managed layout**: SteamTron uses `<drive>/SteamTronLibrary/steamtronapps/`
+   with the same `common/compatdata/fixes` structure as UmuTron's
+   `<drive>/UmuLibrary/umuapps/`, but separate folders. Imports from UmuTron keep
+   the existing content linked and **copy** fixes into the SteamTron tree; the
+   UmuTron source is never deleted.
 
 ## Porting status
 

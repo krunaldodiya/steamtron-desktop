@@ -60,7 +60,7 @@ pub enum ImportAction {
     AddDrive { root: PathBuf, label: String },
     AddGame { planned: PlannedGame },
     RegisterSteam { app_id: u32, title: String },
-    MoveFixes { from: PathBuf, to: PathBuf },
+    CopyFixes { from: PathBuf, to: PathBuf },
     /// A source entry that cannot become a game without a user decision.
     NeedsInput { app_id: Option<u32>, title: String, reason: String },
 }
@@ -506,7 +506,7 @@ pub fn plan_umutron_library(path: impl AsRef<Path>) -> Result<ImportPlan, Import
         if let Some(fixes) = source.fixes_path.filter(|path| path.is_dir()) {
             if let Some(layout) = planned_layout.filter(|layout| layout.fixes != fixes) {
                 if !layout.fixes.exists() {
-                    plan.actions.push(ImportAction::MoveFixes {
+                    plan.actions.push(ImportAction::CopyFixes {
                         from: fixes,
                         to: layout.fixes,
                     });
@@ -573,7 +573,7 @@ pub struct CommitReport {
     pub drives_added: Vec<PathBuf>,
     pub games_added: Vec<String>,
     pub games_skipped: Vec<String>,
-    pub fixes_moved: Vec<(PathBuf, PathBuf)>,
+    pub fixes_copied: Vec<(PathBuf, PathBuf)>,
     pub pending_registrations: Vec<(u32, String)>,
     pub needs_input: Vec<(Option<u32>, String, String)>,
     pub warnings: Vec<String>,
@@ -620,7 +620,7 @@ pub fn apply_plan(plan: &ImportPlan, library_path: impl AsRef<Path>) -> Result<C
                     Err(error) => report.warnings.push(error.to_string()),
                 }
             }
-            ImportAction::MoveFixes { from, to } => {
+            ImportAction::CopyFixes { from, to } => {
                 if !from.is_dir() {
                     report.warnings.push(format!("fixes missing: {}", from.display()));
                     continue;
@@ -658,16 +658,9 @@ pub fn apply_plan(plan: &ImportPlan, library_path: impl AsRef<Path>) -> Result<C
         }
         return Err(ImportError::Format(error.to_string()));
     }
-    for (from, to) in &copied {
-        if fs::remove_dir_all(from).is_ok() {
-            report.fixes_moved.push((from.clone(), to.clone()));
-        } else {
-            report.warnings.push(format!(
-                "fixes copied but source kept: {}",
-                from.display()
-            ));
-        }
-    }
+    // Imports never delete the source fixes: another manager (or the user) may
+    // still rely on them, and the copy is the SteamTron-owned tree.
+    report.fixes_copied = copied;
     Ok(report)
 }
 
@@ -833,7 +826,7 @@ mod tests {
         ));
         assert!(plan.actions.iter().any(|action| matches!(
             action,
-            ImportAction::MoveFixes { from, .. } if from == &legacy_fixes
+            ImportAction::CopyFixes { from, .. } if from == &legacy_fixes
         )));
         assert!(plan.registers().any(|(app_id, _)| app_id == 99));
         assert_eq!(fs::read(&library).unwrap(), before);
@@ -913,9 +906,10 @@ mod commit_tests {
         assert_eq!(library.drives().len(), 1);
         let fixes = temp
             .path()
-            .join("UmuLibrary/umuapps/fixes/Sample Game");
+            .join("SteamTronLibrary/steamtronapps/fixes/Sample Game");
         assert!(fixes.join("patch.dll").is_file());
-        assert!(!temp.path().join("appdata/fixes/77").exists());
+        assert!(temp.path().join("appdata/fixes/77/patch.dll").is_file());
+        assert_eq!(report.fixes_copied.len(), 1);
 
         let second = apply_plan(&plan, &target).unwrap();
         assert!(second.games_added.is_empty());
@@ -929,12 +923,14 @@ mod commit_tests {
         let source = temp.path().join("appdata/fixes/77");
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("patch.dll"), b"patch").unwrap();
-        let destination = temp.path().join("UmuLibrary/umuapps/fixes/Sample Game");
+        let destination = temp
+            .path()
+            .join("SteamTronLibrary/steamtronapps/fixes/Sample Game");
         fs::create_dir_all(&destination).unwrap();
         fs::write(destination.join("other.dll"), b"keep").unwrap();
         let plan = ImportPlan {
             source: None,
-            actions: vec![ImportAction::MoveFixes {
+            actions: vec![ImportAction::CopyFixes {
                 from: source.clone(),
                 to: destination.clone(),
             }],
@@ -943,7 +939,7 @@ mod commit_tests {
 
         let report = apply_plan(&plan, temp.path().join("target/library.json")).unwrap();
 
-        assert!(report.fixes_moved.is_empty());
+        assert!(report.fixes_copied.is_empty());
         assert!(report
             .warnings
             .iter()

@@ -473,9 +473,12 @@ pub fn safe_folder(title: &str) -> Result<String, LibraryError> {
     Ok(trimmed.chars().take(120).collect())
 }
 
-/// `<drive>/UmuLibrary/umuapps` — the shared managed layout.
-pub fn umuapps_root(drive_root: &Path) -> PathBuf {
-    drive_root.join("UmuLibrary").join("umuapps")
+/// `<drive>/SteamTronLibrary/steamtronapps` — SteamTron's managed layout.
+///
+/// It intentionally mirrors UmuTron's `UmuLibrary/umuapps` structure without
+/// sharing the folders, so both applications can own the same drive.
+pub fn steamtronapps_root(drive_root: &Path) -> PathBuf {
+    drive_root.join("SteamTronLibrary").join("steamtronapps")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -488,7 +491,7 @@ pub struct GameLayout {
 }
 
 pub fn game_layout(drive_root: &Path, game: &Game) -> Result<GameLayout, LibraryError> {
-    let base = umuapps_root(drive_root);
+    let base = steamtronapps_root(drive_root);
     let folder = safe_folder(&game.title)?;
     let manifest_name = game
         .metadata_app_id
@@ -759,7 +762,7 @@ mod tests {
         let mut game = sample_game("game-1", "Sample", temp.path().join("game"));
         game.metadata_app_id = Some(42);
         let layout = game_layout(temp.path(), &game).unwrap();
-        assert_eq!(layout.base, umuapps_root(temp.path()));
+        assert_eq!(layout.base, steamtronapps_root(temp.path()));
         assert_eq!(layout.content, layout.base.join("common").join("Sample"));
         assert_eq!(layout.fixes, layout.base.join("fixes").join("Sample"));
         assert_eq!(layout.manifest, layout.base.join("appmanifest_42.json"));
