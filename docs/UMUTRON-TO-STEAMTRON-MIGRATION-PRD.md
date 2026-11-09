@@ -24,7 +24,9 @@ Steam-free path as the default.
 
 ## 2. Goals
 
-1. One Tauri 2 application on Windows and Linux (the UI contract comes from UmuTron).
+1. One Tauri 2 application on Windows and Linux whose UI/UX is adopted from
+   UmuTron (see `UI-UX-MIGRATION.md`). UI is a first-class deliverable in every
+   slice, not a final phase.
 2. **Dual registration on add**: managed library entry + Steam library entry
    (SLSsteam-moon on Linux, BetterSteamTools on Windows), in one flow.
 3. Managed content layout and launch supervisor independent of Steam.
@@ -336,6 +338,10 @@ struct DoctorCheck {
 
 ## 14. UI (from UmuTron)
 
+The full screen map, component rules, tokens, controller model, Tauri command
+contract, and UI-first slices live in [`UI-UX-MIGRATION.md`](UI-UX-MIGRATION.md).
+That document is the source of truth for anything the user sees.
+
 - Library/Home/detail with Play/Stop, launcher picker, size, App ID.
 - Add flow shows both targets and per-target state.
 - Compatibility: runtime, prefix source, launch mode, Steam client requirement,
@@ -366,13 +372,13 @@ struct DoctorCheck {
 | Phase | Deliverable | Acceptance |
 |---|---|---|
 | 0. Decisions | PRD, library folder name, backend matrix, launch-mode defaults, Doctor backend check map | Reviewed and merged |
-| 1. Core model | `library.json` v2, drives, validation, dry-run importers | Import with zero data loss |
-| 2. Dual add | Add-game transaction, registration backends, repair UI, **all backend Doctor checks/repairs** | Adding registers or reports exact state; Doctor validates the backend and clears pending restarts |
+| 1. Core model | `library.json` v2, drives, validation, dry-run importers, **UI U0 (design system + shell)** | Import with zero data loss; shell matches the UI tokens |
+| 2. Dual add | Add-game transaction, registration backends, **UI U3 add stepper**, **all backend Doctor checks/repairs** | Adding registers or reports exact state; Doctor validates the backend and clears pending restarts |
 | 3. Linux runtime | Planner, supervisor, evidence, Play/Stop | Steam-free launch; runtime problems surface on Compatibility/Play |
 | 4. Windows runtime | Native supervisor + WinFsp overlay | Windows launch with fixes |
 | 5. Emulation tooling | GoldBerg + Steamless managers and UI | Apply/Remove/re-apply; tool problems surface in the sections |
 | 6. Steam client mode | Requirement check, registration verification, ownership errors, contradiction checks | Blocked Play explains the state; backend failures link to Doctor |
-| 7. UI parity | All UmuTron screens and commands | Manual matrix on desktop + TV; controller and pickers verified |
+| 7. UI polish | TV/fullscreen, controller walkthrough, golden screenshots, parity of every screen | Controller-only walkthrough on 1080p/720p/600p; snapshot diffs reviewed |
 | 8. Library services | Backups/restore, integrity, optional updates | Restore to chosen drive; failures explained |
 | 9. Hardening | Cross-OS CI, signing, docs, release | Both platforms pass the acceptance matrix |
 
@@ -461,6 +467,9 @@ With the model and traits fixed, up to three tracks can proceed without blocking
 - **Track A** — Linux runtime, supervisor, evidence, Steam prefix creation.
 - **Track B** — Windows runtime, WinFsp conformance, native supervisor.
 - **Track C** — registration backends, Doctor, emulator/unpacker tool managers.
+- **Track D (continuous)** — UI slices U0–U7 from `UI-UX-MIGRATION.md`; every
+  backend slice ships with its screen, and no screen ships without its golden
+  screenshots.
 
 Tracks meet at the add flow, Play, and Doctor; those are the integration gates.
 
