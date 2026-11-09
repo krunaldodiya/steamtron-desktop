@@ -1235,7 +1235,7 @@ function openFullscreenOptions() {
       <button id="fullscreen-reboot">Reboot</button>
       <button id="fullscreen-shutdown">Shutdown</button>
       <button id="fullscreen-exit">Exit fullscreen</button>
-      <button id="fullscreen-quit">Exit</button>
+      <button id="fullscreen-quit">Quit SteamTron</button>
       <div class="fullscreen-scale">
         <button id="fullscreen-scale-down" class="scale-button" aria-label="Decrease UI scale">−</button>
         <span id="fullscreen-scale-label">UI Scale: ${uiScaleLabel()}</span>
