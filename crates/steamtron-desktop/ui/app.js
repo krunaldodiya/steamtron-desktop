@@ -1303,6 +1303,73 @@ function renderSettings() {
   renderProfile(panel);
 }
 
+
+async function showManagedAddGame() {
+  try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { /* keep the last snapshot */ }
+  const drives = managedLibrary?.drives || [];
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="managed-add-close" aria-label="Close">×</button></div>
+    <p class="muted">Download the Lua manifest, register the App ID with the platform backend, and create the managed library entry. Content is downloaded separately.</p>
+    <label for="managed-add-appid">App ID</label><input id="managed-add-appid" inputmode="numeric" pattern="[0-9]+" placeholder="3468650">
+    <label for="managed-add-title">Title (optional)</label><input id="managed-add-title" placeholder="Fetched from Steam when empty">
+    <label for="managed-add-drive">Drive</label><select id="managed-add-drive">${drives.map((drive) => `<option value="${escape(drive.root)}">${escape(drive.label || drive.root)}</option>`).join("")}<option value="__new">Register a new drive…</option></select>
+    <div id="managed-add-new-drive-wrap" style="display:none"><label for="managed-add-new-drive">Drive root</label><input id="managed-add-new-drive" placeholder="/mnt/games"></div>
+    <label for="managed-add-provider">Manifest source</label><select id="managed-add-provider"><option value="steamml">SteamML (public, no account)</option><option value="api">UMUTron API (signed in)</option></select>
+    <label for="managed-add-proton">Proton runner (optional)</label><input id="managed-add-proton" placeholder="/path/to/proton">
+    <div class="modal-status" role="status"></div>
+    <div class="modal-actions"><button id="managed-add-cancel">Cancel</button><button id="managed-add-submit" class="primary">Add game</button></div></div>`;
+  document.body.appendChild(backdrop);
+  const appIdInput = backdrop.querySelector("#managed-add-appid");
+  const titleInput = backdrop.querySelector("#managed-add-title");
+  const driveSelect = backdrop.querySelector("#managed-add-drive");
+  const newDriveWrap = backdrop.querySelector("#managed-add-new-drive-wrap");
+  const newDriveInput = backdrop.querySelector("#managed-add-new-drive");
+  const providerSelect = backdrop.querySelector("#managed-add-provider");
+  const protonInput = backdrop.querySelector("#managed-add-proton");
+  const submit = backdrop.querySelector("#managed-add-submit");
+  const statusNode = backdrop.querySelector(".modal-status");
+  const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
+  const close = () => backdrop.remove();
+  backdrop.querySelector("#managed-add-close").onclick = close;
+  backdrop.querySelector("#managed-add-cancel").onclick = close;
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  driveSelect.onchange = () => {
+    const fresh = driveSelect.value === "__new";
+    newDriveWrap.style.display = fresh ? "" : "none";
+    if (fresh) newDriveInput.focus();
+  };
+  submit.onclick = async () => {
+    const appId = Number(appIdInput.value.trim());
+    if (!Number.isInteger(appId) || appId <= 0) { setStatus("Enter a numeric Steam App ID.", true); appIdInput.focus(); return; }
+    const fresh = driveSelect.value === "__new";
+    const driveRoot = fresh ? newDriveInput.value.trim() : driveSelect.value;
+    if (!driveRoot) { setStatus("Choose or enter a drive root.", true); return; }
+    const label = fresh ? "" : (driveSelect.selectedOptions[0]?.textContent || "");
+    const stop = busy(submit, "Adding…");
+    setStatus("Downloading the manifest and registering the App ID…");
+    await nextPaint();
+    try {
+      const result = await invoke("add_managed_game", { request: {
+        app_id: appId,
+        title: titleInput.value.trim(),
+        drive_root: driveRoot,
+        drive_label: label,
+        provider: providerSelect.value,
+        proton: protonInput.value.trim(),
+      } });
+      markRestartRequired(`Added ${result.title}. Restart Steam to see it.`);
+      showToast(`Added ${result.title} · ${result.backend}`);
+      close();
+      await load();
+    } catch (error) {
+      stop();
+      setStatus(String(error), true);
+    }
+  };
+  appIdInput.focus();
+}
+
 function showAddGame() {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
@@ -1423,7 +1490,7 @@ function showAddGame() {
 
 document.querySelector("#nav-library").onclick = () => { setView("library"); if (searchEl) searchEl.focus(); };
 document.querySelector("#nav-home").onclick = () => setView("home");
-document.querySelector("#add-game").onclick = showAddGame;
+document.querySelector("#add-game").onclick = () => { if (hasManagedLibrary()) showManagedAddGame(); else showAddGame(); };
 document.querySelector("#settings").onclick = renderSettings;
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = () => { if (hasManagedLibrary()) renderManagedList(); else renderGames(); };

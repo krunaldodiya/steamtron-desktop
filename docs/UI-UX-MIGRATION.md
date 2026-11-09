@@ -200,3 +200,14 @@ screen using real commands with fixtures where the backend is pending.
 - Selecting a managed entry opens its preview: library entry, installation root,
   prefix, owning drive, prefix source, Steam registration and launch mode. Play,
   fixes and update actions belong to the runtime slices and are not shown yet.
+
+## Phase 2 status
+
+- `+ Add Game` opens the managed add stepper: App ID, optional title, drive
+  (existing or new root), manifest source (SteamML public / UMUTron API) and an
+  optional Proton runner. Submitting downloads the Lua, registers the App ID,
+  writes the library entry and shows the Steam restart banner.
+- The pre-migration add dialog stays available only while no managed library
+  exists, so the legacy Steam flow is never removed underneath the user.
+- Doctor now reports the Steam registration backend (SLSsteam-moon /
+  BetterSteamTools) instead of calling it an unlock backend.

@@ -118,7 +118,7 @@ pub fn run() -> DoctorReport {
             backend_ready = status.ready;
             checks.push(check(
                 "unlock-backend",
-                "Steam library backend",
+                "Steam registration backend",
                 if status.ready { CheckStatus::Ok } else { CheckStatus::Error },
                 format!("{}: {}", status.backend, status.details),
             ));
@@ -130,7 +130,7 @@ pub fn run() -> DoctorReport {
         }
         Err(error) => {
             checks.push(with_repair(
-                check("unlock-backend", "Steam library backend", CheckStatus::Error, error.to_string()),
+                check("unlock-backend", "Steam registration backend", CheckStatus::Error, error.to_string()),
                 "install-unlock-backend",
             ));
         }
@@ -146,7 +146,7 @@ pub fn run() -> DoctorReport {
                 "Managed game ownership",
                 CheckStatus::Error,
                 format!(
-                    "{} managed Lua entries exist but no unlock backend is active. Steam can show Purchase for installed games.",
+                    "{} managed Lua entries exist but no registration backend is active. Steam can show Purchase for installed games.",
                     managed.len()
                 ),
             ),

@@ -41,7 +41,7 @@ enum CommandKind {
         #[arg(long)]
         fixes: PathBuf,
     },
-    /// Report the platform Steam unlock backend status.
+    /// Report the platform Steam registration backend status.
     Backend,
     /// Validate Steam, helpers, fixes, and overlay requirements.
     Doctor,
