@@ -15,7 +15,6 @@ let managedSelectedId = null;
 let runningManaged = new Set();
 let libraryPage = 1;
 let homeFocusSection = "recent";
-let managedQuery = "";
 const LIBRARY_PAGE_SIZE = 60;
 let appView = "library";
 let pendingRestart = loadPendingRestart();
@@ -357,8 +356,7 @@ function coverCard(game, section) {
 }
 
 function managedFilteredGames() {
-  const query = managedQuery.trim().toLowerCase();
-  return managedLibrary.games.filter((game) => !query || `${game.title} ${game.metadata_app_id || ""}`.toLowerCase().includes(query));
+  return managedLibrary.games;
 }
 
 function libraryPages() {
@@ -372,12 +370,10 @@ function renderManagedLibrary() {
   const start = (libraryPage - 1) * LIBRARY_PAGE_SIZE;
   const visible = filtered.slice(start, start + LIBRARY_PAGE_SIZE);
   const total = managedLibrary.games.length;
-  const countText = managedQuery.trim() ? `${filtered.length} of ${total} games` : `${total} games`;
   detailEl.innerHTML = `<div class="page library-page">
     <header class="page-head"><h1>Your library</h1><p>Every game, one place. Pick up where you left off.</p></header>
-    <div class="library-search"><input id="managed-search" placeholder="Search your library" value="${escape(managedQuery)}" aria-label="Search your library"><button id="managed-search-button">Search</button></div>
-    <p class="library-count">${escape(countText)}</p>
-    ${visible.length ? `<div class="cover-grid">${visible.map((game) => coverCard(game)).join("")}</div>` : '<div class="empty">No games match your search.</div>'}
+    <p class="library-count">${total} games</p>
+    ${visible.length ? `<div class="cover-grid">${visible.map((game) => coverCard(game)).join("")}</div>` : '<div class="empty">Your library is empty. Add a game from the Store.</div>'}
     <nav class="pager" aria-label="Library pages">
       <button data-page="first"${libraryPage === 1 ? " disabled" : ""}>First</button>
       <button data-page="prev"${libraryPage === 1 ? " disabled" : ""}>Previous</button>
@@ -387,15 +383,7 @@ function renderManagedLibrary() {
     </nav>
     <p class="pager-hint">Page ${libraryPage} of ${pages} · PgUp / PgDn</p>
   </div>`;
-  const input = detailEl.querySelector("#managed-search");
-  const run = () => {
-    managedQuery = input.value;
-    libraryPage = 1;
-    renderManagedLibrary();
-  };
   void hydrateCovers(detailEl);
-  detailEl.querySelector("#managed-search-button").onclick = run;
-  input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
   for (const button of detailEl.querySelectorAll("[data-page]")) {
     button.onclick = () => {
       if (button.dataset.page === "first") libraryPage = 1;
@@ -703,7 +691,7 @@ function enterContentFromHeader() {
       || document.querySelector(".home-page .cover-card");
     if (card) { focusControl(card); return true; }
   }
-  const search = document.querySelector("#managed-search, #store-search");
+  const search = document.querySelector("#store-search");
   if (search) { focusControl(search); return true; }
   const play = document.querySelector("#managed-play, #managed-stop");
   if (play) { focusControl(play); return true; }
@@ -720,7 +708,10 @@ function navigationSurface() {
 
 function navigationControls() {
   const settings = document.querySelector("#settings-page");
-  const root = settings && !settings.classList.contains("hidden") ? settings : document;
+  const modal = document.querySelector(".modal-backdrop");
+  const root = settings && !settings.classList.contains("hidden")
+    ? settings
+    : modal || document;
   return [...root.querySelectorAll("button, input, select, textarea, a[href], [tabindex='0']")]
     .filter((node) => !node.disabled
       && node.getClientRects().length > 0
@@ -951,9 +942,10 @@ function focusedManagedGame() {
   return managedLibrary.games.find((game) => game.id === card.dataset.managed) || null;
 }
 
-function dispatchNavigation(action) {
-  const typing = document.activeElement
-    && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
+function dispatchNavigation(action, fromGamepad = false) {
+  const active = document.activeElement;
+  const tag = active?.tagName;
+  const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
   if (action === "back") {
     if (typing) {
       document.activeElement.blur();
@@ -964,13 +956,22 @@ function dispatchNavigation(action) {
       return;
     }
     if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
+    const modal = document.querySelector(".modal-backdrop");
+    if (modal) { modal.remove(); return; }
     if (appView === "game") { setView("library"); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");
     navState.focused = null;
     document.activeElement?.blur?.();
     return;
   }
-  if (typing) return;
+  if (typing) {
+    if (action === "select") return;
+    if (!fromGamepad) {
+      // Native keys stay inside selects, textareas, and horizontal caret moves.
+      if (tag === "SELECT" || tag === "TEXTAREA") return;
+      if (action === "left" || action === "right") return;
+    }
+  }
   if (action === "select") {
     const control = document.activeElement;
     if (control && typeof control.click === "function" && !control.disabled) control.click();
@@ -1045,7 +1046,7 @@ function pollGamepad(now) {
         : (ay > 0 ? "down" : "up"));
     }
   }
-  for (const action of sampleGamepad(pressed, now)) dispatchNavigation(action);
+  for (const action of sampleGamepad(pressed, now)) dispatchNavigation(action, true);
 }
 
 window.addEventListener("keydown", (event) => {
@@ -1055,8 +1056,11 @@ window.addEventListener("keydown", (event) => {
   const gate = document.querySelector("#auth-gate");
   if (gate && !gate.classList.contains("hidden")) return;
   const typing = event.target && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
-  if (typing && action === "select") return;
-  if (event.key === " " && typing) return;
+  if (typing) {
+    if (action === "select" || event.key === " ") return;
+    if ((action === "left" || action === "right") && event.target.tagName !== "SELECT") return;
+    if (event.target.tagName === "SELECT") return;
+  }
   event.preventDefault();
   dispatchNavigation(action);
 });
