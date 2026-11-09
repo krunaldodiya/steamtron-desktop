@@ -39,9 +39,10 @@ Steam-free path as the default.
    registering imported games in Steam when they are not already present.
 8. Keep Steam registration repairable: verify, re-register, remove, and explain
    partial states in the UI.
-9. **Keep Doctor as a must-have, first-class feature.** The existing
-   `steamtron-doctor` crate is retained and extended in every phase: global and
-   per-game checks, explicit safe repairs, UI and CLI surfaces.
+9. **Keep Doctor as a must-have, first-class feature, scoped to registration
+   backends.** The existing `steamtron-doctor` crate validates SLSsteam-moon and
+   BetterSteamTools only: installation, readiness, client compatibility, and
+   registration behavior. It does not validate games.
 
 ## 3. Non-goals
 
@@ -282,11 +283,11 @@ trait RegistrationBackend {
 - Doctor checks: backend installed/ready, client version support, registration
   present, ownership visible, and restart pending.
 
-## 13. Doctor (must-have)
+## 13. Doctor — registration backend validation (must-have)
 
-Doctor is not a cleanup phase; it is part of every backend. The existing
-`steamtron-doctor` crate is retained and extended — never removed or replaced by
-ad-hoc error dialogs.
+Doctor validates **only** the Steam registration backends: SLSsteam-moon on Linux,
+BetterSteamTools / OpenSteamTool on Windows. It never inspects or repairs games,
+drives, runtimes, fixes, or tools; those surfaces own their own state and errors.
 
 ### 13.1 Contract
 
@@ -294,54 +295,44 @@ ad-hoc error dialogs.
 struct DoctorCheck {
     id: &'static str,
     title: &'static str,
-    status: CheckStatus,        // ok | warning | error
+    status: CheckStatus,        // ok | warning | error | unavailable
     detail: String,
-    repair: Option<RepairKind>, // explicit, idempotent, user-confirmed
+    repair: Option<RepairKind>, // backend-scoped, idempotent, user-confirmed
 }
 ```
 
-- Checks never mutate state; repairs are separate, explicit actions.
-- Repairs never start Steam, never delete user files, and never touch content
-  outside our managed folders.
-- Destructive repairs require confirmation; non-destructive repairs may run
-  after a single click.
-- Doctor is available globally (Dashboard) and per game (game Doctor), and
-  headless via `steamtron-cli doctor --json`.
-- Every new backend ships with its checks in the same phase that introduces it.
+- Checks never mutate; repairs are separate and explicit.
+- Repairs never start Steam and never touch game content.
+- One section per backend; the backend that does not apply to the platform is
+  reported as `unavailable`, not as an error.
+- Surfaces: UI dashboard and `steamtron-cli doctor [--json]`.
+- The crate is retained (`steamtron-doctor`) and extended for the new
+  `RegistrationBackend` trait; it is not replaced by per-screen errors.
 
-### 13.2 Global checks
+### 13.2 Checks
 
-| Group | Checks |
+| Check | Detail | Repair |
+|---|---|---|
+| Backend present | SLSsteam `.so` + wrapper, or BetterSteamTools install | Explain and link setup; install is explicit |
+| Backend ready | injection/loader configured for the current client | Re-apply backend setup |
+| Client found | Steam install path resolved | Show the expected path |
+| Client version supported | known-good build range for the backend | Warn, link upstream, offer re-check |
+| Registration visible | App ID present in the client's library/ownership state | Register through the backend; verify |
+| Pending restart | backend wrote state; the client must restart | Ask the user; re-verify on focus |
+| Orphan entries | App IDs no longer managed by us | Offer removal (our IDs only) |
+| Conflicting backends | more than one registration backend active | Explain and disable one |
+| Backend error log | last backend failure message | Show detail; retry |
+
+### 13.3 Outside Doctor
+
+| Failure | Where it is shown |
 |---|---|
-| App | app data writable, `library.json` valid, diagnostics folder writable, version/migrations |
-| Drives | mounted, writable, layout present (`umuapps/{common,compatdata,fixes}`), duplicate roots |
-| Registration | backend installed/ready (SLSsteam-moon / BetterSteamTools), client version support, pending restarts, entries outside our App IDs |
-| Runtime | `umu-run` present, selected Proton valid (Linux), WinFsp/filesystem (Windows), `fuse-overlayfs` + `fusermount3` (Linux) |
-| Tools | GoldBerg cache + checksum, Steamless cache, Wine for Linux Steamless, tool source reachability |
-| Steam (only when used) | client installed, client running when required, ownership visible for the App ID |
-
-### 13.3 Per-game checks
-
-| Check | Repair |
-|---|---|
-| Executable exists and is inside the installation root | Re-point launch target |
-| Installation root readable; managed manifest matches | Recreate manifest |
-| Prefix missing after deletion | Create prefix with the selected runtime |
-| Fixes folder not canonical or duplicated | Offer relocation (no merge of differing trees) |
-| Overlay backend unavailable | Explain install requirement; block Play only for fixes |
-| `launch_mode = steam_client` but not registered | Re-register, then re-verify |
-| `launch_mode = steam_client` but client stopped | Ask the user to start Steam (never auto-start) |
-| `launch_mode = emulator` but emulator payload missing/damaged | Re-apply GoldBerg from the cached verified tool |
-| Steamless manifest references changed files | Report; remove only unchanged entries |
-| Stale launch targets (deleted paths) | Prune or re-point |
-| Environment overrides contradictory to the launch mode | Explain; offer a one-click fix |
-
-### 13.4 Surfaces
-
-- UI: Doctor dashboard grouped as above, with per-check details and repair buttons;
-  a game-level Doctor reachable from the detail page.
-- CLI: `steamtron-cli doctor` (human) and `--json` (support bundles).
-- Diagnostics: every Play failure links to the relevant game Doctor check.
+| Missing/renamed game files, stale launch target | Game detail, Play error |
+| Prefix missing or runner unavailable | Compatibility page, Play error |
+| Overlay backend unavailable | Fixes → launch overlay section |
+| GoldBerg/Steamless tool or payload problems | Fixes sections |
+| Per-game registration state while adding | Add flow and Compatibility |
+| Run logs and evidence | Debug |
 
 ## 14. UI (from UmuTron)
 
@@ -350,13 +341,13 @@ struct DoctorCheck {
 - Compatibility: runtime, prefix source, launch mode, Steam client requirement,
   resolved Proton/prefix paths.
 - Environment editor, Debug (logs, run evidence, controller status), Storage/drives,
-  Backups, Integrity, and **Doctor** as a top-level screen: global dashboard plus a
-  per-game Doctor reachable from the detail page.
+  Backups, Integrity, and **Doctor** as a top-level screen for registration
+  backend validation (SLSsteam-moon / BetterSteamTools). No per-game Doctor.
 - Controller navigation (SDL polling, reconnect on focus), picker memory,
   TV/fullscreen parity.
-- No Activity tab in the detail page and no global Activity screen. The Debug
-  page carries run logs and evidence; Doctor carries problems and repairs, so
-  both jobs already exist once.
+- No Activity tab in the detail page and no global Activity screen. Debug
+  carries run logs and evidence; Doctor carries registration-backend problems
+  and repairs; each job exists exactly once.
 
 ## 15. Migration and import
 
@@ -374,15 +365,15 @@ struct DoctorCheck {
 
 | Phase | Deliverable | Acceptance |
 |---|---|---|
-| 0. Decisions | PRD, library folder name, backend matrix, launch-mode defaults, Doctor check map | Reviewed and merged |
-| 1. Core model | `library.json` v2, drives, validation, dry-run importers, app/drive Doctor checks | Import with zero data loss; Doctor reports broken drives/layout |
-| 2. Dual add | Add-game transaction, registration backends, repair UI, registration Doctor checks/repairs | Adding registers or reports exact state; Doctor re-registers and clears pending restarts |
-| 3. Linux runtime | Planner, supervisor, evidence, Play/Stop, runtime/prefix Doctor checks | Steam-free launch; Doctor explains missing runner/overlay/prefix |
-| 4. Windows runtime | Native supervisor + WinFsp overlay + Windows checks | Windows launch with fixes; Doctor verifies WinFsp and runtime |
-| 5. Emulation tooling | GoldBerg + Steamless managers and UI + tool checks/repairs | Apply/Remove/re-apply; Doctor re-downloads or repairs payloads |
-| 6. Steam client mode | Requirement check, registration verification, ownership errors, contradiction checks | Blocked Play links to the exact Doctor check; no auto-start |
+| 0. Decisions | PRD, library folder name, backend matrix, launch-mode defaults, Doctor backend check map | Reviewed and merged |
+| 1. Core model | `library.json` v2, drives, validation, dry-run importers | Import with zero data loss |
+| 2. Dual add | Add-game transaction, registration backends, repair UI, **all backend Doctor checks/repairs** | Adding registers or reports exact state; Doctor validates the backend and clears pending restarts |
+| 3. Linux runtime | Planner, supervisor, evidence, Play/Stop | Steam-free launch; runtime problems surface on Compatibility/Play |
+| 4. Windows runtime | Native supervisor + WinFsp overlay | Windows launch with fixes |
+| 5. Emulation tooling | GoldBerg + Steamless managers and UI | Apply/Remove/re-apply; tool problems surface in the sections |
+| 6. Steam client mode | Requirement check, registration verification, ownership errors, contradiction checks | Blocked Play explains the state; backend failures link to Doctor |
 | 7. UI parity | All UmuTron screens and commands | Manual matrix on desktop + TV; controller and pickers verified |
-| 8. Library services | Backups/restore, integrity, optional updates, Doctor consolidation | Restore to chosen drive; every failure has a Doctor entry |
+| 8. Library services | Backups/restore, integrity, optional updates | Restore to chosen drive; failures explained |
 | 9. Hardening | Cross-OS CI, signing, docs, release | Both platforms pass the acceptance matrix |
 
 ## 17. Risks
@@ -403,8 +394,9 @@ struct DoctorCheck {
   fixes rules, manifests.
 - Fake registration backends for every state (`registered`, `pending_restart`,
   `backend_missing`, `failed`).
-- Doctor checks and repairs for every state, including idempotent re-runs and
-  refusal to start Steam or delete user files.
+- Doctor backend checks and repairs for every backend state, including
+  idempotent re-runs, `unavailable` on the other platform, and refusal to start
+  Steam or delete user files.
 - Fixture drives and fake runtimes for supervisor tests.
 - Overlay conformance per OS.
 - Importers: golden UmuTron library and old SteamTron config; assert no mutation.
