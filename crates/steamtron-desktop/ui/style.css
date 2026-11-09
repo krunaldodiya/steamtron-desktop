@@ -257,12 +257,16 @@ body {
   padding: 9px 16px; border-radius: 10px; font-size: 14px;
 }
 .nav-item:hover { background: #333d4b; }
-.nav-item.active { background: #171e27; }
+.nav-item.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.nav-item.active:hover { background: #8ff0dc; }
 .nav-item.nav-focus, .topbar .nav-item:focus, .topbar .nav-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-color: var(--border-strong);
-  background: #171e27;
 }
 .panel {
   background: var(--surface-raised);
@@ -391,7 +395,8 @@ button.primary:hover { filter:brightness(1.06); }
 .cover.cover-missing { display:grid; place-items:center; padding:8px; color:var(--muted); font-size:11px; line-height:1.3; text-align:center; background:linear-gradient(145deg,#1b2430,#10161d); }
 .cover.cover-missing::before { content:"No cover art"; }
 
-.profile-button { width:40px; height:40px; padding:0; border-radius:50%; display:grid; place-items:center; background:var(--surface-raised); border:1px solid var(--border-strong); color:var(--text); }
+#settings { background:#2b3441; border-color:var(--border-strong); }
+.profile-button { width:40px; height:40px; padding:0; border-radius:50%; display:grid; place-items:center; background:#2b3441; border:1px solid var(--border-strong); color:var(--text); }
 .profile-button:hover { border-color:var(--accent); color:var(--accent); }
 .top-actions { gap:10px; }
 .store-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:20px; margin-top:22px; }
