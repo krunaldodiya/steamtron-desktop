@@ -2389,10 +2389,10 @@ async function refreshStore(resetPage = false) {
 
 function renderStorePage() {
   const genreOptions = storeGenres.map((genre) =>
-    `<option value="${escape(String(genre.id))}"${String(genre.id) === storeGenre ? " selected" : ""}>${escape(genre.name)}</option>`
+    `<button class="store-option${String(genre.id) === storeGenre ? " selected" : ""}" data-store-genre="${escape(String(genre.id))}">${escape(genre.name)}</button>`
   ).join("");
   const sortOptions = [["popular", "Most popular"], ["rating", "Top rated"], ["latest", "Newest"], ["name_asc", "A–Z"], ["name_desc", "Z–A"]]
-    .map(([value, label]) => `<option value="${value}"${value === storeSort ? " selected" : ""}>${label}</option>`)
+    .map(([value, label]) => `<button class="store-option${value === storeSort ? " selected" : ""}" data-store-sort="${value}">${label}</button>`)
     .join("");
   const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : `${storeTotal ? storeTotal.toLocaleString() : storeItems.length} games · page ${storePage} of ${storePages}`;
   detailEl.innerHTML = `<div class="page store-page">
@@ -2400,12 +2400,14 @@ function renderStorePage() {
     <div class="store-body">
       <aside class="store-sidebar">
         <label for="store-search">Search</label>
-        <input id="store-search" placeholder="Search the catalogue" value="${escape(storeQuery)}" aria-label="Search the catalogue">
-        <button id="store-search-button">Search</button>
-        <label for="store-genre">Genre</label>
-        <select id="store-genre" aria-label="Genre"><option value="">All genres</option>${genreOptions}</select>
-        <label for="store-sort">Sort</label>
-        <select id="store-sort" aria-label="Sort">${sortOptions}</select>
+        <input id="store-search" placeholder="Search the catalogue and press Enter" value="${escape(storeQuery)}" aria-label="Search the catalogue">
+        <label>Genre</label>
+        <div class="store-option-list" role="listbox" aria-label="Genre">
+          <button class="store-option${storeGenre === "" ? " selected" : ""}" data-store-genre="">All genres</button>
+          ${genreOptions}
+        </div>
+        <label>Sort</label>
+        <div class="store-option-list" role="listbox" aria-label="Sort">${sortOptions}</div>
         <p class="library-count">${escape(count)}</p>
       </aside>
       <section class="store-content">
@@ -2429,10 +2431,13 @@ function renderStorePage() {
 
   const input = detailEl.querySelector("#store-search");
   const run = () => { storeQuery = input.value.trim(); void refreshStore(true); };
-  detailEl.querySelector("#store-search-button").onclick = run;
   input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
-  detailEl.querySelector("#store-genre").onchange = (event) => { storeGenre = event.target.value; void refreshStore(true); };
-  detailEl.querySelector("#store-sort").onchange = (event) => { storeSort = event.target.value; void refreshStore(true); };
+  for (const button of detailEl.querySelectorAll("[data-store-genre]")) {
+    button.onclick = () => { storeGenre = button.dataset.storeGenre; void refreshStore(true); };
+  }
+  for (const button of detailEl.querySelectorAll("[data-store-sort]")) {
+    button.onclick = () => { storeSort = button.dataset.storeSort; void refreshStore(true); };
+  }
   const retry = detailEl.querySelector("#store-retry");
   if (retry) retry.onclick = () => { void refreshStore(false); };
   for (const button of detailEl.querySelectorAll("[data-store-page]")) {
