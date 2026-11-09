@@ -9,6 +9,9 @@ let heroPlayTimer = null;
 let selected = null;
 let detailTab = "general";
 let artworkLoading = false;
+let managedLibrary = null;
+let managedSelectedId = null;
+let appView = "library";
 let pendingRestart = loadPendingRestart();
 
 
@@ -250,6 +253,133 @@ function showMigration(sources) {
   };
 }
 
+
+function hasManagedLibrary() {
+  return Boolean(managedLibrary?.games?.length);
+}
+
+function managedDrive(game) {
+  const root = game.installation?.root || "";
+  return (managedLibrary?.drives || []).find((drive) => {
+    const base = String(drive.root || "").replace(/\/+$/, "");
+    return base && (root === base || root.startsWith(base + "/"));
+  }) || null;
+}
+
+function managedReady(game) {
+  return Boolean(game.installation?.root);
+}
+
+function managedCard(game, compact = false) {
+  const appId = game.metadata_app_id;
+  const cover = appId ? coverUrl(appId) : "";
+  const meta = appId ? `Steam App ${appId}` : "Managed entry";
+  const readiness = managedReady(game) ? "Ready" : "Setup needed";
+  const selectedClass = game.id === managedSelectedId ? " active" : "";
+  return `<button class="game game-card${selectedClass}${compact ? " compact" : ""}" data-managed="${escape(game.id)}" title="${escape(game.title)}">
+    <span class="cover" aria-hidden="true">${cover ? `<img loading="lazy" src="${escape(cover)}" alt="">` : ""}</span>
+    <span class="game-meta">
+      <strong>${escape(game.title)}</strong>
+      <span>${escape(meta)}</span>
+      <span class="badges"><span class="badge${managedReady(game) ? " ok" : " warn"}">${escape(readiness)}</span></span>
+    </span>
+  </button>`;
+}
+
+function renderManagedList() {
+  const query = searchEl.value.trim().toLowerCase();
+  gamesEl.className = "games list";
+  gamesEl.replaceChildren();
+  const visible = managedLibrary.games.filter((game) => !query || `${game.title} ${game.metadata_app_id || ""}`.toLowerCase().includes(query));
+  for (const game of visible) {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = managedCard(game);
+    gamesEl.appendChild(wrapper.firstElementChild);
+  }
+  if (!gamesEl.children.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = managedLibrary.games.length ? "No games match your search." : "Your library is empty. Add a game to get started.";
+    gamesEl.appendChild(empty);
+  }
+}
+
+function managedDetails(game) {
+  const drive = managedDrive(game);
+  return `<div class="status">
+    <div class="row"><div class="label">Library entry</div><div class="value">${escape(game.id)}</div></div>
+    <div class="row"><div class="label">Installation</div><div class="value">${escape(game.installation?.root || "Not configured")}</div></div>
+    <div class="row"><div class="label">Prefix</div><div class="value">${escape(game.installation?.prefix || "Created on first Play")}</div></div>
+    <div class="row"><div class="label">Drive</div><div class="value">${escape(drive ? `${drive.label || drive.id} · ${drive.root}` : "Not on a registered drive")}</div></div>
+    <div class="row"><div class="label">Prefix source</div><div class="value">${escape(game.launch?.prefix_mode === "steam" ? "Steam compatdata" : "SteamTron prefix")}</div></div>
+    <div class="row"><div class="label">Steam</div><div class="value">${escape(game.metadata_app_id ? `App ${game.metadata_app_id}` : "No App ID")}${game.steam ? ` · ${escape(game.steam.state || "unregistered")}` : ""}</div></div>
+    <div class="row"><div class="label">Launch mode</div><div class="value">${escape(game.steam?.launch_mode || "emulator")}</div></div>
+  </div>`;
+}
+
+function renderManagedPreview(game) {
+  const appId = game.metadata_app_id;
+  const hero = appId ? headerUrl(appId) : "";
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p></div></div>${managedDetails(game)}`;
+}
+
+function renderManagedHome() {
+  const installed = managedLibrary.games.filter((game) => managedReady(game));
+  const pending = managedLibrary.games.filter((game) => !managedReady(game));
+  const featured = installed[0] || managedLibrary.games[0];
+  const appId = featured?.metadata_app_id;
+  const hero = appId ? headerUrl(appId) : "";
+  const rail = (title, items, empty) => `<section class="managed-rail"><h2>${escape(title)}</h2>${items.length ? `<div class="rail-list">${items.map((game) => managedCard(game, true)).join("")}</div>` : `<div class="status">${escape(empty)}</div>`}</section>`;
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><p class="muted">Your library</p><h2>${escape(featured?.title || "Your next game")}</h2></div></div>${rail("Ready to play", installed.slice(0, 8), "No installed games yet.")}${rail("Needs setup", pending.slice(0, 8), "Every library entry is ready.")}`;
+}
+
+function renderManagedMode() {
+  if (!hasManagedLibrary()) return;
+  if (!managedLibrary.games.some((game) => game.id === managedSelectedId)) {
+    managedSelectedId = managedLibrary.games[0]?.id || null;
+  }
+  renderManagedList();
+  if (appView === "home") {
+    renderManagedHome();
+    return;
+  }
+  const game = managedLibrary.games.find((item) => item.id === managedSelectedId);
+  if (game) renderManagedPreview(game);
+}
+
+function setView(view) {
+  appView = view;
+  document.querySelector("#nav-home").classList.toggle("active", view === "home");
+  document.querySelector("#nav-library").classList.toggle("active", view === "library");
+  document.querySelector("#nav-home").setAttribute("aria-current", view === "home" ? "page" : "false");
+  document.querySelector("#nav-library").setAttribute("aria-current", view === "library" ? "page" : "false");
+  if (hasManagedLibrary()) {
+    renderManagedMode();
+  } else if (view === "library") {
+    renderGames();
+    const game = games.find((item) => item.appid === selected);
+    if (game) renderDetail(game, detailTab);
+    else detailEl.innerHTML = `<div class="empty">No Steam games found.</div>`;
+  } else {
+    detailEl.innerHTML = `<div class="empty">Add a game to build your library.</div>`;
+  }
+}
+
+gamesEl.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-managed]");
+  if (!button) return;
+  managedSelectedId = button.dataset.managed;
+  appView = "library";
+  setView("library");
+});
+
+detailEl.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-managed]");
+  if (!button) return;
+  managedSelectedId = button.dataset.managed;
+  setView("library");
+});
+
 async function boot() {
   try {
     const auth = await invoke("profile_status");
@@ -401,7 +531,7 @@ function selectGame(game) {
 
 gamesEl.addEventListener("click", (event) => {
   const button = event.target.closest(".game-card");
-  if (!button) return;
+  if (!button || button.dataset.managed) return;
   selectGame(games.find((game) => game.appid === button.dataset.appid));
 });
 
@@ -1014,6 +1144,12 @@ async function load() {
       if (added.length) await loadFixes();
     } catch (_error) { /* non-fatal */ }
     try { await invoke("auto_pin_installed"); } catch (_error) { /* non-fatal */ }
+    try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { managedLibrary = null; }
+    if (hasManagedLibrary()) {
+      renderManagedMode();
+      void loadArtwork();
+      return true;
+    }
     if (!games.some((game) => game.appid === selected)) {
       selected = games[0]?.appid || null;
       detailTab = "general";
@@ -1285,11 +1421,12 @@ function showAddGame() {
   queryInput.focus();
 }
 
-document.querySelector("#nav-library").onclick = () => { if (searchEl) searchEl.focus(); };
+document.querySelector("#nav-library").onclick = () => { setView("library"); if (searchEl) searchEl.focus(); };
+document.querySelector("#nav-home").onclick = () => setView("home");
 document.querySelector("#add-game").onclick = showAddGame;
 document.querySelector("#settings").onclick = renderSettings;
 document.querySelector("#refresh").onclick = refreshLibrary;
-searchEl.oninput = renderGames;
+searchEl.oninput = () => { if (hasManagedLibrary()) renderManagedList(); else renderGames(); };
 document.querySelector("#restart-banner-button").onclick = (event) => restartSteam(event.currentTarget);
 document.querySelector("#restart-banner-dismiss").onclick = () => {
   clearRestartRequired();

@@ -189,3 +189,14 @@ screen using real commands with fixtures where the backend is pending.
 | Controller in webview | Rust `gilrs` loop in the backend; UI receives actions as events |
 | Platform font/GPU differences | Ship fallback fonts; test Cairo/WebKitGTK and WebView2 |
 | Two backends of “status” creeping back | Enforce the “status has one home” table in review |
+
+## Implementation status (phase 1)
+
+- `Home` and `Library` are selectable routes in the header. `Library` shows the
+  managed grid with search, readiness badges and an empty state; `Home` shows the
+  featured entry plus "Ready to play" / "Needs setup" rails.
+- Managed mode activates when `library_snapshot` returns at least one game. Until
+  then the pre-migration Steam view keeps working unchanged.
+- Selecting a managed entry opens its preview: library entry, installation root,
+  prefix, owning drive, prefix source, Steam registration and launch mode. Play,
+  fixes and update actions belong to the runtime slices and are not shown yet.
