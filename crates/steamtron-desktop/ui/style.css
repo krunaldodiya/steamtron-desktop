@@ -434,3 +434,7 @@ body.store-open { overflow:hidden; }
 .fullscreen-options { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
 .fullscreen-options button { width:100%; padding:12px 16px; }
 body.fullscreen-mode .topbar { padding:10px 20px; }
+
+#window-mode .icon-exit { display:none; }
+body.fullscreen-mode #window-mode .icon-enter { display:none; }
+body.fullscreen-mode #window-mode .icon-exit { display:block; }

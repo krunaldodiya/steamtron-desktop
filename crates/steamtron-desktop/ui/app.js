@@ -2840,7 +2840,10 @@ window.addEventListener("focus", async () => {
   await refreshManagedRunning();
   if (appView === "library" || appView === "home" || appView === "game") renderManagedMode();
 });
-document.querySelector("#settings").onclick = openSettingsPage;
+document.querySelector("#settings").onclick = () => {
+  if (document.body.classList.contains("fullscreen-mode")) openFullscreenOptions();
+  else void openSettingsPage();
+};
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = () => { if (hasManagedLibrary()) renderManagedList(); else renderGames(); };
 document.querySelector("#restart-banner-button").onclick = (event) => restartSteam(event.currentTarget);
