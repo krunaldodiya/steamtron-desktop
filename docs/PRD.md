@@ -7,11 +7,13 @@ Last updated: 2026-11-03
 This document is the source of truth for product scope, platform decisions, and
 development conventions.
 
-> 2026-11-09 — Steam-agnostic migration: the desktop app moves to a managed,
-> Steam-free library (runtime adapters, GoldBerg, Steamless) while keeping the
-> Steam client path as an optional integration. See
+> 2026-11-09 — Dual-library migration: adding a game now creates both a managed
+> library entry and a Steam client library registration (SLSsteam-moon on Linux,
+> BetterSteamTools on Windows). Content stays in our drives; Steam is never the
+> downloader. Launching uses our supervisor with three modes: GoldBerg emulator
+> (default), registered Steam client (for Steamworks titles), or native. See
 > [`UMUTRON-TO-STEAMTRON-MIGRATION-PRD.md`](UMUTRON-TO-STEAMTRON-MIGRATION-PRD.md).
-> That document is the source of truth for the migration phases and contracts. If an implementation conflicts with this document,
+> That document is the source of truth for migration phases and contracts. If an implementation conflicts with this document,
 either fix the implementation or amend the document with a dated decision.
 
 ## 1. Purpose

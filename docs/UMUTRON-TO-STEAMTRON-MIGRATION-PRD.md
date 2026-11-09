@@ -1,293 +1,344 @@
-# SteamTron Desktop → Steam-agnostic migration PRD
+# SteamTron Desktop → dual-library, Steam-agnostic launcher
 
 Status: proposal for review
-Version: 0.1
+Version: 0.2 (supersedes 0.1 in git history)
 Date: 2026-11-09
-Scope: this repository only (`SteamTron-Desktop`). **UmuTron is not refactored**: it is the behavioral reference implementation.
+Scope: this repository only (`SteamTron-Desktop`). **UmuTron is not refactored**: it is the behavioral and UI reference.
 
 ## 1. Why
 
-SteamTron Desktop today is a Steam manager: it discovers the Steam library, writes
-`localconfig.vdf` launch options, installs Lua/manifest entries through SLSsteam /
-BetterSteamTools, and starts games through Steam. That makes Steam a hard
-dependency for every game.
+Two products solved halves of the problem:
 
-UmuTron proved the opposite contract on Linux: a managed library plus a fixes
-overlay plus a Steam emulator (GoldBerg) and Steamless lets most Steam games run
-**without a Steam client at all**. This PRD moves that contract into SteamTron
-Desktop, cross-platform (Windows + Linux), while keeping the existing Steam mode
-as an explicit, optional integration for the games that truly need it.
+- **UmuTron** owns a managed game library, a fixes overlay, a launch supervisor,
+  GoldBerg/Steamless automation, and a TV-friendly UI — but adding a game only
+  touches its own library.
+- **SteamTron Desktop** owns cross-platform packaging and Steam-library
+  registration through SLSsteam-moon (Linux) and BetterSteamTools (Windows) — but
+  adding a game only touches Steam, and its UI is built around Steam.
 
-Non-negotiable framing:
-
-- SteamTron Desktop is the product being changed.
-- No Python code is shipped or executed; UmuTron modules are the specification.
-- Steam is optional. Default Play must never require, start, or wait for Steam.
-- Existing SteamTron data must be imported non-destructively.
+The product now **does both for every game**: one action adds the game to the
+managed library *and* registers it in the Steam client's library. Content is
+never downloaded by Steam; the Steam entry exists so the client reports the App
+ID as owned when a title needs Steamworks. Launching remains ours, with the
+Steam-free path as the default.
 
 ## 2. Goals
 
-1. One Tauri 2 application on Windows and Linux that runs Steam games without Steam.
-2. Managed library (drives, games, prefixes, fixes) independent of the Steam client.
-3. Launch pipeline with evidence, stop semantics, and diagnostics on both OSes.
-4. Per-game Steam emulation automation (GoldBerg) and Steam DRM unpacking (Steamless).
-5. Fixes overlay on both OSes (fuse-overlayfs / WinFsp) with one fixes location per game.
-6. Optional per-game “Steam client required” mode: verify installed + running, never start it.
-7. Import UmuTron libraries and existing SteamTron configuration without data loss.
-8. Keep the current Steam features available as an opt-in integration, not the default path.
+1. One Tauri 2 application on Windows and Linux (the UI contract comes from UmuTron).
+2. **Dual registration on add**: managed library entry + Steam library entry
+   (SLSsteam-moon on Linux, BetterSteamTools on Windows), in one flow.
+3. Managed content layout and launch supervisor independent of Steam.
+4. Three explicit launch modes per game:
+   - **Emulator (default where it works)**: GoldBerg, no Steam client required.
+   - **Steam client**: the registered App ID is used through the running client
+     (required by some Steamworks titles). Never started automatically.
+   - **Native**: no Steamworks at all (Linux: UMU/Proton may still be the runtime).
+5. Fixes overlay on both OSes with one canonical fixes folder per game.
+6. GoldBerg and Steamless automation as first-class fixes sections.
+7. Import UmuTron libraries and existing SteamTron configuration without data loss,
+   registering imported games in Steam when they are not already present.
+8. Keep Steam registration repairable: verify, re-register, remove, and explain
+   partial states in the UI.
 
 ## 3. Non-goals
 
 - Refactoring or shipping UmuTron.
-- Reimplementing the Steam client or Steam Input.
-- Bypassing Denuvo/EAC/BattlEye; documenting per-title workarounds as guarantees.
-- Wine/Proton on Windows (native execution only).
+- Downloading game content through Steam; repositories/manifests stay optional.
+- Reimplementing Steam Input, cloud saves, achievements, or anti-cheat.
+- Bypassing Denuvo/EAC/BattlEye.
+- Wine/Proton on Windows.
 - Mac support.
-- Bundling third-party binaries without license review; tools are downloaded on demand.
+- Auto-starting the Steam client. The app may ask the user to start it.
 
 ## 4. Current state (audit)
 
-| Area | SteamTron Desktop today | Steam-free target |
+| Area | SteamTron today | Target |
 |---|---|---|
 | Game identity | `appid` key in `config.json` | `Game.id` + optional `metadata_app_id` |
-| Discovery | Steam `libraryfolders.vdf`, appmanifests (required) | Managed drives; Steam scan is an optional importer |
-| Launch | `steam://rungameid`, `localconfig.vdf` options | Own supervisor + runtime adapter; Steam mode optional |
-| Fixes | ZIP + fuse-overlayfs / WinFsp, keyed by appid | Same overlay backends, one canonical fixes folder per game |
-| Unlock | SLSsteam / BetterSteamTools (required) | GoldBerg emulator (default); SLSsteam/BTS optional |
-| Lua/manifest | `stplug-in`, depotcache | Optional “Steam integration” feature set |
-| Runtime | Steam’s own Proton | Linux: umu-run + Proton; Windows: native |
-| Updates/pins | Steam manifests | Keep; becomes optional Steam-mode feature |
-| Doctor/auth/UI | Present | Keep; extend for new backends |
+| Add game | Steam Lua/manifest entry only | Managed entry **and** Steam registration |
+| Content | Steam `steamapps/common` | Managed drives (`UmuLibrary/umuapps`) |
+| Registration | SLSsteam / BetterSteamTools (only path) | Registration backends behind a trait, mandatory on add |
+| Launch | `steam://rungameid` / launch options | Own supervisor + runtime adapters; Steam client mode optional per game |
+| Fixes | ZIP + fuse/WinFsp keyed by appid | Same backends, canonical folder, GoldBerg + Steamless sections |
+| Runtime | Steam's Proton | Linux: umu-run + Proton; Windows: native |
+| UI | Steam catalogue-centric Tauri UI | UmuTron library/detail/fixes/compatibility UI |
 
-Existing crates stay, with new modules and two new platform crates:
+## 5. Product model
+
+### 5.1 Dual registration
 
 ```text
-crates/
-  steamtron-core/        models, storage, launch planner, fixes, tools, steam import
-  steamtron-overlay/     fuse-overlayfs (Linux), WinFsp (Windows)  [keep]
-  steamtron-runtime/     RuntimeBackend trait + supervisor contract
-  steamtron-runtime-linux/   umu-run + Proton adapter
-  steamtron-runtime-windows/ native process adapter
-  steamtron-emulator/    GoldBerg assets + apply/remove
-  steamtron-unpack/      Steamless assets + apply/remove
-  steamtron-unlock/      SLSsteam / BetterSteamTools  [optional mode]
-  steamtron-library/     backup, updates, importers
-  steamtron-doctor/      diagnostics per backend
-  steamtron-desktop/     Tauri commands + UI
-  steamtron-cli/         headless: doctor, launch, fixes, tools
+        +----------------------+        +---------------------------+
+ add -> | Managed library      |        | Steam client library      |
+        | drives, prefixes,    |  +-->  | SLSsteam-moon (Linux)     |
+        | fixes, launch config |        | BetterSteamTools (Windows)|
+        +----------------------+        +---------------------------+
+                 |                                   |
+                 | content stays here                | ownership + library entry only
+                 +-----------------+-----------------+
+                                   |
+                               Play (ours)
 ```
 
-## 5. Architecture
+- Every added game gets a managed record and a Steam registration.
+- Registration grants the App ID to the client; it never downloads content.
+- Removing a game from our library offers to remove the Steam registration too.
+- Registration is idempotent and verifiable; re-adding repairs a missing entry.
+
+### 5.2 Registration states
+
+| State | Meaning | UI |
+|---|---|---|
+| `registered` | Backend reports the App ID present | Ready |
+| `pending_restart` | Written, but the client must restart | “Restart Steam to finish” |
+| `backend_missing` | SLSsteam/BTS not installed or not ready | Actionable error + doctor link |
+| `client_stopped` | Backend needs the client to apply live | Ask user to start Steam |
+| `failed` | Backend rejected the entry | Retry / details |
+
+### 5.3 Launch modes
+
+| Mode | Requires Steam client | When |
+|---|---|---|
+| `emulator` | No | Default. GoldBerg replaces the Steam library and interfaces |
+| `steam_client` | Yes, running | Titles that need real Steamworks/ownership behavior |
+| `native` | No | Games without Steamworks, or native Linux builds |
+
+Selection rules:
+
+- Default from detection: a game with a `steam_api(64).dll` → `emulator`;
+  otherwise `native`.
+- `steam_client` is opt-in per game and verified at Play (installed + running,
+  registration present). Never started by us.
+- A failed emulator launch can be retried in `steam_client` mode without
+  re-adding the game.
+
+## 6. Architecture
 
 ```mermaid
 flowchart LR
   UI[Tauri UI] --> Core[steamtron-core]
   CLI[steamtron-cli] --> Core
-  Core --> Store[(Managed library\nlibrary.json + drives)]
-  Core --> Planner[Launch planner]
-  Planner --> RT[RuntimeBackend]
+  Core --> Store[(library.json + drives)]
+  Core --> Reg[RegistrationBackend]
+  Reg --> SLS[Linux: SLSsteam-moon]
+  Reg --> BTS[Windows: BetterSteamTools]
+  Core --> Plan[Launch planner]
+  Plan --> RT[RuntimeBackend]
   RT --> Lin[Linux: umu-run + Proton]
-  RT --> Win[Windows: native process]
-  Planner --> Ovl[OverlayBackend]
+  RT --> Win[Windows: native]
+  Plan --> Ovl[OverlayBackend]
   Ovl --> Fuse[fuse-overlayfs]
-  Ovl --> Winfsp[WinFsp union]
-  Core --> Emu[Emulator: GoldBerg]
-  Core --> Unp[Unpacker: Steamless]
-  Core --> Tools[Tool cache + verification]
-  Core -. optional .-> Steam[Steam integration\nSLSsteam / BTS / Lua]
+  Ovl --> Fsp[WinFsp union]
+  Core --> Emu[GoldBerg]
+  Core --> Unp[Steamless]
+  Core --> Tools[Tool cache + checksums]
 ```
 
-Invariants (ported from UmuTron):
+Invariants:
 
-- Never write inside an installed game tree; the overlay is the only writable view.
-- Never start, wait for, or depend on Steam unless a game explicitly requires it.
+- Never write inside an installed game tree; the overlay is the writable view.
+- Never start Steam; only verify and ask.
 - One fixes location per game: `<drive>/<Library>/umuapps/fixes/<Game>`.
-- Tools are downloaded once into app data, verified, and shared by every game.
-- Every launch is owned by a supervisor process with a JSON run record and evidence.
+- Registration and content are independent: a failed registration never blocks
+  editing, importing fixes, or removing content.
+- Tools are downloaded once, verified, and shared.
 
-## 6. Data model
+## 7. Crates
 
-New `library.json` (app data), replacing appid-keyed `config.json` for the
-Steam-free path. Migration keeps the old file readable.
+```text
+crates/
+  steamtron-core/            models, storage, planner, fixes, tools, steam import
+  steamtron-overlay/         fuse-overlayfs (Linux), WinFsp (Windows)        [keep]
+  steamtron-runtime/         RuntimeBackend + supervisor contract            [new]
+  steamtron-runtime-linux/   umu-run + Proton                               [new]
+  steamtron-runtime-windows/ native process                                 [new]
+  steamtron-register/        RegistrationBackend + Linux/Windows adapters    [renamed from unlock]
+  steamtron-emulator/        GoldBerg assets and apply/remove                [new]
+  steamtron-unpack/          Steamless assets and apply/remove               [new]
+  steamtron-library/         importers, backup, optional updates/manifests   [extend]
+  steamtron-doctor/          checks per backend and per game                 [extend]
+  steamtron-desktop/         Tauri commands + UmuTron-derived UI             [extend]
+  steamtron-cli/             headless doctor/register/launch/fixes           [extend]
+```
+
+## 8. Data model
 
 ```json
 {
   "version": 2,
-  "settings": {
-    "default_display_mode": "desktop",
-    "gamemode": true,
-    "picker_folders": { "fixes_export": "/mnt/x" }
-  },
-  "drives": [
-    { "id": "drive-1", "root": "/mnt/krunal", "label": "Samsung", "default": true }
-  ],
-  "games": [
-    {
+  "settings": { "default_display_mode": "desktop", "gamemode": true,
+                "picker_folders": { "fixes_export": "/mnt/x" } },
+  "drives": [ { "id": "d1", "root": "/mnt/krunal", "label": "Samsung", "default": true } ],
+  "games": [ {
       "id": "uuid",
       "title": "Cricket 26",
       "metadata_app_id": 3468650,
-      "metadata_source": { "provider": "steam", "id": 3468650 },
       "installation": { "mode": "managed", "root": ".../umuapps/common/Cricket 26",
-                        "prefix": ".../compatdata/Cricket 26", "proton": ".../runners/proton" },
-      "launch": { "prefix_mode": "umu", "requires_steam": false,
-                  "environment": {}, "arguments": [] },
+                        "prefix": ".../compatdata/Cricket 26", "proton": ".../runners/valve-experimental" },
+      "steam": { "app_id": 3468650, "registered": true, "backend": "slssteam-moon",
+                 "state": "registered", "registered_at": 0, "launch_mode": "steam_client" },
+      "launch": { "prefix_mode": "steam", "requires_steam": true, "environment": {} },
       "launch_targets": [ { "id": "t1", "executable": "...", "primary": true } ],
       "fixes_enabled": true,
       "artwork": { "cover": "...", "hero": "..." }
-    }
-  ]
+  } ]
 }
 ```
 
-Layout per drive (compatible with UmuTron data):
+Per drive:
 
 ```text
 <drive>/UmuLibrary/umuapps/
-  common/<Game>/                 installed game
-  compatdata/<Game>/pfx          UmuTron prefix
-  fixes/<Game>/                  single fixes location
-  appmanifest_<App ID>.json      managed manifest (optional)
+  common/<Game>/      installed content (ours)
+  compatdata/<Game>/  UmuTron prefix
+  fixes/<Game>/       single fixes location
+  appmanifest_<App ID>.json   managed manifest (optional)
 ```
 
-Decision to review: shared `UmuLibrary` name (import/export with UmuTron) versus
-`SteamTronLibrary`. Recommendation: adopt `UmuLibrary` when it exists, otherwise
-create it; never create a second library beside an existing one.
+## 9. Add-game transaction
 
-## 7. Launch contract
+```mermaid
+stateDiagram-v2
+  [*] --> Detected
+  Detected --> Managed: create record + folders
+  Managed --> Registering: Steam backend
+  Registering --> Ready: registered
+  Registering --> PendingRestart: restart required
+  Registering --> Partial: backend missing/failed
+  Partial --> Registering: retry / repair
+  Ready --> [*]
+```
 
-### 7.1 Linux
+Rules:
 
-- `argv = [umu-run, <merged exe>, ...args]`; cwd is the merged game directory.
-- Env whitelist (POSIX keys + locale, DISPLAY/Wayland, XDG, DBus, prime/GL).
-- Prefix: `umu` mode (owned prefix) or `steam` mode (existing compatdata identity).
-- `PROTONPATH` from the managed runner; `GAMEID=umu-<appid>` when available.
-- `PROTON_LOG`/`PROTON_LOG_DIR` scoped to the run diagnostics folder.
-- Optional Steam requirement check: installed + running, never started by us.
-- Fixes DLLs → native-first `<name>=n,b` overrides, merged with user overrides.
+- Managed creation is committed first; registration is a retryable step.
+- The UI shows both columns in the add flow: “Library” and “Steam”.
+- A partial add still appears in the library with a repair action.
+- Duplicate App IDs merge into one record; registration is refreshed, not duplicated.
+- The registration backend receives only the App ID and display title.
+- No content is copied into Steam libraries.
 
-### 7.2 Windows
+## 10. Launch contract
 
-- `CreateProcess` with the merged executable, working directory, and a sanitized
-  environment; no Wine, no Proton, no Steam.
-- Same fixes overlay contract through WinFsp; the same env-override rule is not
-  needed (native loader order), but fixes DLLs still shadow game DLLs.
-- Supervisor tracks the process, exit code, and evidence.
+### 10.1 Linux
 
-### 7.3 Fixes
+- `[umu-run, <merged exe>, args...]`, cwd = merged directory.
+- Prefix `umu` (owned) or `steam` (compatdata identity).
+- `steam_client` mode: verify registration + client running; `lsteamclient`
+  must stay enabled.
+- `emulator` mode: GoldBerg DLL from fixes; `steam_api(64)=n,b` and, where
+  relevant, `PROTON_DISABLE_LSTEAMCLIENT` visible in Environment.
+- Fixes DLLs → native-first `<name>=n,b`, merged with user overrides.
 
-- One canonical folder; import/export ZIP; enable/disable.
-- Overlay mount verified writable before launch (probe write into upper layer).
-- Sectioned UI: import/export · location · overlay · GoldBerg · Steamless.
+### 10.2 Windows
 
-## 8. Steam-free emulation
+- Native `CreateProcess` with merged cwd and sanitized environment.
+- WinFsp overlay provides the fixes view.
+- `steam_client` mode verifies registration and the running client.
+- `emulator` mode uses the GoldBerg Windows DLL; no Wine.
 
-### 8.1 GoldBerg (always available)
+### 10.3 Supervisor
 
-1. Ensure the pinned `alex47exe/gse_fork` release in `<app data>/tools/goldberg/<tag>`.
-2. Find the game’s original `steam_api(64).dll` (bounded, depth-first search).
-3. Copy it into fixes, generate `steam_interfaces.txt` (Linux: `umu-run` + Wine;
-   Windows: direct execution), then install the regular emulator DLL.
-4. Write `steam_settings/` (`steam_appid.txt`, `steam_interfaces.txt`, `configs.*.ini`).
-5. Record a payload manifest for exact removal; re-apply resets first, atomically.
-6. Linux only: derive `PROTON_DISABLE_LSTEAMCLIENT`/`steam_api=n,b` visibility in
-   the game Environment page; a running-Steam requirement always wins.
+- Separate process/thread, JSON run record, stop semantics, selected-path evidence,
+  diagnostics folder, recent-play timestamp only after continuous evidence.
 
-### 8.2 Steamless (always available)
+## 11. Fixes
 
-1. Ensure the tool once in app data (Linux: `krunaldodiya/steamless-linux` +
-   Wine; Windows: Steamless CLI + .NET runtime, source/licensing to confirm).
-2. Copy every registered launcher into fixes preserving relative paths.
-3. Skip launchers without a `.bind` section; run the tool on protected ones.
-4. Record `{path, sha256}`; remove only unchanged files; report skipped/provided ones.
+- One canonical folder; import/export ZIP (game-name file); enable/disable.
+- Overlay verified writable before launch.
+- Sections: import/export · location · overlay · GoldBerg · Steamless.
+- **GoldBerg**: pinned tool, original DLL discovery, interface generation,
+  `steam_settings`, payload manifest, reset-on-reapply, exact removal.
+- **Steamless**: per-launcher copies, `.bind` pre-check, recorded removal,
+  skip/report unprotected and fix-provided launchers.
 
-## 9. Optional Steam integration
+## 12. Registration backends
 
-Kept, but off the critical path:
+Contract:
 
-- Per-game **Steam client** switch: verify installed and running; never start.
-- Steam-prefix mode reuses `compatdata/<App ID>` and creates it when missing.
-- SLSsteam / BetterSteamTools / Lua / depotcache remain for users who want them.
-- Ownership caveat documented: an unowned App ID needs a client-side ownership
-  patch (e.g. SLSsteam) or actual ownership; GoldBerg avoids the question.
+```rust
+trait RegistrationBackend {
+    fn status(&self) -> BackendStatus;
+    fn register(&self, app_id: &str, title: &str) -> Result<Registration>;
+    fn verify(&self, app_id: &str) -> Result<Registration>;
+    fn unregister(&self, app_id: &str) -> Result<()>;
+    fn requires_restart(&self) -> bool;
+}
+```
 
-## 10. UI parity checklist
+- **Linux**: SLSsteam-moon; writes the client's app/library state, verified by
+  the backend's own metadata (`stplug-in`, library cache, added-times). The
+  client may need a restart before ownership is visible.
+- **Windows**: BetterSteamTools (OpenSteamTool fallback); the same contract.
+- The app never launches Steam; it asks the user and re-verifies on focus.
+- Registration removal is confirmed and only touches our App IDs.
+- Doctor checks: backend installed/ready, client version support, registration
+  present, ownership visible, and restart pending.
 
-| Screen | Source of behavior |
-|---|---|
-| Library grid, cards, pagination, search | SteamTron UI + UmuTron catalog |
-| Detail: Play/Stop, launchers, size, app id | UmuTron detail page |
-| Fixes: import/export, location, overlay | SteamTron fixes + UmuTron rules |
-| Fixes: GoldBerg apply/remove | UmuTron `goldberg.py` behavior |
-| Fixes: Steamless apply/remove | UmuTron `steamless.py` behavior |
-| Compatibility: runtime, prefix source, requirement, paths | UmuTron compatibility page |
-| Environment editor | UmuTron environment page |
-| Storage/drives + backups/restore | SteamTron storage + UmuTron repair rules |
-| Debug: run log, diagnostics, controller status | UmuTron debug + controller work |
-| Doctor | SteamTron doctor, extended per backend |
+## 13. UI (from UmuTron)
 
-File pickers remember the last folder per action; controller navigation uses
-SDL polling with reconnect on focus; UI commands validate every path (no shell).
+- Library/Home/detail with Play/Stop, launcher picker, size, App ID.
+- Add flow shows both targets and per-target state.
+- Compatibility: runtime, prefix source, launch mode, Steam client requirement,
+  resolved Proton/prefix paths.
+- Environment editor, Debug (logs, run evidence, controller status), Storage/drives,
+  Backups, Integrity, Doctor.
+- Controller navigation (SDL polling, reconnect on focus), picker memory,
+  TV/fullscreen parity.
 
-## 11. Migration and import rules
+## 14. Migration and import
 
-1. **SteamTron `config.json`** → `Game` entries with `metadata_app_id`; fixes
-   folders move to the canonical library location when no conflict exists.
-2. **Steam library scan** → optional “Linked” candidates; Play never requires
-   Steam afterwards. Launch targets are restricted to the game folder.
-3. **UmuTron `library.json` + `UmuLibrary`** → drives, games, prefixes, fixes,
-   runners; unknown fields preserved; no files moved unless the destination is
-   absent or empty. Identical duplicates collapse; differing trees are kept.
-4. **Fixes ZIPs** import into the canonical folder; exports use the game name.
-5. Every import is dry-run first and reports planned moves; nothing is deleted
-   without an explicit confirmation.
+1. **SteamTron `config.json`** → managed games; register missing entries.
+2. **UmuTron library + drives** → drives, games, prefixes, fixes; register
+   missing Steam entries for games with an App ID; never move differing trees.
+3. **Steam library scan** → linked candidates; content stays where it is.
+4. **Fixes ZIPs** import into the canonical folder.
+5. Every import is dry-run first and reports planned moves and registrations.
+6. No automatic deletion; removal requires confirmation and reports what is kept.
 
-## 12. Phases and acceptance
+## 15. Phases and acceptance
 
 | Phase | Deliverable | Acceptance |
 |---|---|---|
-| 0. Baseline | This PRD, parity matrix, decisions on layout/tool sources | Reviewed and merged |
-| 1. Core model | `library.json` v2, drives, validation, atomic writes, importers (dry-run) | Import of a real UmuTron library and old config without data loss; unit tests |
-| 2. Linux runtime | Planner, supervisor, run record, evidence, Play/Stop, diagnostics | A Steam-free Linux game launches from the Tauri app; stop is owned; logs captured |
-| 3. Windows runtime | Native supervisor + WinFsp overlay wiring | A Windows game launches with fixes applied; no Steam process required |
-| 4. Steam-free tooling | GoldBerg + Steamless managers and UI sections | Apply/remove on both OSes; re-apply resets; unprotected launchers reported by name |
-| 5. Steam mode (optional) | Requirement check, Steam prefix creation, SLSsteam/BTS as opt-in | Enabled game blocks Play with actionable error when Steam is not running; no auto-start |
-| 6. UI parity | All checklist screens and commands | Manual matrix on desktop + TV; controller navigation and picker memory verified |
-| 7. Library services | Backups/restore, integrity, updates (optional), doctor | Restore into a chosen drive; diagnostics explain failures |
-| 8. Hardening | Cross-OS CI, fixtures, signing, docs, release | Both platforms build and pass the acceptance matrix |
+| 0. Decisions | PRD, library folder name, backend matrix, launch-mode defaults | Reviewed and merged |
+| 1. Core model | `library.json` v2, drives, validation, dry-run importers | Real UmuTron + old config import with zero data loss |
+| 2. Dual add | Add-game transaction, registration backends, repair UI | Adding a game registers it in Steam (or reports `pending_restart`/`backend_missing`) |
+| 3. Linux runtime | Planner, supervisor, evidence, Play/Stop | Steam-free game launches; stop owned; diagnostics captured |
+| 4. Windows runtime | Native supervisor + WinFsp overlay | Windows game launches with fixes, no Steam |
+| 5. Emulation tooling | GoldBerg + Steamless managers and UI | Apply/Remove/re-apply on both OSes |
+| 6. Steam client mode | Requirement check, registration verification, ownership errors | Non-running client blocks Play with actionable text; no auto-start |
+| 7. UI parity | All UmuTron screens and commands | Manual matrix on desktop + TV; controller and pickers verified |
+| 8. Library services | Backups/restore, integrity, doctor, optional updates | Restore to chosen drive; failures explained |
+| 9. Hardening | Cross-OS CI, signing, docs, release | Both platforms pass the acceptance matrix |
 
-## 13. Risks and mitigations
+## 16. Risks
 
 | Risk | Mitigation |
 |---|---|
-| WinFsp overlay maturity (copy-up, whiteouts, performance) | Reuse the existing WinFsp backend; add copy-up/whitespace conformance tests before UI integration |
-| Wine dependency for Steamless on Linux | Keep it optional and reported in doctor; never block Play on it |
-| Windows Steamless source/licensing | Decide before phase 4; otherwise gate the section to Linux temporarily |
-| Sharing `UmuLibrary` with UmuTron | Document ownership rules; never merge differing trees; dry-run imports |
-| Antivirus/signing on Windows | Sign binaries in phase 8; quarantine-first writes |
-| Steam client/ownership ambiguity | Explicit per-game switch, clear errors, GoldBerg as the Steam-free default |
-| Tool download availability | Pin URLs + checksums, cache, clear failure messages, retry/repair in doctor |
+| Registration backend unavailable/unsupported client build | Doctor check, clear error, retry, backend fallback |
+| Client restart needed after registration | Explicit `pending_restart` state and re-verify on focus |
+| WinFsp overlay fidelity | Conformance tests before UI wiring |
+| Windows Steamless source/licensing | Decide in phase 0; Linux-only gating if unresolved |
+| Sharing `UmuLibrary` with UmuTron | No-merge rule, dry-run imports, never delete |
+| Steamworks titles that still need the real client | Launch mode switch without re-adding; documented ownership caveat |
+| Antivirus/signing on Windows | Signed binaries, quarantine-first writes |
 
-## 14. Testing strategy
+## 17. Testing
 
-- Rust unit tests for model, planner, env derivation, fixes rules, manifests.
-- Fixture drives and fake runtime scripts (no real games) for supervisor tests.
-- Overlay conformance per OS: mount, write probe, copy-up, unmount cleanup.
+- Rust unit tests for model, add transaction, registration contract, planner,
+  fixes rules, manifests.
+- Fake registration backends for every state (`registered`, `pending_restart`,
+  `backend_missing`, `failed`).
+- Fixture drives and fake runtimes for supervisor tests.
+- Overlay conformance per OS.
 - Importers: golden UmuTron library and old SteamTron config; assert no mutation.
-- End-to-end smoke per platform with one prepared game; document residuals.
-- Tauri command tests for path validation and error surfaces.
+- End-to-end smoke per platform with one prepared game.
 
-## 15. Open questions
+## 18. Open questions
 
-1. Library folder name: `UmuLibrary` (shared) vs `SteamTronLibrary` (isolated)?
-2. Windows Steamless distribution: bundle, download, or Linux-only for v1?
-3. Keep Lua/manifest and update pinning as optional features, or remove from the
-   Steam-free product and offer them as an add-on?
-4. Keep the account/catalog service and artwork repair?
-5. Minimum platform matrix (Windows 10/11 builds, glibc/SteamRT versions).
-
-## 16. Out of scope for v1 of this migration
-
-- Anti-cheat or DRM beyond SteamStub.
-- Multi-user Steam libraries and family sharing semantics.
-- Cloud saves, achievements, overlay in-game UI.
-- Automatic game downloads from Steam depots (existing downloader stays opt-in).
+1. Library folder name: shared `UmuLibrary` or `SteamTronLibrary`?
+2. Windows Steamless: bundle, download, or Linux-only for v1?
+3. Should removing a game always unregister from Steam, or ask (recommend ask)?
+4. Keep Lua/manifest and update pinning as optional features?
+5. Keep the account/catalog service?
+6. Minimum Windows/Linux matrix (Windows 10/11, glibc/SteamRT versions)?
