@@ -506,6 +506,12 @@ Rules:
   `fix/` branch.
 - CI runs on every branch; `main` must stay buildable and pass the full suite at
   all times.
+- **Frozen original:** the branch `original` and the annotated tag
+  `pre-migration-2026-11-09` point at the last pre-migration `main`. They are
+  permanent references: never commit to `original`, never move or delete the
+  tag, never force-push it. `main` is the integration branch and will move as
+  phases merge; `original` is the rollback and comparison base
+  (`git diff original..main`).
 
 ### 20.6 Rough size
 
