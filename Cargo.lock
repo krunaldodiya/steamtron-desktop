@@ -3932,6 +3932,7 @@ name = "steamtron-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "reqwest 0.12.28",
  "rfd",
  "serde",
  "serde_json",

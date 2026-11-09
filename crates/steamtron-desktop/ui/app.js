@@ -495,7 +495,8 @@ function renderManagedHome() {
       <div class="home-hero-content">
         <p class="eyebrow" id="home-eyebrow">Recently played</p>
         <h1 id="home-title">${escape(featured?.title || "Your next game")}</h1>
-        <p class="home-meta" id="home-meta">${escape(appId ? `Steam App ${appId}` : "Managed entry")}${featured && managedReady(featured) ? " · Ready to play" : ""}</p>
+        <p class="home-meta" id="home-related">${escape(appId ? `Steam App ${appId}` : "Managed entry")}${featured && managedReady(featured) ? " · Ready to play" : ""}</p>
+        <p class="home-description hidden" id="home-description"></p>
         <div class="home-actions"><button class="primary" id="home-play"${featured ? "" : " disabled"}>${running ? "Stop" : "Play"}</button><button id="home-view"${featured ? "" : " disabled"}>View game</button></div>
       </div>
     </section>
@@ -517,6 +518,7 @@ function renderManagedHome() {
   }
   const view = detailEl.querySelector("#home-view");
   if (view && featured) view.onclick = () => openManagedGame(featured.id);
+  if (featured) void applyHeroDetails(featured);
 }
 
 function renderManagedMode() {
@@ -683,6 +685,40 @@ function focusControl(node) {
   }
 }
 
+const appDetailsCache = new Map();
+
+async function appDetails(appid) {
+  if (!appid) return null;
+  if (appDetailsCache.has(appid)) return appDetailsCache.get(appid);
+  const details = await invoke("app_details", { appid });
+  appDetailsCache.set(appid, details);
+  return details;
+}
+
+async function applyHeroDetails(game) {
+  const related = document.querySelector("#home-related");
+  const description = document.querySelector("#home-description");
+  if (!related || !description || !game) return;
+  const appId = game.metadata_app_id;
+  const fallback = `${appId ? `Steam App ${appId}` : "Managed entry"}${managedReady(game) ? " · Ready to play" : ""}`;
+  related.textContent = fallback;
+  description.textContent = "";
+  description.classList.add("hidden");
+  if (!appId) return;
+  try {
+    const details = await appDetails(appId);
+    if (managedSelectedId !== game.id) return;
+    const meta = [details.release_date, details.genres].filter(Boolean).join(" · ");
+    if (meta) related.textContent = meta;
+    if (details.description) {
+      description.textContent = details.description;
+      description.classList.remove("hidden");
+    }
+  } catch (_error) {
+    // The fallback line stays; store metadata is optional.
+  }
+}
+
 function syncHomeHero(card) {
   if (!managedLibrary) return;
   const game = managedLibrary.games.find((item) => item.id === card.dataset.managed);
@@ -704,8 +740,7 @@ function syncHomeHero(card) {
   if (eyebrow) eyebrow.textContent = railKind === "setup" ? "Recently ready to play" : "Recently played";
   const title = document.querySelector("#home-title");
   if (title) title.textContent = game.title;
-  const meta = document.querySelector("#home-meta");
-  if (meta) meta.textContent = `${appId ? `Steam App ${appId}` : "Managed entry"}${managedReady(game) ? " · Ready to play" : ""}`;
+  void applyHeroDetails(game);
   const counter = document.querySelector("#home-counter");
   if (counter) counter.textContent = railKind === "setup" ? `${total} ready games` : `${pad2(index)} / ${pad2(total)}`;
   const play = document.querySelector("#home-play");
@@ -740,6 +775,25 @@ function moveNavigation(action) {
     const step = action === "next" ? 1 : -1;
     focusControl(controls[(index + step + controls.length) % controls.length]);
     return true;
+  }
+  // UmuTron's home rail wraps with modulo; the scroll clamps at the end and
+  // focus moves across the last visible cards before looping to the first.
+  if ((action === "left" || action === "right") && current.matches?.(".cover-card[data-managed]")) {
+    const rail = current.closest(".rail-scroll");
+    if (rail && rail.closest(".home-page") && rail.closest(".managed-rail")?.dataset.rail === "recent") {
+      const cards = [...rail.querySelectorAll(".cover-card")];
+      const index = cards.indexOf(current);
+      if (index >= 0) {
+        if (action === "right" && index === cards.length - 1) {
+          focusControl(cards[0]);
+          return true;
+        }
+        if (action === "left" && index === 0) {
+          focusControl(cards[cards.length - 1]);
+          return true;
+        }
+      }
+    }
   }
   const center = (node) => {
     const rect = node.getBoundingClientRect();

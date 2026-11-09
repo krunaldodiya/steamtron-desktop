@@ -2270,6 +2270,68 @@ fn open_path(path: String) -> Result<(), String> {
     }
 }
 
+
+#[tauri::command]
+async fn app_details(appid: u32) -> Result<serde_json::Value, String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    static CACHE: OnceLock<Mutex<HashMap<u32, serde_json::Value>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(value) = cache.lock().ok().and_then(|cache| cache.get(&appid).cloned()) {
+        return Ok(value);
+    }
+    let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&l=english");
+    let response = reqwest::Client::new()
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Steam store returned HTTP {}", response.status()));
+    }
+    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let data = payload
+        .get(appid.to_string())
+        .and_then(|entry| entry.get("data"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let release_date = data
+        .get("release_date")
+        .and_then(|value| value.get("date"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let genres = data
+        .get("genres")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|genre| genre.get("description").and_then(|value| value.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    let description = data
+        .get("short_description")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let name = data
+        .get("name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let value = serde_json::json!({
+        "name": name,
+        "release_date": release_date,
+        "genres": genres,
+        "description": description,
+    });
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(appid, value.clone());
+    }
+    Ok(value)
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2464,6 +2526,7 @@ fn main() {
             play_managed,
             reconcile_registrations,
             quit_app,
+            app_details,
             app_version,
             update_library_settings,
             add_library_drive,
