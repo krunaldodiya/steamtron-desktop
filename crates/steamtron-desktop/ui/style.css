@@ -410,7 +410,7 @@ button.primary:hover { filter:brightness(1.06); }
 .store-sidebar input { width:100%; padding:11px 13px; border:1px solid var(--border); border-radius:8px; background:var(--surface-raised); color:var(--text); font-size:14px; outline:none; }
 .store-sidebar input:focus { border-color:var(--accent); }
 .store-option-list { display:flex; flex-direction:column; gap:2px; overflow:auto; padding:4px; border:1px solid var(--border); border-radius:10px; background:var(--surface-raised); }
-.store-option-list[data-list="genre"] { flex:0 0 auto; min-height:0; max-height:min(34vh, 300px); }
+.store-option-list[data-list="genre"] { flex:0 0 auto; min-height:0; max-height:clamp(200px, calc(100vh - 470px), 430px); }
 .store-option-list[data-list="sort"] { flex:0 0 auto; max-height:none; }
 .store-option { width:100%; text-align:left; border:0; background:transparent; color:var(--muted); padding:8px 10px; border-radius:7px; font-size:13px; }
 .store-option:hover { background:#212b37; color:var(--text); }
