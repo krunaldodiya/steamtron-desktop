@@ -473,7 +473,41 @@ With the model and traits fixed, up to three tracks can proceed without blocking
 
 Tracks meet at the add flow, Play, and Doctor; those are the integration gates.
 
-### 20.5 Rough size
+### 20.5 Branching and integration
+
+One branch per phase; `main` is always releasable.
+
+| Phase | Branch |
+|---|---|
+| 0 | `phase/0-decisions` |
+| 1 | `phase/1-core-model` |
+| 2 | `phase/2-dual-add` |
+| 3 | `phase/3-linux-runtime` |
+| 4 | `phase/4-windows-runtime` |
+| 5 | `phase/5-emulation-tooling` |
+| 6 | `phase/6-steam-client-mode` |
+| 7 | `phase/7-ui-polish` |
+| 8 | `phase/8-library-services` |
+| 9 | `phase/9-hardening` |
+
+Rules:
+
+- Branch from `main` when the phase starts; rebase or merge `main` before the
+  phase PR when an earlier phase landed.
+- Parallel phases (3–5) branch from the last merged phase; they merge back in
+  dependency order and resolve conflicts on the phase branch, never on `main`.
+- One PR per phase, titled `phase N: <name>`, with the phase's acceptance
+  checklist and Doctor/UI evidence attached.
+- Squash-merge into `main` after acceptance; delete the branch.
+- Hotfixes use `fix/<slug>` from `main` and are cherry-picked into active phase
+  branches when they touch shared code.
+- Documentation and tooling that belong to no phase may go to `main` directly
+  (`docs/…`, `chore/…`); anything that changes runtime behavior uses a phase or
+  `fix/` branch.
+- CI runs on every branch; `main` must stay buildable and pass the full suite at
+  all times.
+
+### 20.6 Rough size
 
 | Phase | Size | Depends on |
 |---|---|---|
