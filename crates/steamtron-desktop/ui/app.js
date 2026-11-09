@@ -771,6 +771,23 @@ function scrollControlIntoView(node) {
   }
 }
 
+function focusStoreContent() {
+  const card = document.querySelector("#store-results .cover-card")
+    || document.querySelector(".store-content .cover-card")
+    || document.querySelector(".store-content button");
+  if (card) { focusControl(card); return true; }
+  return false;
+}
+
+function focusStoreSidebar() {
+  const candidate = navState.lastSidebar;
+  const target = candidate && document.contains(candidate)
+    ? candidate
+    : document.querySelector(".store-sidebar input, .store-sidebar .store-option, .store-sidebar .store-clear-link");
+  if (target) { focusControl(target); return true; }
+  return false;
+}
+
 function focusControl(node) {
   if (!node) return;
   if (navState.focused && navState.focused !== node) navState.focused.classList.remove("nav-focus");
@@ -778,6 +795,7 @@ function focusControl(node) {
   node.classList.add("nav-focus");
   node.focus({ preventScroll: true });
   scrollControlIntoView(node);
+  if (node.closest(".store-sidebar")) navState.lastSidebar = node;
   if (node.matches?.(".cover-card[data-managed]")) {
     if (node.closest(".home-page")) {
       syncHomeHero(node);
@@ -962,6 +980,12 @@ function moveNavigation(action) {
     focusControl(best.node);
     return true;
   }
+  if (action === "right" && current.closest(".store-sidebar")) {
+    return focusStoreContent();
+  }
+  if (action === "left" && current.closest(".store-content")) {
+    return focusStoreSidebar();
+  }
   if (action === "up") {
     const nav = activeNavControl();
     if (nav) { focusControl(nav); return true; }
@@ -1097,8 +1121,21 @@ window.addEventListener("keydown", (event) => {
   const typing = event.target && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
   if (typing) {
     if (action === "select" || event.key === " ") return;
-    if ((action === "left" || action === "right") && event.target.tagName !== "SELECT") return;
     if (event.target.tagName === "SELECT") return;
+    if (action === "left" || action === "right") {
+      const caret = event.target.selectionStart;
+      if (action === "right" && (caret === null || caret >= event.target.value.length)) {
+        event.preventDefault();
+        focusStoreContent();
+        return;
+      }
+      if (action === "left" && caret === 0) {
+        event.preventDefault();
+        focusStoreSidebar();
+        return;
+      }
+      return;
+    }
   }
   event.preventDefault();
   dispatchNavigation(action);
@@ -2543,6 +2580,12 @@ function renderStorePage() {
     card.onclick = () => openStoreItem(card.dataset.storeId);
   }
   hydrateStoreCovers(detailEl);
+  for (const list of detailEl.querySelectorAll(".store-option-list")) {
+    const selected = list.querySelector(".store-option.selected");
+    if (selected) {
+      list.scrollTop = Math.max(0, selected.offsetTop - (list.clientHeight - selected.offsetHeight) / 2);
+    }
+  }
   const content = detailEl.querySelector(".store-content");
   if (content) content.scrollTop = previousScroll;
   if (previousInDetail) {
