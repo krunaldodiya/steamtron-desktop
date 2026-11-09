@@ -423,39 +423,29 @@ async function stopManagedGame(game, button) {
   }
 }
 
-function managedDetails(game) {
-  const drive = managedDrive(game);
-  return `<div class="status">
-    <div class="row"><div class="label">Library entry</div><div class="value">${escape(game.id)}</div></div>
-    <div class="row"><div class="label">Installation</div><div class="value">${escape(game.installation?.root || "Not configured")}</div></div>
-    <div class="row"><div class="label">Prefix</div><div class="value">${escape(game.installation?.prefix || "Created on first Play")}</div></div>
-    <div class="row"><div class="label">Drive</div><div class="value">${escape(drive ? `${drive.label || drive.id} · ${drive.root}` : "Not on a registered drive")}</div></div>
-    <div class="row"><div class="label">Prefix source</div><div class="value">${escape(game.launch?.prefix_mode === "steam" ? "Steam compatdata" : "SteamTron prefix")}</div></div>
-    <div class="row"><div class="label">Steam</div><div class="value">${escape(game.metadata_app_id ? `App ${game.metadata_app_id}` : "No App ID")}${game.steam ? ` · ${escape(game.steam.state || "unregistered")}` : ""}</div></div>
-    <div class="row"><div class="label">Launch mode</div><div class="value">${escape(game.steam?.launch_mode || "emulator")}</div></div>
-  </div>`;
-}
-
 function managedSetupMarkup(game) {
-  return `<div class="status" id="managed-setup"><div class="row"><div class="label">Launch target</div><div class="value">Not configured</div></div><label for="managed-exe">Executable</label><div class="search-row"><input id="managed-exe" placeholder="Game.exe"><button id="managed-exe-browse">Browse…</button></div><label for="managed-args">Arguments</label><input id="managed-args" placeholder="-windowed (space separated)"><label for="managed-proton">Proton runner (optional)</label><input id="managed-proton" value="${escape(game.launch?.proton || "")}"><div class="update-actions"><button class="primary" id="managed-setup-save">Save setup</button></div></div>`;
+  const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
+  const executable = target?.executable || "";
+  const argumentsText = (target?.arguments || []).join(" ");
+  return `<div class="status" id="managed-setup"><div class="row"><div class="label">Launch target</div><div class="value">${escape(executable || "Not configured")}</div></div><label for="managed-exe">Executable</label><div class="search-row"><input id="managed-exe" placeholder="Game.exe" value="${escape(executable)}"><button id="managed-exe-browse">Browse…</button></div><label for="managed-args">Arguments</label><input id="managed-args" placeholder="-windowed (space separated)" value="${escape(argumentsText)}"><label for="managed-proton">Proton runner (optional)</label><input id="managed-proton" value="${escape(game.launch?.proton || game.installation?.proton || "")}"><div class="update-actions"><button class="primary" id="managed-setup-save">Save setup</button></div></div>`;
 }
 
-async function wireManagedSetup(game) {
-  const host = detailEl.querySelector("#managed-setup");
-  if (!host) return;
-  const exeInput = host.querySelector("#managed-exe");
-  const argsInput = host.querySelector("#managed-args");
-  const protonInput = host.querySelector("#managed-proton");
-  host.querySelector("#managed-exe-browse").onclick = async () => {
+async function wireManagedSetup(game, host = detailEl, onSaved = () => renderManagedMode()) {
+  const box = host.querySelector("#managed-setup");
+  if (!box) return;
+  const exeInput = box.querySelector("#managed-exe");
+  const argsInput = box.querySelector("#managed-args");
+  const protonInput = box.querySelector("#managed-proton");
+  box.querySelector("#managed-exe-browse").onclick = async () => {
     try {
       const path = await invoke("pick_managed_executable", { gameId: game.id });
       if (path) exeInput.value = path;
     } catch (error) { showToast(String(error), true); }
   };
-  host.querySelector("#managed-setup-save").onclick = async () => {
+  box.querySelector("#managed-setup-save").onclick = async () => {
     const executable = exeInput.value.trim();
     if (!executable) { showToast("Choose the game executable first.", true); return; }
-    const button = host.querySelector("#managed-setup-save");
+    const button = box.querySelector("#managed-setup-save");
     const stop = busy(button, "Saving…");
     try {
       const result = await invoke("set_managed_launch_target", { request: {
@@ -466,7 +456,7 @@ async function wireManagedSetup(game) {
         name: "",
       } });
       showToast(`Launch target saved: ${result.name}`);
-      renderManagedMode();
+      onSaved();
     } catch (error) {
       showToast(String(error), true);
       stop();
@@ -474,40 +464,39 @@ async function wireManagedSetup(game) {
   };
 }
 
-async function loadManagedFixes(gameId) {
-  const host = detailEl.querySelector("#managed-fixes");
-  if (!host) return;
+async function loadManagedFixes(gameId, host = detailEl) {
+  const box = host.querySelector("#managed-fixes");
+  if (!box) return;
   try {
     const view = await invoke("managed_fixes", { gameId });
     const value = view.files.length
       ? `${view.files.length} file${view.files.length === 1 ? "" : "s"} · ${view.path}`
       : `None installed · ${view.path}`;
-    host.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(value)}</div></div><div class="update-actions"><button id="managed-fixes-install">Install ZIP…</button>${view.files.length ? '<button id="managed-fixes-remove">Remove</button>' : ""}</div>`;
-    host.querySelector("#managed-fixes-install").onclick = async () => {
+    box.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(value)}</div></div><div class="update-actions"><button id="managed-fixes-install">Install ZIP…</button>${view.files.length ? '<button id="managed-fixes-remove">Remove</button>' : ""}</div>`;
+    box.querySelector("#managed-fixes-install").onclick = async () => {
       try {
         const installed = await invoke("install_managed_fixes", { gameId });
         if (!installed) return;
         showToast(`Installed ${installed.files.length} fix file${installed.files.length === 1 ? "" : "s"}`);
-        await loadManagedFixes(gameId);
+        await loadManagedFixes(gameId, host);
       } catch (error) { showToast(String(error), true); }
     };
-    const remove = host.querySelector("#managed-fixes-remove");
+    const remove = box.querySelector("#managed-fixes-remove");
     if (remove) remove.onclick = async () => {
       if (!window.confirm("Remove the installed fixes for this game?")) return;
       try {
         const removed = await invoke("remove_managed_fixes", { gameId });
         showToast(`Removed ${removed.files} fix file${removed.files === 1 ? "" : "s"}`);
-        await loadManagedFixes(gameId);
+        await loadManagedFixes(gameId, host);
       } catch (error) { showToast(String(error), true); }
     };
   } catch (error) {
-    host.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(String(error))}</div></div>`;
+    box.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(String(error))}</div></div>`;
   }
 }
 
 function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
-  const hero = appId ? heroUrl(appId) : "";
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
   const canPlay = managedReady(game) && Boolean(target);
   const steamMode = Boolean(game.launch?.requires_steam || game.steam?.launch_mode === "steam_client");
@@ -515,18 +504,100 @@ function renderManagedPreview(game) {
   const action = running
     ? '<button id="managed-stop" class="primary">Stop</button>'
     : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
-  detailEl.innerHTML = `<div class="page game-page">
+  detailEl.innerHTML = `<div class="page game-page game-detail">
     <div class="game-page-top"><button id="managed-back" class="secondary">← Library</button></div>
-    <div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target || steamMode ? "" : '<span class="muted">No launch target yet.</span>'}${steamMode ? '<span class="muted">Steam client required</span>' : ""}</div></div></div>${managedDetails(game)}${target ? "" : managedSetupMarkup(game)}<div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>
+    <section class="game-hero${appId ? "" : " no-artwork"}" id="game-hero">
+      <div class="game-hero-shade"></div>
+      <div class="game-hero-card">
+        <img class="game-cover" id="game-cover" alt="" loading="lazy">
+        <div class="game-info">
+          <h1>${escape(game.title)}</h1>
+          <p class="game-meta" id="game-meta">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p>
+          <p class="game-description hidden" id="game-description"></p>
+          <p class="game-credits" id="game-credits"></p>
+          <div class="game-actions">${action}<button id="managed-options" class="game-icon-button" title="Game options" aria-label="Game options"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span></div>
+          ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : ""}
+          <div class="game-chips" id="game-chips"></div>
+        </div>
+      </div>
+    </section>
   </div>`;
   detailEl.querySelector("#managed-back").onclick = () => setView("library");
-  void hydrateHero(game);
-  void loadManagedFixes(game.id);
-  void wireManagedSetup(game);
+  detailEl.querySelector("#managed-options").onclick = () => openManagedGameOptions(game);
+  void hydrateGameDetail(game);
   const play = detailEl.querySelector("#managed-play");
   if (play && canPlay) play.onclick = () => startManagedGame(game, play);
   const stopButton = detailEl.querySelector("#managed-stop");
   if (stopButton) stopButton.onclick = () => stopManagedGame(game, stopButton);
+}
+
+async function hydrateGameDetail(game) {
+  const appId = game.metadata_app_id;
+  const heroNode = detailEl.querySelector("#game-hero");
+  const coverNode = detailEl.querySelector("#game-cover");
+  const metaNode = detailEl.querySelector("#game-meta");
+  const descriptionNode = detailEl.querySelector("#game-description");
+  const creditsNode = detailEl.querySelector("#game-credits");
+  const sizeNode = detailEl.querySelector("#game-size");
+  const chipsNode = detailEl.querySelector("#game-chips");
+  try {
+    const artwork = await artworkFor(game.id);
+    if (heroNode && artwork?.hero) heroNode.style.backgroundImage = `url('${convertFileSrc(artwork.hero)}')`;
+    if (coverNode) {
+      coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; }, { once: true });
+      if (artwork?.cover) coverNode.src = convertFileSrc(artwork.cover);
+      else if (appId) coverNode.src = coverUrl(appId);
+    }
+  } catch (_error) { /* keep the gradient */ }
+  const chips = [];
+  if (appId) chips.push(`STEAM_ID: ${appId}`);
+  const proton = game.launch?.proton || game.installation?.proton || "";
+  if (proton) chips.push(`Proton: ${proton.split("/").filter(Boolean).pop()}`);
+  if (chipsNode) chipsNode.innerHTML = chips.map((chip) => `<span class="game-chip">${escape(chip)}</span>`).join("");
+  if (appId) {
+    try {
+      const details = await appDetails(appId);
+      const meta = [details.release_date, details.genres].filter(Boolean).join(" · ");
+      if (meta && metaNode) metaNode.textContent = meta;
+      if (details.description && descriptionNode) {
+        descriptionNode.textContent = details.description;
+        descriptionNode.classList.remove("hidden");
+      }
+      const credits = [details.developers, details.publishers].filter(Boolean).join(" · ");
+      if (credits && creditsNode) creditsNode.textContent = credits;
+    } catch (_error) { /* keep the fallback meta */ }
+  }
+  try {
+    const size = await invoke("managed_game_size", { gameId: game.id });
+    if (sizeNode) sizeNode.textContent = `Size: ${formatBytes(size)}`;
+  } catch (_error) {
+    if (sizeNode) sizeNode.textContent = "Size: unavailable";
+  }
+}
+
+function openManagedGameOptions(game) {
+  const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal" style="max-width:700px">
+    <div class="modal-head"><h2>Game options</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <p class="muted">${escape(game.title)}</p>
+    <div class="game-options-paths">
+      <div class="row"><div class="label">Installation</div><div class="value">${escape(game.installation?.root || "")}</div></div>
+      <div class="row"><div class="label">Prefix</div><div class="value">${escape(game.installation?.prefix || "")}</div></div>
+      <div class="row"><div class="label">Launch target</div><div class="value">${escape(target?.executable || "Not configured")}</div></div>
+    </div>
+    ${managedSetupMarkup(game)}
+    <div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const close = () => backdrop.remove();
+  backdrop.querySelector(".modal-close").onclick = close;
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  void wireManagedSetup(game, backdrop, () => { close(); renderManagedMode(); });
+  void loadManagedFixes(game.id, backdrop);
+  const first = backdrop.querySelector("#managed-setup-save") || backdrop.querySelector("#managed-exe");
+  if (first) focusControl(first);
 }
 
 function pad2(value) {
@@ -605,7 +676,7 @@ function openManagedGame(id) {
 function setView(view) {
   appView = view;
   document.body.classList.toggle("store-open", view === "store");
-  const navView = view === "game" ? "library" : view;
+  const navView = view === "game" ? "library" : view === "store-game" ? "store" : view;
   for (const name of ["home", "library", "store"]) {
     const button = document.querySelector(`#nav-${name}`);
     button.classList.toggle("active", navView === name);
@@ -683,7 +754,7 @@ function headerControls() {
 }
 
 function activeNavControl() {
-  const view = appView === "game" ? "library" : appView;
+  const view = appView === "game" ? "library" : appView === "store-game" ? "store" : appView;
   return document.querySelector(`.topbar #nav-${view}`) || document.querySelector(".topbar #nav-home");
 }
 
@@ -1017,6 +1088,7 @@ function dispatchNavigation(action, fromGamepad = false) {
     const modal = document.querySelector(".modal-backdrop");
     if (modal) { modal.remove(); return; }
     if (document.body.classList.contains("fullscreen-mode")) { openFullscreenOptions(); return; }
+    if (appView === "store-game") { setView("store"); return; }
     if (appView === "game") { setView("library"); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");
     navState.focused = null;
@@ -2465,6 +2537,7 @@ let storeGenres = [];
 let storeLoading = false;
 let storeError = "";
 let storeTried = false;
+let storeDetail = null;
 let storeRecent = (() => { try { return JSON.parse(localStorage.getItem("steamtron.storeRecent.v1") || "[]"); } catch (_error) { return []; } })();
 
 function saveStoreRecent() {
@@ -2495,15 +2568,61 @@ function hydrateStoreCovers(host) {
   }
 }
 
-function openStoreItem(id) {
-  const item = [...storeItems, ...storeRecent].find((entry) => String(entry.id) === String(id));
-  if (!item) return;
-  rememberStoreItem(item);
-  if (item.steam_app_id) {
-    void showManagedAddGame({ app_id: item.steam_app_id, title: item.name });
-  } else {
-    showToast("This title has no Steam App ID and cannot be added to the managed library.");
+async function openStoreItem(id) {
+  const base = [...storeItems, ...storeRecent].find((entry) => String(entry.id) === String(id));
+  if (!base) return;
+  rememberStoreItem(base);
+  let item = base;
+  try {
+    const full = await invoke("store_game", { id: Number(id) });
+    if (full && full.id) item = full;
+  } catch (_error) { /* the list entry is enough for the detail page */ }
+  storeDetail = item;
+  appView = "store-game";
+  renderStoreDetail();
+}
+
+function renderStoreDetail() {
+  const item = storeDetail;
+  if (!item) { setView("store"); return; }
+  const hero = item.images?.hero || item.images?.portrait || "";
+  const cover = item.images?.portrait || "";
+  const genres = (item.genres || []).map((genre) => genre.name).filter(Boolean).join(", ");
+  const meta = [item.release_date, genres].filter(Boolean).join(" · ");
+  const credits = [item.developers, item.publishers].filter(Boolean).join(" · ");
+  const inLibrary = Boolean(item.steam_app_id
+    && managedLibrary?.games.some((game) => game.metadata_app_id === item.steam_app_id));
+  const chips = [`IGDB_ID: ${item.id}`];
+  if (item.steam_app_id) chips.push(`STEAM_ID: ${item.steam_app_id}`);
+  const action = inLibrary
+    ? '<button class="primary" disabled>In library</button>'
+    : item.steam_app_id
+      ? '<button class="primary" id="store-add">Add to library</button>'
+      : '<button class="primary" disabled>No Steam App ID</button>';
+  detailEl.innerHTML = `<div class="page game-page game-detail">
+    <div class="game-page-top"><button id="store-back" class="secondary">← Store</button></div>
+    <section class="game-hero${hero ? "" : " no-artwork"}" id="game-hero"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}>
+      <div class="game-hero-shade"></div>
+      <div class="game-hero-card">
+        ${cover ? `<img class="game-cover" src="${escape(cover)}" alt="" loading="lazy">` : ""}
+        <div class="game-info">
+          <h1>${escape(item.name)}</h1>
+          <p class="game-meta">${escape(meta || "IGDB catalogue entry")}</p>
+          <p class="game-description">${escape(item.description || "")}</p>
+          <p class="game-credits">${escape(credits)}</p>
+          <div class="game-actions">${action}</div>
+          <div class="game-chips">${chips.map((chip) => `<span class="game-chip">${escape(chip)}</span>`).join("")}</div>
+        </div>
+      </div>
+    </section>
+  </div>`;
+  detailEl.querySelector("#store-back").onclick = () => setView("store");
+  const add = detailEl.querySelector("#store-add");
+  if (add) {
+    add.onclick = () => showManagedAddGame({ app_id: item.steam_app_id, title: item.name });
   }
+  const coverNode = detailEl.querySelector(".game-cover");
+  if (coverNode) coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; });
 }
 
 function applyStorePage(data) {

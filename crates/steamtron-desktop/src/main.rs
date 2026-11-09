@@ -2322,11 +2322,25 @@ async fn app_details(appid: u32) -> Result<serde_json::Value, String> {
         .get("name")
         .and_then(|value| value.as_str())
         .unwrap_or("");
+    let join_names = |key: &str| {
+        data.get(key)
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default()
+    };
     let value = serde_json::json!({
         "name": name,
         "release_date": release_date,
         "genres": genres,
         "description": description,
+        "developers": join_names("developers"),
+        "publishers": join_names("publishers"),
     });
     if let Ok(mut cache) = cache.lock() {
         cache.insert(appid, value.clone());
@@ -2529,6 +2543,41 @@ fn shutdown_system() -> Result<(), String> {
     Err("shutdown is not supported on this platform".into())
 }
 
+
+fn directory_size(root: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else { continue };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else { continue };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if let Ok(meta) = entry.metadata() {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+#[tauri::command]
+async fn managed_game_size(game_id: String) -> Result<u64, String> {
+    use steamtron_core::library::Library;
+
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let root = library
+        .game(&game_id)
+        .map(|game| game.installation.root.clone())
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    tauri::async_runtime::spawn_blocking(move || directory_size(&root))
+        .await
+        .map_err(|error| format!("size task failed: {error}"))
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2723,6 +2772,7 @@ fn main() {
             play_managed,
             reconcile_registrations,
             quit_app,
+            managed_game_size,
             fullscreen_state,
             toggle_fullscreen,
             set_ui_scale,

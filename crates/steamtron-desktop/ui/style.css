@@ -441,3 +441,25 @@ body.fullscreen-mode .topbar { padding:10px 20px; }
 #window-mode .icon-exit { display:none; }
 body.fullscreen-mode #window-mode .icon-enter { display:none; }
 body.fullscreen-mode #window-mode .icon-exit { display:block; }
+
+.game-detail .game-page-top { padding:18px 0 16px; }
+.game-hero { position:relative; min-height:clamp(460px, 60vh, 640px); display:flex; align-items:flex-end; background-size:cover; background-position:center; border-radius:18px; overflow:hidden; background-color:#101820; }
+.game-hero.no-artwork { background:radial-gradient(circle at 25% 20%, #1d3c52, #0d1218 65%); }
+.game-hero-shade { position:absolute; inset:0; background:linear-gradient(0deg, rgba(8,12,18,.97) 0%, rgba(8,12,18,.55) 45%, rgba(8,12,18,.06) 100%); }
+.game-hero-card { position:relative; z-index:1; display:flex; gap:26px; margin:34px; padding:26px; border-radius:18px; background:rgba(12,18,26,.82); border:1px solid rgba(255,255,255,.07); backdrop-filter:blur(16px); max-width:1060px; }
+.game-cover { width:190px; aspect-ratio:2/3; object-fit:cover; border-radius:10px; flex-shrink:0; background:#141c26; }
+.game-info { min-width:0; display:flex; flex-direction:column; }
+.game-info h1 { font-size:clamp(28px, 3vw, 40px); color:#fff; letter-spacing:-.5px; }
+.game-meta { margin:10px 0 0; color:var(--muted); font-size:14px; }
+.game-description { margin:12px 0 0; color:#cfd8e3; line-height:1.55; font-size:14px; max-width:720px; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.game-description.hidden { display:none; }
+.game-credits { margin:10px 0 0; color:var(--muted); font-size:13px; }
+.game-note { margin:10px 0 0; }
+.game-actions { display:flex; align-items:center; gap:10px; margin-top:22px; flex-wrap:wrap; }
+.game-actions .primary { min-width:120px; }
+.game-icon-button { width:42px; height:42px; padding:0; display:grid; place-items:center; border-radius:9px; border:1px solid var(--border-strong); background:var(--surface-raised); color:var(--text); }
+.game-icon-button:hover { border-color:var(--accent); }
+.game-size { color:var(--muted); font-size:13px; border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+.game-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+.game-chip { border:1px solid var(--border); border-radius:999px; padding:6px 11px; color:var(--muted); font-size:11px; letter-spacing:.03em; text-transform:uppercase; }
+.game-options-paths { margin:10px 0 4px; }
