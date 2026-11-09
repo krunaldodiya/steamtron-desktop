@@ -677,7 +677,7 @@ const GAMEPAD_ACTIONS = new Map([
 
 function headerControls() {
   return [...document.querySelectorAll(".topbar .nav-item, .topbar .top-actions button")]
-    .filter((node) => !node.disabled && node.getClientRects().length > 0 && !node.closest("#profile-menu"));
+    .filter((node) => !node.disabled && node.getClientRects().length > 0);
 }
 
 function activeNavControl() {
@@ -709,9 +709,9 @@ function navigationSurface() {
 function navigationControls() {
   const settings = document.querySelector("#settings-page");
   const modal = document.querySelector(".modal-backdrop");
-  const menu = document.querySelector("#profile-menu");
-  const root = menu && !menu.classList.contains("hidden")
-    ? menu
+  const dialog = document.querySelector("#profile-dialog");
+  const root = dialog && !dialog.classList.contains("hidden")
+    ? dialog
     : settings && !settings.classList.contains("hidden")
       ? settings
       : modal || document;
@@ -966,8 +966,7 @@ function dispatchNavigation(action, fromGamepad = false) {
       }
       return;
     }
-    const menu = document.querySelector("#profile-menu");
-    if (menu && !menu.classList.contains("hidden")) { closeProfileMenu(); return; }
+    if (profileDialogOpen()) { closeProfileDialog(); return; }
     if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
     const modal = document.querySelector(".modal-backdrop");
     if (modal) { modal.remove(); return; }
@@ -1080,62 +1079,44 @@ window.addEventListener("keydown", (event) => {
 
 requestAnimationFrame(pollGamepad);
 
-const profileMenuEl = document.querySelector("#profile-menu");
+const profileDialog = document.querySelector("#profile-dialog");
 
-function profileMenuOpen() {
-  return Boolean(profileMenuEl && !profileMenuEl.classList.contains("hidden"));
+function profileDialogOpen() {
+  return Boolean(profileDialog && !profileDialog.classList.contains("hidden"));
 }
 
-function closeProfileMenu() {
-  if (!profileMenuEl) return;
-  profileMenuEl.classList.add("hidden");
-  profileMenuEl.replaceChildren();
-  if (navState.focused && profileMenuEl.contains(navState.focused)) {
+function closeProfileDialog() {
+  if (!profileDialog) return;
+  profileDialog.classList.add("hidden");
+  if (navState.focused && profileDialog.contains(navState.focused)) {
     navState.focused.classList.remove("nav-focus");
     navState.focused = null;
   }
 }
 
-async function toggleProfileMenu() {
-  if (profileMenuOpen()) { closeProfileMenu(); return; }
+async function openProfileDialog() {
   let profile = null;
   try { profile = await invoke("profile_status"); } catch (_error) { profile = null; }
-  const email = profile?.email || (profile?.authenticated ? "Signed in" : "Signed out");
-  profileMenuEl.innerHTML = `<div class="profile-menu-head">
-      <span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"></path></svg></span>
-      <div><strong>${escape(email)}</strong><span>${escape(profile?.base_url || "SteamTron account")}</span></div>
-    </div>
-    <button data-profile-action="account" role="menuitem">Account settings</button>
-    <button data-profile-action="settings" role="menuitem">App settings</button>
-    <button data-profile-action="signout" class="danger" role="menuitem">Sign out</button>`;
-  profileMenuEl.classList.remove("hidden");
-  profileMenuEl.onclick = async (event) => {
-    const action = event.target.closest("[data-profile-action]")?.dataset.profileAction;
-    if (!action) return;
-    closeProfileMenu();
-    if (action === "account" || action === "settings") {
-      settingsTab = "general";
-      await openSettingsPage();
-      return;
-    }
-    if (action === "signout") {
-      try {
-        await invoke("profile_logout");
-        showAuthGate("Signed out. Sign in to continue.");
-      } catch (error) {
-        showToast(String(error), true);
-      }
-    }
-  };
-  const first = profileMenuEl.querySelector("button");
-  if (first) focusControl(first);
+  document.querySelector("#profile-email").textContent =
+    profile?.email || (profile?.authenticated ? "Signed in" : "Signed out");
+  document.querySelector("#profile-base").textContent = profile?.base_url || "";
+  profileDialog.classList.remove("hidden");
+  focusControl(document.querySelector("#profile-logout"));
 }
 
-document.querySelector("#profile").onclick = () => { void toggleProfileMenu(); };
-document.addEventListener("click", (event) => {
-  if (!profileMenuOpen()) return;
-  if (event.target.closest("#profile-menu") || event.target.closest("#profile")) return;
-  closeProfileMenu();
+document.querySelector("#profile").onclick = () => { void openProfileDialog(); };
+document.querySelector("#profile-close").onclick = closeProfileDialog;
+document.querySelector("#profile-logout").onclick = async () => {
+  try {
+    await invoke("profile_logout");
+    closeProfileDialog();
+    showAuthGate("Signed out. Sign in to continue.");
+  } catch (error) {
+    showToast(String(error), true);
+  }
+};
+profileDialog.addEventListener("click", (event) => {
+  if (event.target === profileDialog) closeProfileDialog();
 });
 
 async function boot() {
