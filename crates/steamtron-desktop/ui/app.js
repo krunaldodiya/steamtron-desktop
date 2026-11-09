@@ -1191,7 +1191,7 @@ function applyFullscreenState(fullscreen) {
   document.body.classList.toggle("fullscreen-mode", fullscreen);
   const button = document.querySelector("#window-mode");
   if (button) {
-    const label = fullscreen ? "Exit fullscreen mode (F11)" : "Switch to fullscreen mode (F11)";
+    const label = fullscreen ? "Exit Fullscreen mode (F11)" : "Switch to Fullscreen mode (F11)";
     button.title = label;
     button.setAttribute("aria-label", label);
   }
@@ -1234,7 +1234,7 @@ function openFullscreenOptions() {
     <div class="fullscreen-options">
       <button id="fullscreen-reboot">Reboot</button>
       <button id="fullscreen-shutdown">Shutdown</button>
-      <button id="fullscreen-exit">Exit fullscreen</button>
+      <button id="fullscreen-exit">Exit Fullscreen</button>
       <button id="fullscreen-quit">Quit SteamTron</button>
       <div class="fullscreen-scale">
         <button id="fullscreen-scale-down" class="scale-button" aria-label="Decrease UI scale">−</button>
