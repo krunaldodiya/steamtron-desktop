@@ -729,7 +729,9 @@ function openManagedGame(id) {
 }
 
 function setView(view) {
+  const returningToStore = view === "store" && appView === "store-game";
   appView = view;
+  if (returningToStore) restoreStoreScroll = true;
   document.body.classList.toggle("store-open", view === "store");
   const navView = view === "game" ? "library" : view === "store-game" ? "store" : view;
   for (const name of ["home", "library", "store"]) {
@@ -2593,6 +2595,9 @@ let storeLoading = false;
 let storeError = "";
 let storeTried = false;
 let storeDetail = null;
+let storeDraft = "";
+let storeScrollTop = 0;
+let restoreStoreScroll = false;
 let storeRecent = (() => { try { return JSON.parse(localStorage.getItem("steamtron.storeRecent.v1") || "[]"); } catch (_error) { return []; } })();
 
 function saveStoreRecent() {
@@ -2626,6 +2631,12 @@ function hydrateStoreCovers(host) {
 async function openStoreItem(id) {
   const base = [...storeItems, ...storeRecent].find((entry) => String(entry.id) === String(id));
   if (!base) return;
+  if (appView === "store") {
+    const content = detailEl.querySelector(".store-content");
+    if (content) storeScrollTop = content.scrollTop;
+    const search = detailEl.querySelector("#store-search");
+    if (search) storeDraft = search.value;
+  }
   rememberStoreItem(base);
   let item = base;
   try {
@@ -2782,7 +2793,7 @@ function renderStorePage() {
     <div class="store-body">
       <aside class="store-sidebar">
         <div class="store-sidebar-head"><label for="store-search">Search</label><button type="button" tabindex="0" class="store-clear-link" id="store-clear-search">Clear</button></div>
-        <input id="store-search" placeholder="Search the catalogue and press Enter" value="${escape(storeQuery)}" aria-label="Search the catalogue">
+        <input id="store-search" placeholder="Search the catalogue and press Enter" value="${escape(storeDraft)}" aria-label="Search the catalogue">
         <div class="store-sidebar-head"><label>Genre</label><button type="button" tabindex="0" class="store-clear-link" id="store-clear-genre">Clear</button></div>
         <div class="store-option-list" data-list="genre" role="listbox" aria-label="Genre">
           ${genreOptions}
@@ -2813,7 +2824,12 @@ function renderStorePage() {
   </div>`;
 
   const input = detailEl.querySelector("#store-search");
-  const run = () => { storeQuery = input.value.trim(); void reloadStore(true); };
+  input.addEventListener("input", () => { storeDraft = input.value; });
+  const run = () => {
+    storeDraft = input.value;
+    storeQuery = storeDraft.trim();
+    void reloadStore(true);
+  };
   input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
   for (const button of detailEl.querySelectorAll("[data-store-genre]")) {
     button.onclick = () => { storeGenre = button.dataset.storeGenre; void reloadStore(true); };
@@ -2823,6 +2839,7 @@ function renderStorePage() {
   }
   detailEl.querySelector("#store-clear-search").onclick = () => {
     storeQuery = "";
+    storeDraft = "";
     input.value = "";
     void reloadStore(true);
   };
@@ -2857,7 +2874,8 @@ function renderStorePage() {
     }
   }
   const content = detailEl.querySelector(".store-content");
-  if (content) content.scrollTop = previousScroll;
+  if (content) content.scrollTop = restoreStoreScroll ? storeScrollTop : previousScroll;
+  restoreStoreScroll = false;
   if (previousInDetail) {
     let restore = null;
     if (previousStoreId) restore = detailEl.querySelector(`[data-store-id="${CSS.escape(previousStoreId)}"]`);
