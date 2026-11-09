@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::library::{
@@ -43,19 +43,19 @@ impl ImportError {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ImportSource {
     SteamTronConfig,
     UmuTronLibrary,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PlannedGame {
     pub game: Game,
     pub source: ImportSource,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum ImportAction {
     AddDrive { root: PathBuf, label: String },
     AddGame { planned: PlannedGame },
@@ -65,7 +65,7 @@ pub enum ImportAction {
     NeedsInput { app_id: Option<u32>, title: String, reason: String },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ImportPlan {
     pub source: Option<ImportSource>,
     pub actions: Vec<ImportAction>,
@@ -568,6 +568,147 @@ pub fn imported_settings(settings: &UmuSettings) -> LibrarySettings {
     result
 }
 
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct CommitReport {
+    pub drives_added: Vec<PathBuf>,
+    pub games_added: Vec<String>,
+    pub games_skipped: Vec<String>,
+    pub fixes_moved: Vec<(PathBuf, PathBuf)>,
+    pub pending_registrations: Vec<(u32, String)>,
+    pub needs_input: Vec<(Option<u32>, String, String)>,
+    pub warnings: Vec<String>,
+}
+
+/// Apply a previously reviewed plan to `library_path`.
+///
+/// Safety rules: existing games and drives are skipped, fixes are copied before
+/// the library is saved and the source is removed only after a successful save,
+/// and a failure rolls back any copied fixes. Steam registration is never
+/// performed here; it is returned as `pending_registrations`.
+pub fn apply_plan(plan: &ImportPlan, library_path: impl AsRef<Path>) -> Result<CommitReport, ImportError> {
+    let library_path = library_path.as_ref();
+    let mut library = crate::library::Library::open(library_path)
+        .map_err(|error| ImportError::Format(error.to_string()))?;
+    let mut report = CommitReport::default();
+    let mut copied: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+    for action in &plan.actions {
+        match action {
+            ImportAction::AddDrive { root, label } => {
+                if library.drives().iter().any(|drive| &drive.root == root) {
+                    continue;
+                }
+                let default = library.drives().is_empty();
+                match library.add_drive(root.clone(), label.clone(), default) {
+                    Ok(_) => report.drives_added.push(root.clone()),
+                    Err(error) => report.warnings.push(error.to_string()),
+                }
+            }
+            ImportAction::AddGame { planned } => {
+                let game = &planned.game;
+                let duplicate = library.game(&game.id).is_some()
+                    || game
+                        .metadata_app_id
+                        .and_then(|app_id| library.game_by_app_id(app_id))
+                        .is_some();
+                if duplicate {
+                    report.games_skipped.push(game.id.clone());
+                    continue;
+                }
+                match library.upsert_game(game.clone()) {
+                    Ok(()) => report.games_added.push(game.id.clone()),
+                    Err(error) => report.warnings.push(error.to_string()),
+                }
+            }
+            ImportAction::MoveFixes { from, to } => {
+                if !from.is_dir() {
+                    report.warnings.push(format!("fixes missing: {}", from.display()));
+                    continue;
+                }
+                if to.exists() {
+                    report.warnings.push(format!(
+                        "fixes destination already exists, source kept: {}",
+                        from.display()
+                    ));
+                    continue;
+                }
+                match copy_tree(from, to) {
+                    Ok(()) => copied.push((from.clone(), to.clone())),
+                    Err(error) => report.warnings.push(error.to_string()),
+                }
+            }
+            ImportAction::RegisterSteam { app_id, title } => {
+                report.pending_registrations.push((*app_id, title.clone()));
+            }
+            ImportAction::NeedsInput {
+                app_id,
+                title,
+                reason,
+            } => {
+                report
+                    .needs_input
+                    .push((*app_id, title.clone(), reason.clone()));
+            }
+        }
+    }
+
+    if let Err(error) = library.save() {
+        for (_, to) in &copied {
+            let _ = fs::remove_dir_all(to);
+        }
+        return Err(ImportError::Format(error.to_string()));
+    }
+    for (from, to) in &copied {
+        if fs::remove_dir_all(from).is_ok() {
+            report.fixes_moved.push((from.clone(), to.clone()));
+        } else {
+            report.warnings.push(format!(
+                "fixes copied but source kept: {}",
+                from.display()
+            ));
+        }
+    }
+    Ok(report)
+}
+
+fn copy_tree(from: &Path, to: &Path) -> Result<(), ImportError> {
+    fs::create_dir_all(to).map_err(|error| ImportError::io(to, error))?;
+    for entry in fs::read_dir(from).map_err(|error| ImportError::io(from, error))? {
+        let entry = entry.map_err(|error| ImportError::io(from, error))?;
+        let path = entry.path();
+        let target = to.join(entry.file_name());
+        let kind = entry.file_type().map_err(|error| ImportError::io(&path, error))?;
+        if kind.is_symlink() {
+            return Err(ImportError::Format(format!(
+                "fixes contain a symbolic link: {}",
+                path.display()
+            )));
+        }
+        if kind.is_dir() {
+            copy_tree(&path, &target)?;
+        } else if kind.is_file() {
+            fs::copy(&path, &target).map_err(|error| ImportError::io(&target, error))?;
+        }
+    }
+    Ok(())
+}
+
+/// Detect the source document and plan it without mutating anything.
+pub fn plan_path(path: impl AsRef<Path>) -> Result<ImportPlan, ImportError> {
+    let path = path.as_ref();
+    let text = fs::read_to_string(path).map_err(|error| ImportError::io(path, error))?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|source| ImportError::Json {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let array_games = value.get("games").map(|games| games.is_array()).unwrap_or(false);
+    if array_games {
+        plan_umutron_library(path)
+    } else {
+        plan_legacy_config(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,5 +857,139 @@ mod tests {
         let plan = plan_umutron_library(&library).unwrap();
 
         assert!(matches!(plan.actions[0], ImportAction::NeedsInput { .. }));
+    }
+}
+
+#[cfg(test)]
+mod commit_tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    fn write_umutron_source(temp: &Path) -> PathBuf {
+        let root = temp.join("UmuLibrary/umuapps/common/Sample Game");
+        fs::create_dir_all(root.join("Bin")).unwrap();
+        fs::write(root.join("Bin/Sample.exe"), b"exe").unwrap();
+        let legacy_fixes = temp.join("appdata/fixes/77");
+        fs::create_dir_all(&legacy_fixes).unwrap();
+        fs::write(legacy_fixes.join("patch.dll"), b"patch").unwrap();
+        let library = temp.join("library.json");
+        fs::write(
+            &library,
+            serde_json::json!({
+                "version": 1,
+                "games": [ {
+                    "id": "game-1",
+                    "title": "Sample Game",
+                    "metadata_app_id": 77,
+                    "installation": { "mode": "linked", "root": root },
+                    "launch_targets": [
+                        { "id": "t1", "executable": root.join("Bin/Sample.exe"), "primary": true }
+                    ],
+                    "fixes_path": legacy_fixes,
+                    "fixes_enabled": true
+                } ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        library
+    }
+
+    #[test]
+    fn applies_games_drives_and_fixes_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = write_umutron_source(temp.path());
+        let plan = plan_umutron_library(&source).unwrap();
+        let target = temp.path().join("target/library.json");
+
+        let report = apply_plan(&plan, &target).unwrap();
+
+        assert_eq!(report.games_added, vec!["game-1"]);
+        assert_eq!(report.drives_added.len(), 1);
+        assert!(report.pending_registrations.iter().any(|(app_id, _)| *app_id == 77));
+        let library = crate::library::Library::open(&target).unwrap();
+        assert_eq!(library.games().len(), 1);
+        assert_eq!(library.drives().len(), 1);
+        let fixes = temp
+            .path()
+            .join("UmuLibrary/umuapps/fixes/Sample Game");
+        assert!(fixes.join("patch.dll").is_file());
+        assert!(!temp.path().join("appdata/fixes/77").exists());
+
+        let second = apply_plan(&plan, &target).unwrap();
+        assert!(second.games_added.is_empty());
+        assert_eq!(second.games_skipped, vec!["game-1"]);
+        assert!(second.drives_added.is_empty());
+    }
+
+    #[test]
+    fn keeps_the_source_when_the_fixes_destination_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("appdata/fixes/77");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("patch.dll"), b"patch").unwrap();
+        let destination = temp.path().join("UmuLibrary/umuapps/fixes/Sample Game");
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(destination.join("other.dll"), b"keep").unwrap();
+        let plan = ImportPlan {
+            source: None,
+            actions: vec![ImportAction::MoveFixes {
+                from: source.clone(),
+                to: destination.clone(),
+            }],
+            warnings: Vec::new(),
+        };
+
+        let report = apply_plan(&plan, temp.path().join("target/library.json")).unwrap();
+
+        assert!(report.fixes_moved.is_empty());
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("destination already exists")));
+        assert!(source.join("patch.dll").is_file());
+        assert!(destination.join("other.dll").is_file());
+    }
+
+    #[test]
+    fn records_entries_that_need_a_user_decision() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("legacy.json");
+        let executable = temp.path().join("elsewhere/Sample.exe");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"exe").unwrap();
+        fs::write(
+            &source,
+            serde_json::json!({
+                "version": 1,
+                "games": { "9": { "launch_targets": [
+                    { "id": "t1", "executable": executable, "primary": true } ] } }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let plan = plan_path(&source).unwrap();
+
+        let report = apply_plan(&plan, temp.path().join("library.json")).unwrap();
+
+        assert_eq!(report.needs_input.len(), 1);
+        assert_eq!(report.needs_input[0].0, Some(9));
+    }
+
+    #[test]
+    fn detects_the_source_document() {
+        let temp = tempfile::tempdir().unwrap();
+        let umutron = write_umutron_source(temp.path());
+        assert_eq!(
+            plan_path(&umutron).unwrap().source,
+            Some(ImportSource::UmuTronLibrary)
+        );
+        let legacy = temp.path().join("legacy.json");
+        fs::write(&legacy, r#"{"version":1,"games":{}}"#).unwrap();
+        assert_eq!(
+            plan_path(&legacy).unwrap().source,
+            Some(ImportSource::SteamTronConfig)
+        );
     }
 }
