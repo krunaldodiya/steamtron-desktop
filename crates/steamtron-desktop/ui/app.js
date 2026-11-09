@@ -2447,16 +2447,13 @@ function renderStorePage() {
     <header class="page-head"><h1>Discover your next game</h1><p>Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">
       <aside class="store-sidebar">
-        <label for="store-search">Search</label>
+        <div class="store-sidebar-head"><label for="store-search">Search</label><button type="button" tabindex="0" class="store-clear-link" id="store-clear-search">Clear</button></div>
         <input id="store-search" placeholder="Search the catalogue and press Enter" value="${escape(storeQuery)}" aria-label="Search the catalogue">
-        <button class="store-option store-clear-row" id="store-clear-search">Clear search</button>
-        <label>Genre</label>
+        <div class="store-sidebar-head"><label>Genre</label><button type="button" tabindex="0" class="store-clear-link" id="store-clear-genre">Clear</button></div>
         <div class="store-option-list" data-list="genre" role="listbox" aria-label="Genre">
-          <button class="store-option${storeGenre === "" ? " selected" : ""}" data-store-genre="">All genres</button>
           ${genreOptions}
         </div>
-        <button class="store-option store-clear-row" id="store-clear-genre">Clear genre</button>
-        <label>Sort</label>
+        <div class="store-sidebar-head"><label>Sort</label><button type="button" tabindex="0" class="store-clear-link" id="store-clear-sort">Clear</button></div>
         <div class="store-option-list" data-list="sort" role="listbox" aria-label="Sort">${sortOptions}</div>
         <p class="library-count">${escape(count)}</p>
       </aside>
@@ -2497,6 +2494,10 @@ function renderStorePage() {
   };
   detailEl.querySelector("#store-clear-genre").onclick = () => {
     storeGenre = "";
+    void reloadStore(true);
+  };
+  detailEl.querySelector("#store-clear-sort").onclick = () => {
+    storeSort = "popular";
     void reloadStore(true);
   };
   const retry = detailEl.querySelector("#store-retry");
