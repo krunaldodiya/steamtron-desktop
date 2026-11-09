@@ -12,6 +12,9 @@ let artworkLoading = false;
 let managedLibrary = null;
 let managedSelectedId = null;
 let runningManaged = new Set();
+let libraryPage = 1;
+let managedQuery = "";
+const LIBRARY_PAGE_SIZE = 60;
 let appView = "library";
 let pendingRestart = loadPendingRestart();
 
@@ -51,6 +54,10 @@ function coverUrl(appid) {
 
 function headerUrl(appid) {
   return `https://cdn.cloudflare.steamstatic.com/steam/apps/${encodeURIComponent(appid)}/header.jpg`;
+}
+
+function heroUrl(appid) {
+  return `https://cdn.cloudflare.steamstatic.com/steam/apps/${encodeURIComponent(appid)}/library_hero.jpg`;
 }
 
 function bindCoverImage(image, appid) {
@@ -171,8 +178,8 @@ function showAuthGate(message = "") {
   authGate.classList.remove("hidden");
   for (const node of appSections) { node.inert = true; node.setAttribute("aria-hidden", "true"); }
   gateStatus.textContent = message;
-  gateSignin.disabled = false;
-  gateSignin.focus();
+  gateSpinner.classList.add("hidden");
+  document.querySelector("#gate-retry").disabled = false;
 }
 
 function hideAuthGate() {
@@ -276,37 +283,91 @@ function managedReady(game) {
   return Boolean(game.installation?.root);
 }
 
-function managedCard(game, compact = false) {
+function coverCard(game) {
   const appId = game.metadata_app_id;
   const cover = appId ? coverUrl(appId) : "";
-  const meta = appId ? `Steam App ${appId}` : "Managed entry";
-  const readiness = managedReady(game) ? "Ready" : "Setup needed";
-  const selectedClass = game.id === managedSelectedId ? " active" : "";
-  return `<button class="game game-card${selectedClass}${compact ? " compact" : ""}" data-managed="${escape(game.id)}" title="${escape(game.title)}">
-    <span class="cover" aria-hidden="true">${cover ? `<img loading="lazy" src="${escape(cover)}" alt="">` : ""}</span>
-    <span class="game-meta">
-      <strong>${escape(game.title)}</strong>
-      <span>${escape(meta)}</span>
-      <span class="badges"><span class="badge${managedReady(game) ? " ok" : " warn"}">${escape(readiness)}</span></span>
-    </span>
+  const active = game.id === managedSelectedId ? " active" : "";
+  return `<button class="cover-card${active}" data-managed="${escape(game.id)}" title="${escape(game.title)}">
+    <span class="cover">${cover ? `<img loading="lazy" src="${escape(cover)}" alt="">` : ""}<span class="play-glyph" aria-hidden="true">▶</span></span>
+    <span class="cover-title">${escape(game.title)}</span>
   </button>`;
 }
 
-function renderManagedList() {
-  const query = searchEl.value.trim().toLowerCase();
-  gamesEl.className = "games list";
-  gamesEl.replaceChildren();
-  const visible = managedLibrary.games.filter((game) => !query || `${game.title} ${game.metadata_app_id || ""}`.toLowerCase().includes(query));
-  for (const game of visible) {
-    const wrapper = document.createElement("div");
-    wrapper.innerHTML = managedCard(game);
-    gamesEl.appendChild(wrapper.firstElementChild);
+function managedFilteredGames() {
+  const query = managedQuery.trim().toLowerCase();
+  return managedLibrary.games.filter((game) => !query || `${game.title} ${game.metadata_app_id || ""}`.toLowerCase().includes(query));
+}
+
+function libraryPages() {
+  return Math.max(1, Math.ceil(managedFilteredGames().length / LIBRARY_PAGE_SIZE));
+}
+
+function renderManagedLibrary() {
+  const filtered = managedFilteredGames();
+  const pages = libraryPages();
+  libraryPage = Math.min(Math.max(1, libraryPage), pages);
+  const start = (libraryPage - 1) * LIBRARY_PAGE_SIZE;
+  const visible = filtered.slice(start, start + LIBRARY_PAGE_SIZE);
+  const total = managedLibrary.games.length;
+  const countText = managedQuery.trim() ? `${filtered.length} of ${total} games` : `${total} games`;
+  detailEl.innerHTML = `<div class="page library-page">
+    <header class="page-head"><h1>Your library</h1><p>Every game, one place. Pick up where you left off.</p></header>
+    <div class="library-search"><input id="managed-search" placeholder="Search your library" value="${escape(managedQuery)}" aria-label="Search your library"><button id="managed-search-button">Search</button></div>
+    <p class="library-count">${escape(countText)}</p>
+    ${visible.length ? `<div class="cover-grid">${visible.map(coverCard).join("")}</div>` : '<div class="empty">No games match your search.</div>'}
+    <nav class="pager" aria-label="Library pages">
+      <button data-page="first"${libraryPage === 1 ? " disabled" : ""}>First</button>
+      <button data-page="prev"${libraryPage === 1 ? " disabled" : ""}>Previous</button>
+      <span class="pager-page">${libraryPage}</span>
+      <button data-page="next"${libraryPage === pages ? " disabled" : ""}>Next</button>
+      <button data-page="last"${libraryPage === pages ? " disabled" : ""}>Last</button>
+    </nav>
+    <p class="pager-hint">Page ${libraryPage} of ${pages} · PgUp / PgDn</p>
+  </div>`;
+  const input = detailEl.querySelector("#managed-search");
+  const run = () => {
+    managedQuery = input.value;
+    libraryPage = 1;
+    renderManagedLibrary();
+  };
+  detailEl.querySelector("#managed-search-button").onclick = run;
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
+  for (const button of detailEl.querySelectorAll("[data-page]")) {
+    button.onclick = () => {
+      if (button.dataset.page === "first") libraryPage = 1;
+      else if (button.dataset.page === "prev") libraryPage = Math.max(1, libraryPage - 1);
+      else if (button.dataset.page === "next") libraryPage = Math.min(libraryPages(), libraryPage + 1);
+      else libraryPage = libraryPages();
+      renderManagedLibrary();
+    };
   }
-  if (!gamesEl.children.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = managedLibrary.games.length ? "No games match your search." : "Your library is empty. Add a game to get started.";
-    gamesEl.appendChild(empty);
+}
+
+async function startManagedGame(game, button) {
+  const stop = button ? busy(button, "Starting…") : () => {};
+  try {
+    const result = await invoke("play_managed", { gameId: game.id });
+    if (result.mode !== "steam") runningManaged.add(game.id);
+    showToast(result.mode === "steam"
+      ? `Starting ${game.title} through Steam`
+      : `Started ${game.title} · ${result.log}`);
+    renderManagedMode();
+  } catch (error) {
+    showToast(String(error), true);
+    stop();
+  }
+}
+
+async function stopManagedGame(game, button) {
+  const stop = button ? busy(button, "Stopping…") : () => {};
+  try {
+    await invoke("stop_managed", { gameId: game.id });
+    runningManaged.delete(game.id);
+    showToast(`Stopped ${game.title}`);
+    renderManagedMode();
+  } catch (error) {
+    showToast(String(error), true);
+    stop();
   }
 }
 
@@ -394,7 +455,7 @@ async function loadManagedFixes(gameId) {
 
 function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
-  const hero = appId ? headerUrl(appId) : "";
+  const hero = appId ? heroUrl(appId) : "";
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
   const canPlay = managedReady(game) && Boolean(target);
   const steamMode = Boolean(game.launch?.requires_steam || game.steam?.launch_mode === "steam_client");
@@ -402,76 +463,97 @@ function renderManagedPreview(game) {
   const action = running
     ? '<button id="managed-stop" class="primary">Stop</button>'
     : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
-  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target || steamMode ? "" : '<span class="muted">No launch target yet.</span>'}${steamMode ? '<span class="muted">Steam client required</span>' : ""}</div></div></div>${managedDetails(game)}${target ? "" : managedSetupMarkup(game)}<div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>`;
+  detailEl.innerHTML = `<div class="page game-page">
+    <div class="game-page-top"><button id="managed-back" class="secondary">← Library</button></div>
+    <div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target || steamMode ? "" : '<span class="muted">No launch target yet.</span>'}${steamMode ? '<span class="muted">Steam client required</span>' : ""}</div></div></div>${managedDetails(game)}${target ? "" : managedSetupMarkup(game)}<div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>
+  </div>`;
+  detailEl.querySelector("#managed-back").onclick = () => setView("library");
   void loadManagedFixes(game.id);
   void wireManagedSetup(game);
   const play = detailEl.querySelector("#managed-play");
-  if (play && canPlay) {
-    play.onclick = async () => {
-      const stop = busy(play, "Starting…");
-      try {
-        const result = await invoke("play_managed", { gameId: game.id });
-        if (result.mode !== "steam") runningManaged.add(game.id);
-        showToast(result.mode === "steam"
-          ? `Starting ${game.title} through Steam`
-          : `Started ${game.title} · ${result.log}`);
-        renderManagedMode();
-      } catch (error) {
-        showToast(String(error), true);
-        stop();
-      }
-    };
-  }
+  if (play && canPlay) play.onclick = () => startManagedGame(game, play);
   const stopButton = detailEl.querySelector("#managed-stop");
-  if (stopButton) {
-    stopButton.onclick = async () => {
-      const stop = busy(stopButton, "Stopping…");
-      try {
-        await invoke("stop_managed", { gameId: game.id });
-        runningManaged.delete(game.id);
-        showToast(`Stopped ${game.title}`);
-        renderManagedMode();
-      } catch (error) {
-        showToast(String(error), true);
-        stop();
-      }
-    };
-  }
+  if (stopButton) stopButton.onclick = () => stopManagedGame(game, stopButton);
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
 }
 
 function renderManagedHome() {
-  const installed = managedLibrary.games.filter((game) => managedReady(game));
-  const pending = managedLibrary.games.filter((game) => !managedReady(game));
-  const featured = installed[0] || managedLibrary.games[0];
+  const games = managedLibrary.games;
+  const installed = games.filter((game) => managedReady(game));
+  const featured = installed[0] || games[0];
   const appId = featured?.metadata_app_id;
-  const hero = appId ? headerUrl(appId) : "";
-  const rail = (title, items, empty) => `<section class="managed-rail"><h2>${escape(title)}</h2>${items.length ? `<div class="rail-list">${items.map((game) => managedCard(game, true)).join("")}</div>` : `<div class="status">${escape(empty)}</div>`}</section>`;
-  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><p class="muted">Your library</p><h2>${escape(featured?.title || "Your next game")}</h2></div></div>${rail("Ready to play", installed.slice(0, 8), "No installed games yet.")}${rail("Needs setup", pending.slice(0, 8), "Every library entry is ready.")}`;
+  const hero = appId ? heroUrl(appId) : "";
+  const running = featured ? runningManaged.has(featured.id) : false;
+  const railPages = Math.max(1, Math.ceil(games.length / 10));
+  detailEl.innerHTML = `<div class="page home-page">
+    <section class="home-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}>
+      <div class="home-hero-shade"></div>
+      <div class="home-hero-content">
+        <p class="eyebrow">Recently played</p>
+        <h1>${escape(featured?.title || "Your next game")}</h1>
+        <p class="home-meta">${escape(appId ? `Steam App ${appId}` : "Managed entry")}${featured && managedReady(featured) ? " · Ready to play" : ""}</p>
+        <div class="home-actions"><button class="primary" id="home-play"${featured ? "" : " disabled"}>${running ? "Stop" : "Play"}</button><button id="home-view"${featured ? "" : " disabled"}>View game</button></div>
+      </div>
+    </section>
+    <section class="managed-rail">
+      <div class="rail-head"><h2>Recently played</h2><span class="muted">${pad2(1)} / ${pad2(railPages)}</span></div>
+      <div class="rail-scroll">${games.map(coverCard).join("")}</div>
+    </section>
+    <section class="managed-rail">
+      <div class="rail-head"><h2>Recently ready to play</h2></div>
+      <p class="muted">Your ready games, newest completed setups first.</p>
+      ${installed.length ? `<div class="rail-scroll">${installed.map(coverCard).join("")}</div>` : '<div class="status">No installed games yet.</div>'}
+    </section>
+  </div>`;
+  const play = detailEl.querySelector("#home-play");
+  if (play && featured) {
+    play.onclick = () => running
+      ? stopManagedGame(featured, play)
+      : startManagedGame(featured, play);
+  }
+  const view = detailEl.querySelector("#home-view");
+  if (view && featured) view.onclick = () => openManagedGame(featured.id);
 }
 
 function renderManagedMode() {
   if (!hasManagedLibrary()) return;
+  document.body.classList.add("managed");
   if (!managedLibrary.games.some((game) => game.id === managedSelectedId)) {
     managedSelectedId = managedLibrary.games[0]?.id || null;
   }
-  renderManagedList();
   if (appView === "home") {
     renderManagedHome();
     return;
   }
-  const game = managedLibrary.games.find((item) => item.id === managedSelectedId);
-  if (game) renderManagedPreview(game);
+  if (appView === "game") {
+    const game = managedLibrary.games.find((item) => item.id === managedSelectedId);
+    if (game) {
+      renderManagedPreview(game);
+      return;
+    }
+  }
+  renderManagedLibrary();
+}
+
+function openManagedGame(id) {
+  managedSelectedId = id;
+  appView = "game";
+  renderManagedMode();
 }
 
 function setView(view) {
   appView = view;
-  document.querySelector("#nav-home").classList.toggle("active", view === "home");
-  document.querySelector("#nav-library").classList.toggle("active", view === "library");
-  document.querySelector("#nav-home").setAttribute("aria-current", view === "home" ? "page" : "false");
-  document.querySelector("#nav-library").setAttribute("aria-current", view === "library" ? "page" : "false");
+  const navView = view === "game" ? "library" : view;
+  document.querySelector("#nav-home").classList.toggle("active", navView === "home");
+  document.querySelector("#nav-library").classList.toggle("active", navView === "library");
+  document.querySelector("#nav-home").setAttribute("aria-current", navView === "home" ? "page" : "false");
+  document.querySelector("#nav-library").setAttribute("aria-current", navView === "library" ? "page" : "false");
   if (hasManagedLibrary()) {
     renderManagedMode();
-  } else if (view === "library") {
+  } else if (view === "library" || view === "game") {
     renderGames();
     const game = games.find((item) => item.appid === selected);
     if (game) renderDetail(game, detailTab);
@@ -484,22 +566,34 @@ function setView(view) {
 gamesEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-managed]");
   if (!button) return;
-  managedSelectedId = button.dataset.managed;
-  appView = "library";
-  setView("library");
+  openManagedGame(button.dataset.managed);
 });
 
 detailEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-managed]");
   if (!button) return;
-  managedSelectedId = button.dataset.managed;
-  setView("library");
+  openManagedGame(button.dataset.managed);
+});
+
+window.addEventListener("keydown", (event) => {
+  if (!hasManagedLibrary() || appView !== "library") return;
+  if (event.key !== "PageDown" && event.key !== "PageUp") return;
+  event.preventDefault();
+  const pages = libraryPages();
+  libraryPage = event.key === "PageDown"
+    ? Math.min(pages, libraryPage + 1)
+    : Math.max(1, libraryPage - 1);
+  renderManagedLibrary();
 });
 
 async function boot() {
   try {
     const auth = await invoke("profile_status");
-    if (!auth.authenticated) { showAuthGate("Sign in to continue."); return; }
+    if (!auth.authenticated) {
+      showAuthGate("Opening your browser to sign in…");
+      void runSignIn();
+      return;
+    }
     hideAuthGate();
     await load();
     await checkMigration();
@@ -508,19 +602,38 @@ async function boot() {
   }
 }
 
-gateSignin.onclick = async () => {
-  const stop = busy(gateSignin, "Signing in…");
-  gateStatus.textContent = "Complete sign-in in your browser…";
+const gateRetry = document.querySelector("#gate-retry");
+const gateQuit = document.querySelector("#gate-quit");
+const gateSpinner = document.querySelector("#gate-spinner");
+let signInRunning = false;
+
+async function runSignIn() {
+  if (signInRunning) return;
+  signInRunning = true;
+  gateSpinner.classList.remove("hidden");
+  gateRetry.disabled = true;
+  gateStatus.textContent = "Opening your browser to sign in…";
   try {
     const auth = await invoke("profile_login");
-    stop();
-    if (!auth.authenticated) { showAuthGate("Sign-in did not complete."); return; }
+    if (!auth.authenticated) {
+      gateStatus.textContent = "Sign-in did not complete. Retry to open the browser again.";
+      return;
+    }
     hideAuthGate();
     await load();
+    await checkMigration();
   } catch (error) {
-    stop();
-    showAuthGate(`Sign-in failed: ${error}`);
+    gateStatus.textContent = String(error);
+  } finally {
+    signInRunning = false;
+    gateSpinner.classList.add("hidden");
+    gateRetry.disabled = false;
   }
+}
+
+gateRetry.onclick = () => { void runSignIn(); };
+gateQuit.onclick = () => {
+  invoke("quit_app").catch(() => window.close());
 };
 
 let toastTimer = null;
@@ -1264,10 +1377,12 @@ async function load() {
     try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { managedLibrary = null; }
     await refreshManagedRunning();
     if (hasManagedLibrary()) {
+      document.body.classList.add("managed");
       renderManagedMode();
       void loadArtwork();
       return true;
     }
+    document.body.classList.remove("managed");
     if (!games.some((game) => game.appid === selected)) {
       selected = games[0]?.appid || null;
       detailTab = "general";

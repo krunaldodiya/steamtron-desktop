@@ -9,11 +9,16 @@
 </head>
 <body>
   <div id="auth-gate" class="auth-gate">
-    <div class="auth-card">
-      <h1>SteamTron</h1>
-      <p class="muted">Sign in before using the desktop app. Adding games and Steam library actions stay locked until your session is active.</p>
-      <button id="gate-signin" class="primary">Sign in</button>
-      <div id="gate-status" class="status"></div>
+    <div class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <div class="auth-modal-head">Sign in · SteamTron</div>
+      <div class="auth-lock" aria-hidden="true">🔒</div>
+      <h2 id="auth-title">Sign in to SteamTron</h2>
+      <p id="gate-status" class="auth-status">Opening your browser to sign in…</p>
+      <div class="auth-spinner" id="gate-spinner" aria-hidden="true"></div>
+      <div class="auth-actions">
+        <button id="gate-retry" class="secondary">Retry</button>
+        <button id="gate-quit" class="primary">Quit</button>
+      </div>
     </div>
   </div>
   <header class="topbar">

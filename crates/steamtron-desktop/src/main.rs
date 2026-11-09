@@ -1973,6 +1973,11 @@ fn remove_managed_fixes(game_id: String) -> Result<steamtron_library::managed::F
 }
 
 #[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
 fn reconcile_registrations() -> Result<steamtron_library::managed::ReconcileReport, String> {
     let backend = platform_backend().map_err(|error| error.to_string())?;
     steamtron_library::managed::reconcile_registrations(&backend)
@@ -2160,6 +2165,7 @@ fn main() {
             add_managed_game,
             play_managed,
             reconcile_registrations,
+            quit_app,
             running_managed,
             stop_managed,
             managed_fixes,
