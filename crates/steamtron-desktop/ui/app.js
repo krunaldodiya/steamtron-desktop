@@ -9,24 +9,8 @@ let heroPlayTimer = null;
 let selected = null;
 let detailTab = "general";
 let artworkLoading = false;
-let activity = loadActivity();
 let pendingRestart = loadPendingRestart();
 
-
-function loadActivity() {
-  try {
-    const value = JSON.parse(localStorage.getItem("steamtron.activity.v1") || "[]");
-    return Array.isArray(value)
-      ? value.slice(0, 100).map((item) => item.status === "running"
-          ? { ...item, status: "interrupted", detail: item.detail || "Interrupted before completion" }
-          : item)
-      : [];
-  } catch (_error) { return []; }
-}
-
-function saveActivity() {
-  try { localStorage.setItem("steamtron.activity.v1", JSON.stringify(activity.slice(0, 100))); } catch (_error) {}
-}
 
 function loadPendingRestart() {
   try { return JSON.parse(localStorage.getItem("steamtron.pendingRestart.v1") || "null"); } catch (_error) { return null; }
@@ -55,111 +39,6 @@ function renderRestartBanner() {
   banner.classList.toggle("hidden", !pendingRestart);
   const text = document.querySelector("#restart-banner-text");
   if (text) text.textContent = pendingRestart?.message || "SteamTron changed Steam library files.";
-}
-
-function recordActivity(action, options = {}) {
-  const item = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    at: new Date().toISOString(),
-    action,
-    appid: options.appid || null,
-    title: options.title || null,
-    detail: options.detail || "",
-    status: options.status || "success",
-    command: options.command || null,
-    args: options.args || null,
-  };
-  activity.unshift(item);
-  activity = activity.slice(0, 100);
-  saveActivity();
-  renderActivity();
-  updateActivityCount();
-}
-
-function updateActivity(id, changes) {
-  const item = activity.find((entry) => entry.id === id);
-  if (!item) return;
-  Object.assign(item, changes);
-  saveActivity();
-  renderActivity();
-  updateActivityCount();
-}
-
-async function retryActivity(item) {
-  if (!item?.command) return;
-  updateActivity(item.id, { status: "running", detail: "Retrying…" });
-  try {
-    await invoke(item.command, item.args || {});
-    updateActivity(item.id, { status: "success", detail: "Retry succeeded." });
-    await load();
-  } catch (error) {
-    updateActivity(item.id, { status: "error", detail: String(error) });
-  }
-}
-
-function updateActivityCount() {
-  const badge = document.querySelector("#activity-count");
-  if (!badge) return;
-  const count = activity.length;
-  badge.textContent = String(count > 99 ? "99+" : count);
-  badge.classList.toggle("hidden", count === 0);
-}
-
-function timeAgo(value) {
-  const then = new Date(value).getTime();
-  if (!Number.isFinite(then)) return "";
-  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
-  if (seconds < 604800) return `${Math.round(seconds / 86400)}d ago`;
-  return new Date(value).toLocaleDateString();
-}
-
-function activityFor(appid) {
-  return activity.filter((item) => item.appid === appid);
-}
-
-function activityRow(item, compact = false) {
-  const row = document.createElement("div");
-  row.className = `activity-row ${item.status === "error" ? "error" : ""} ${item.status || "success"}`;
-  const subject = item.title || (item.appid ? `App ${item.appid}` : "SteamTron");
-  const statusLabel = item.status === "running" ? "Running" : item.status === "error" ? "Failed" : item.status === "interrupted" ? "Interrupted" : "";
-  row.innerHTML = `<div class="activity-top"><strong>${escape(item.action)}</strong><span>${escape(statusLabel || timeAgo(item.at))}</span></div><div class="activity-subject">${escape(subject)}${item.detail ? ` · ${escape(item.detail)}` : ""}</div>`;
-  if (item.status === "error" && item.command) {
-    const retry = document.createElement("button");
-    retry.className = "secondary activity-retry";
-    retry.textContent = "Retry";
-    retry.onclick = () => retryActivity(item);
-    row.appendChild(retry);
-  }
-  if (compact) row.classList.add("compact");
-  return row;
-}
-
-function renderActivity() {
-  const list = document.querySelector("#activity-list");
-  if (!list) return;
-  list.replaceChildren();
-  if (!activity.length) {
-    const empty = document.createElement("div");
-    empty.className = "status";
-    empty.textContent = "No activity yet.";
-    list.appendChild(empty);
-    return;
-  }
-  for (const item of activity) list.appendChild(activityRow(item));
-}
-
-function openActivity() {
-  document.querySelector("#activity-drawer")?.classList.remove("hidden");
-  document.querySelector("#activity-backdrop")?.classList.remove("hidden");
-  renderActivity();
-}
-
-function closeActivity() {
-  document.querySelector("#activity-drawer")?.classList.add("hidden");
-  document.querySelector("#activity-backdrop")?.classList.add("hidden");
 }
 
 function coverUrl(appid) {
@@ -460,7 +339,6 @@ function renderDetail(game, tab = "general") {
   if (game.installed) tabs.push(["launch", "Launch options"]);
   if (game.installed) tabs.push(["fixes", "Fixes"]);
   if (game.managed) tabs.push(["updates", "Updates"]);
-  if (game.managed || game.installed) tabs.push(["activity", "Activity"]);
   const active = tabs.some(([key]) => key === tab) ? tab : "general";
   const hero = game.hero || game.cover || "";
   detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.name)}</h2><p class="muted">Steam App ${escape(game.appid)}</p><div class="quicklooks">${quicklookMarkup(game)}</div><div class="detail-hero-actions"><button id="hero-play" class="primary">Play</button></div></div></div><div class="game-tabs">${tabs.map(([key, label]) => `<button class="game-tab${key === active ? " active" : ""}" data-tab="${key}">${label}</button>`).join("")}</div><div class="game-panel"></div>`;
@@ -470,7 +348,6 @@ function renderDetail(game, tab = "general") {
   if (active === "updates" && game.managed) { renderUpdatesPanel(panel, game); return; }
   if (active === "launch") { renderLaunchOptionsPanel(panel, game, current); return; }
   if (active === "fixes") { renderFixesPanel(panel, game, current); return; }
-  if (active === "activity") { renderActivityPanel(panel, game); return; }
   renderGeneralPanel(panel, game);
 }
 
@@ -619,7 +496,6 @@ function renderLaunchOptionsPanel(panel, game, current) {
       const path = await invoke("pick_launch_executable", { appid: game.appid });
       if (!path) return;
       showLaunchEditor(game, null, (result) => {
-        recordActivity("Added launch option", { appid: game.appid, title: game.name });
         refresh(result);
       }, path);
     } catch (error) { setStatus(String(error), true); }
@@ -762,7 +638,6 @@ function renderGeneralPanel(panel, game) {
       selected = null;
       detailEl.innerHTML = `<div class="empty">Select a Steam game.</div>`;
       await load();
-      recordActivity("Removed library entry", { appid: game.appid, title: game.name, detail: `${result.removed.length} file${result.removed.length === 1 ? "" : "s"}` });
       if (result.steam_restart_required) markRestartRequired(`Removed ${game.name}. Restart Steam to finish removing the library entry.`);
       showToast(result.steam_restart_required
         ? `Removed ${game.name} · restart Steam from Settings to apply`
@@ -848,7 +723,6 @@ function renderFixesPanel(panel, game, current) {
     try {
       await invoke("windows_security_apply", { appid: game.appid, includeGame: true });
       await loadSecurity();
-      recordActivity("Added Windows Security exception", { appid: game.appid, title: game.name });
       status("Windows Security exception added for this game.");
     } catch (error) { status(String(error), true); }
     finally { stop(); }
@@ -859,7 +733,6 @@ function renderFixesPanel(panel, game, current) {
     try {
       await invoke("windows_security_remove", { appid: game.appid });
       await loadSecurity();
-      recordActivity("Removed Windows Security exception", { appid: game.appid, title: game.name });
       status("Windows Security exception removed.");
     } catch (error) { status(String(error), true); }
     finally { stop(); }
@@ -884,7 +757,6 @@ function renderFixesPanel(panel, game, current) {
       if (result) {
         fixes.set(game.appid, result);
         await loadFixes();
-        recordActivity("Installed fixes", { appid: game.appid, title: game.name });
         markRestartRequired(`Fixes installed for ${game.name}. Restart Steam to apply the launch option.`);
         stop();
         renderDetail(game, "fixes");
@@ -911,7 +783,6 @@ function renderFixesPanel(panel, game, current) {
       if (!result) { stop(); status("Folder selection cancelled."); return; }
       fixes.set(game.appid, result);
       await loadFixes();
-      recordActivity("Set fixes folder", { appid: game.appid, title: game.name, detail: result.fixes });
       markRestartRequired(`Fixes folder changed for ${game.name}. Restart Steam to apply the launch option.`);
       stop();
       renderDetail(game, "fixes");
@@ -936,7 +807,6 @@ function renderFixesPanel(panel, game, current) {
     try {
       const message = await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled });
       await loadFixes();
-      recordActivity(current.enabled ? "Disabled fixes" : "Enabled fixes", { appid: game.appid, title: game.name });
       markRestartRequired(`${game.name} fixes changed. Restart Steam to apply.`);
       stop();
       renderDetail(game, "fixes");
@@ -952,7 +822,7 @@ function renderFixesPanel(panel, game, current) {
     if (!await ensureSteamClosed(current?.launch_option_set ? "clear the launch option" : "set the launch option")) return;
     const enabled = !current?.launch_option_set;
     const stop = busy(button, enabled ? "Setting…" : "Clearing…");
-    try { const message = await invoke("apply_launch_option", { appid: game.appid, enabled }); await loadFixes(); recordActivity(enabled ? "Set launch option" : "Cleared launch option", { appid: game.appid, title: game.name }); markRestartRequired(`${game.name} launch option changed. Restart Steam to apply.`); stop(); renderDetail(game, "fixes"); status(message); }
+    try { const message = await invoke("apply_launch_option", { appid: game.appid, enabled }); await loadFixes(); markRestartRequired(`${game.name} launch option changed. Restart Steam to apply.`); stop(); renderDetail(game, "fixes"); status(message); }
     catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#remove").onclick = async () => {
@@ -960,16 +830,9 @@ function renderFixesPanel(panel, game, current) {
     const button = panel.querySelector("#remove");
     if (!await ensureSteamClosed("remove fixes")) return;
     const stop = busy(button, "Removing fixes…");
-    try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); recordActivity("Removed fixes", { appid: game.appid, title: game.name }); markRestartRequired(`${game.name} fixes removed. Restart Steam to apply.`); stop(); renderDetail(game, "fixes"); renderGames(); status("Fixes entry removed."); }
+    try { await invoke("remove_fixes", { appid: game.appid }); fixes.delete(game.appid); await loadFixes(); markRestartRequired(`${game.name} fixes removed. Restart Steam to apply.`); stop(); renderDetail(game, "fixes"); renderGames(); status("Fixes entry removed."); }
     catch (error) { stop(); status(String(error), true); }
   };
-}
-
-function renderActivityPanel(panel, game) {
-  const items = activityFor(game.appid);
-  panel.innerHTML = `<div class="activity-panel"><div class="status">${items.length ? `${items.length} recorded operation${items.length === 1 ? "" : "s"} for this game.` : "No SteamTron operations recorded for this game yet."}</div><div class="activity-list compact-list"></div></div>`;
-  const list = panel.querySelector(".compact-list");
-  for (const item of items) list.appendChild(activityRow(item, true));
 }
 
 function renderUpdatesPanel(host, game) {
@@ -1025,13 +888,13 @@ function renderUpdatesPanel(host, game) {
   host.querySelector("#updates-refresh").onclick = load;
   auto.onclick = async () => {
     const stop = busy(auto, "Clearing pin…");
-    try { data = await invoke("clear_update_pin", { appid: game.appid }); selectedVersion = data.installed || data.latest || ""; recordActivity("Cleared update pin", { appid: game.appid, title: game.name }); markRestartRequired(`${game.name} update pin cleared. Restart Steam to apply.`); stop(); render(); }
+    try { data = await invoke("clear_update_pin", { appid: game.appid }); selectedVersion = data.installed || data.latest || ""; markRestartRequired(`${game.name} update pin cleared. Restart Steam to apply.`); stop(); render(); }
     catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
   };
   pin.onclick = async () => {
     if (!selectedVersion) return;
     const stop = busy(pin, "Pinning…");
-    try { data = await invoke("update_pin", { appid: game.appid, date: selectedVersion }); recordActivity("Pinned archived build", { appid: game.appid, title: game.name, detail: selectedVersion }); markRestartRequired(`${game.name} update pin changed. Restart Steam to apply.`); stop(); render(); }
+    try { data = await invoke("update_pin", { appid: game.appid, date: selectedVersion }); markRestartRequired(`${game.name} update pin changed. Restart Steam to apply.`); stop(); render(); }
     catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
   };
   load();
@@ -1102,7 +965,6 @@ async function restartSteam(button) {
   try {
     const message = await invoke("restart_steam");
     clearRestartRequired();
-    recordActivity("Restarted Steam");
     showToast(message);
   }
   catch (error) { showToast(String(error), true); }
@@ -1128,7 +990,6 @@ async function loadDoctor(target = null) {
     const stop = busy(button, "Repairing…");
     try {
       const message = await invoke("repair_steam_library");
-      recordActivity("Repaired Steam library", { detail: message });
       markRestartRequired("Steam library repaired. Start Steam manually.");
       stop();
       renderSettingsMessage(message);
@@ -1195,23 +1056,19 @@ function renderSettings() {
   const settingsBackup = detailEl.querySelector("#settings-backup");
   settingsBackup.onclick = async () => {
     const stop = busy(settingsBackup, "Backing up…");
-    const operationId = recordActivity("Exporting library backup", { status: "running" });
     try {
       const result = await invoke("export_backup");
-      updateActivity(operationId, { status: result ? "success" : "interrupted", detail: result ? `${result.games} games · ${result.files} files` : "Cancelled" });
       stop();
       if (!result) { renderSettingsMessage("Backup cancelled."); return; }
       renderSettingsMessage(`Backup written: ${result.path} (${result.games} games, ${result.files} files).`);
-    } catch (error) { updateActivity(operationId, { status: "error", detail: String(error) }); stop(); renderSettingsMessage(String(error), true); }
+    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
   };
   const settingsRestore = detailEl.querySelector("#settings-restore");
   settingsRestore.onclick = async () => {
     if (!window.confirm("Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest, and fixes files may be overwritten.")) return;
     const stop = busy(settingsRestore, "Restoring…");
-    const operationId = recordActivity("Restoring library backup", { status: "running" });
     try {
       const result = await invoke("restore_backup");
-      updateActivity(operationId, { status: result ? "success" : "interrupted", detail: result ? `${result.games} games` : "Cancelled" });
       stop();
       if (!result) { renderSettingsMessage("Restore cancelled."); return; }
       markRestartRequired("Library metadata restored. Start Steam to apply the restored files.");
@@ -1298,7 +1155,6 @@ function showAddGame() {
     submit.disabled = true;
     importButton.disabled = true;
     const pinned = result.pinned ? ` · pinned latest ${result.pinned}` : result.pin_error ? ` · latest pin failed: ${result.pin_error}` : "";
-    recordActivity("Added game", { appid: result.appid, title: result.title, detail: `${result.manifests} manifest${result.manifests === 1 ? "" : "s"}` });
     markRestartRequired(`Added ${result.title}. Restart Steam to see it in the library.`);
     setStatus(`Added ${result.title}${pinned}. Restart Steam from Settings to see it in the library.`, !!result.pin_error);
     await load();
@@ -1314,10 +1170,8 @@ function showAddGame() {
     importButton.disabled = true;
     setStatus(`Downloading manifest bundle for ${selected.name}…`);
     await nextPaint();
-    const operationId = recordActivity("Adding game", { appid: selected.appid, title: selected.name, status: "running", command: "add_game", args: { appidOrUrl: selected.appid, title: selected.name } });
     try {
       const result = await invoke("add_game", { appidOrUrl: selected.appid, title: selected.name });
-      updateActivity(operationId, { status: "success", detail: "Library entry added." });
       let securityWarning = "";
       if (securityCheck.checked) {
         setStatus(`Approve the Windows Security exception for ${selected.name}…`);
@@ -1332,7 +1186,6 @@ function showAddGame() {
       await finish(result);
       if (securityWarning) setStatus(securityWarning, true);
     } catch (error) {
-      updateActivity(operationId, { status: "error", detail: String(error) });
       stop();
       setStatus(String(error), true);
       submit.disabled = false;
@@ -1357,28 +1210,17 @@ function showAddGame() {
   queryInput.focus();
 }
 
+document.querySelector("#nav-library").onclick = () => { if (searchEl) searchEl.focus(); };
 document.querySelector("#add-game").onclick = showAddGame;
 document.querySelector("#settings").onclick = renderSettings;
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = renderGames;
-document.querySelector("#activity").onclick = openActivity;
-document.querySelector("#activity-close").onclick = closeActivity;
-document.querySelector("#activity-backdrop").onclick = closeActivity;
-document.querySelector("#activity-clear").onclick = () => {
-  if (!window.confirm("Clear SteamTron activity history?")) return;
-  activity = [];
-  saveActivity();
-  renderActivity();
-  updateActivityCount();
-  clearRestartRequired();
-};
 document.querySelector("#restart-banner-button").onclick = (event) => restartSteam(event.currentTarget);
 document.querySelector("#restart-banner-dismiss").onclick = () => {
   clearRestartRequired();
 };
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    closeActivity();
     document.querySelectorAll(".modal-backdrop").forEach((node) => node.remove());
   }
 });
@@ -1391,5 +1233,4 @@ window.addEventListener("unhandledrejection", (event) => {
   showToast(`UI error: ${event.reason}`, true);
 });
 renderRestartBanner();
-updateActivityCount();
 boot();

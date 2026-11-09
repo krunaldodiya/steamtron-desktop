@@ -222,3 +222,43 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 .launch-editor .modal-actions { margin-top: 18px; }
 
 .launch-editor-path { margin-top: 5px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); overflow-wrap: anywhere; color: var(--muted); }
+
+/* UmuTron-derived shell overrides (U0). */
+body {
+  background: radial-gradient(1200px 600px at 15% -10%, #182430 0%, var(--surface) 55%);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.topbar {
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: var(--space-3); }
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid var(--accent);
+  box-shadow: inset 0 0 0 4px var(--surface);
+  background: var(--accent-soft);
+}
+.brand-text h1 { font-size: 20px; letter-spacing: .2px; }
+.brand-text .muted { font-size: 12px; margin-top: 2px; }
+.top-nav { display: flex; flex: 1; gap: var(--space-1); }
+.nav-item {
+  border: 0; background: transparent; color: var(--muted);
+  padding: 8px 12px; border-radius: var(--radius-pill); font-size: 13px;
+}
+.nav-item:hover { background: var(--surface-raised); color: var(--text); }
+.nav-item.active { color: var(--text); background: var(--accent-soft); }
+.panel {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+button { border-color: var(--border-strong); background: var(--surface-raised); color: var(--text); border-radius: 10px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.primary:hover { filter: brightness(1.05); }
+.search { background: var(--surface-inset); color: var(--text); border-bottom-color: var(--border); }
+.game { border-bottom-color: var(--border); }
+.game:hover, .game.active { background: var(--accent-soft); }

@@ -1,0 +1,27 @@
+/* UmuTron-derived design tokens. Every surface uses these roles. */
+:root {
+  color-scheme: dark;
+  --surface: #0f1116;
+  --surface-raised: #171a21;
+  --surface-inset: #111a23;
+  --border: #262b36;
+  --border-strong: #33404f;
+  --text: #e8ecf3;
+  --muted: #93a0b4;
+  --accent: #7fd8c8;
+  --accent-ink: #08211d;
+  --accent-soft: rgba(127, 216, 200, 0.14);
+  --success: #79d18b;
+  --warning: #e2b75a;
+  --error: #e27676;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --font-ui: Inter, system-ui, "Segoe UI", sans-serif;
+  --scale: 1;
+}

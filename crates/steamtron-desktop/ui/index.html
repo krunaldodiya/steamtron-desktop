@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SteamTron</title>
+  <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,12 +17,17 @@
     </div>
   </div>
   <header class="topbar">
-    <div>
-      <h1>SteamTron</h1>
-      <p class="muted">Steam fixes and overlay manager</p>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <h1>SteamTron</h1>
+        <p class="muted">Play Steam games without Steam</p>
+      </div>
     </div>
+    <nav class="top-nav" aria-label="Primary">
+      <button id="nav-library" class="nav-item active" aria-current="page">Library</button>
+    </nav>
     <div class="top-actions">
-      <button id="activity" class="secondary activity-button">Activity<span id="activity-count" class="activity-count hidden">0</span></button>
       <button id="add-game" class="primary">+ Add Game</button>
       <button id="settings" class="secondary">Settings</button>
     </div>
@@ -44,12 +50,6 @@
       <div class="empty">Select a Steam game.</div>
     </section>
   </main>
-  <div id="activity-backdrop" class="drawer-backdrop hidden"></div>
-  <aside id="activity-drawer" class="activity-drawer hidden" aria-label="Activity">
-    <div class="drawer-head"><div><h2>Activity</h2><p class="muted">Operations from this computer</p></div><button id="activity-close" class="modal-close" aria-label="Close activity">×</button></div>
-    <div id="activity-list" class="activity-list"></div>
-    <div class="drawer-actions"><button id="activity-clear" class="secondary">Clear history</button></div>
-  </aside>
   <script src="app.js"></script>
 </body>
 </html>

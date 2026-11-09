@@ -1656,6 +1656,55 @@ fn try_overlay_wrapper() -> Option<i32> {
     })
 }
 
+#[tauri::command]
+fn library_snapshot() -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    let library = Library::load().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "path": library.path().display().to_string(),
+        "settings": library.settings(),
+        "drives": library.drives(),
+        "games": library.games(),
+    }))
+}
+
+#[tauri::command]
+fn library_import_preview(path: String) -> Result<serde_json::Value, String> {
+    use std::path::PathBuf;
+
+    let plan = steamtron_core::import::plan_path(PathBuf::from(&path))
+        .map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({ "path": path, "plan": plan }))
+}
+
+#[tauri::command]
+fn library_import_commit(path: String) -> Result<serde_json::Value, String> {
+    use std::path::PathBuf;
+    use steamtron_core::library::Library;
+
+    let plan = steamtron_core::import::plan_path(PathBuf::from(&path))
+        .map_err(|error| error.to_string())?;
+    let target = Library::default_path();
+    let report = steamtron_core::import::apply_plan(&plan, &target)
+        .map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "library": target.display().to_string(),
+        "report": report,
+    }))
+}
+
+#[tauri::command]
+fn library_remember_picker(key: String, folder: String) -> Result<(), String> {
+    use steamtron_core::library::Library;
+
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    library
+        .set_picker_folder(&key, folder)
+        .map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())
+}
+
 fn main() {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if let Some(code) = try_overlay_wrapper() {
@@ -1717,7 +1766,11 @@ fn main() {
             export_fixes,
             set_enabled,
             apply_launch_option,
-            remove_fixes
+            remove_fixes,
+            library_snapshot,
+            library_import_preview,
+            library_import_commit,
+            library_remember_picker
         ])
         .run(tauri::generate_context!())
         .expect("error while running SteamTron");
