@@ -2399,15 +2399,15 @@ function renderStorePage() {
     <header class="page-head"><h1>Discover your next game</h1><p>Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">
       <aside class="store-sidebar">
-        <label for="store-search">Search</label>
+        <div class="store-sidebar-head"><label for="store-search">Search</label><button class="store-clear" id="store-clear-search">Clear</button></div>
         <input id="store-search" placeholder="Search the catalogue and press Enter" value="${escape(storeQuery)}" aria-label="Search the catalogue">
-        <label>Genre</label>
-        <div class="store-option-list" role="listbox" aria-label="Genre">
+        <div class="store-sidebar-head"><label>Genre</label><button class="store-clear" id="store-clear-genre">Clear</button></div>
+        <div class="store-option-list" data-list="genre" role="listbox" aria-label="Genre">
           <button class="store-option${storeGenre === "" ? " selected" : ""}" data-store-genre="">All genres</button>
           ${genreOptions}
         </div>
         <label>Sort</label>
-        <div class="store-option-list" role="listbox" aria-label="Sort">${sortOptions}</div>
+        <div class="store-option-list" data-list="sort" role="listbox" aria-label="Sort">${sortOptions}</div>
         <p class="library-count">${escape(count)}</p>
       </aside>
       <section class="store-content">
@@ -2438,6 +2438,15 @@ function renderStorePage() {
   for (const button of detailEl.querySelectorAll("[data-store-sort]")) {
     button.onclick = () => { storeSort = button.dataset.storeSort; void refreshStore(true); };
   }
+  detailEl.querySelector("#store-clear-search").onclick = () => {
+    storeQuery = "";
+    input.value = "";
+    void refreshStore(true);
+  };
+  detailEl.querySelector("#store-clear-genre").onclick = () => {
+    storeGenre = "";
+    void refreshStore(true);
+  };
   const retry = detailEl.querySelector("#store-retry");
   if (retry) retry.onclick = () => { void refreshStore(false); };
   for (const button of detailEl.querySelectorAll("[data-store-page]")) {

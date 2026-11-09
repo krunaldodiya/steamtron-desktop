@@ -399,12 +399,17 @@ button.primary:hover { filter:brightness(1.06); }
 .profile-button { width:40px; height:40px; padding:0; border-radius:50%; display:grid; place-items:center; background:#2b3441; border:1px solid var(--border-strong); color:var(--text); }
 .profile-button:hover { border-color:var(--accent); color:var(--accent); }
 .top-actions { gap:10px; position:relative; }
-.store-body { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:32px; align-items:start; margin-top:22px; }
-.store-sidebar { position:sticky; top:90px; display:flex; flex-direction:column; gap:8px; }
-.store-sidebar label { margin-top:8px; color:var(--muted); font-size:11px; letter-spacing:.09em; text-transform:uppercase; }
+.store-body { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:32px; align-items:stretch; margin-top:22px; }
+.store-sidebar { position:sticky; top:90px; display:flex; flex-direction:column; gap:8px; max-height:calc(100vh - 120px); }
+.store-sidebar-head { display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
+.store-sidebar label { color:var(--muted); font-size:11px; letter-spacing:.09em; text-transform:uppercase; }
+.store-clear { padding:0; border:0; background:transparent; color:var(--muted); font-size:11px; text-decoration:underline; }
+.store-clear:hover { color:var(--text); }
 .store-sidebar input { width:100%; padding:11px 13px; border:1px solid var(--border); border-radius:8px; background:var(--surface-raised); color:var(--text); font-size:14px; outline:none; }
 .store-sidebar input:focus { border-color:var(--accent); }
-.store-option-list { display:flex; flex-direction:column; gap:2px; max-height:240px; overflow:auto; padding:4px; border:1px solid var(--border); border-radius:10px; background:var(--surface-raised); }
+.store-option-list { display:flex; flex-direction:column; gap:2px; overflow:auto; padding:4px; border:1px solid var(--border); border-radius:10px; background:var(--surface-raised); }
+.store-option-list[data-list="genre"] { flex:1 1 auto; min-height:120px; }
+.store-option-list[data-list="sort"] { flex:0 0 auto; }
 .store-option { width:100%; text-align:left; border:0; background:transparent; color:var(--muted); padding:8px 10px; border-radius:7px; font-size:13px; }
 .store-option:hover { background:#212b37; color:var(--text); }
 .store-option.selected { background:var(--accent); color:var(--accent-ink); font-weight:600; }
