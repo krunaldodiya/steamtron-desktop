@@ -12,8 +12,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::steamtron_home;
-
 pub const LIBRARY_VERSION: u32 = 2;
 pub const MAX_DRIVES: usize = 64;
 pub const MAX_GAMES: usize = 10_000;
@@ -260,7 +258,7 @@ pub struct Library {
 
 impl Library {
     pub fn default_path() -> PathBuf {
-        steamtron_home().join("library.json")
+        crate::paths::layout().library()
     }
 
     /// Open a library file; a missing file is an empty library, not an error.

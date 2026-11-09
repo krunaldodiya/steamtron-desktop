@@ -7,7 +7,6 @@ use thiserror::Error;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::data_home;
 
 const MARKER: &str = "steamtron-fixes.json";
 const MAX_ARCHIVE: u64 = 512 * 1024 * 1024;
@@ -45,7 +44,7 @@ pub fn fixes_root() -> PathBuf {
     if let Some(value) = std::env::var_os("STEAMTRON_FIXES") {
         return PathBuf::from(value);
     }
-    data_home().join("steamtron/fixes")
+    crate::paths::layout().legacy_fixes_root()
 }
 
 pub fn fixes_path(appid: &str) -> Result<PathBuf, FixesError> {

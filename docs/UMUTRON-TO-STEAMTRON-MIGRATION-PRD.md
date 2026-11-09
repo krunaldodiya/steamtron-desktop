@@ -153,6 +153,19 @@ Invariants:
   editing, importing fixes, or removing content.
 - Tools are downloaded once, verified, and shared.
 
+### Global app data
+
+| Purpose | Linux | Windows |
+|---|---|---|
+| Data (library, tools, diagnostics, overlay upper, launch) | `$XDG_DATA_HOME/steamtron` | `%LOCALAPPDATA%\SteamTron` |
+| Config (credentials, editable choices) | `$XDG_CONFIG_HOME/steamtron` | `%APPDATA%\SteamTron` |
+| Cache (regenerable downloads) | `$XDG_CACHE_HOME/steamtron` | `%LOCALAPPDATA%\SteamTron\cache` |
+
+Overrides: `STEAMTRON_DATA_HOME`, `STEAMTRON_CONFIG_HOME`, `STEAMTRON_CACHE_HOME`.
+Per-game content never lives here; it belongs to a drive. The complete tree,
+lifecycle rules, and the read-only UmuTron import mapping are in
+[`STORAGE-LAYOUT.md`](STORAGE-LAYOUT.md).
+
 ## 7. Crates
 
 ```text
