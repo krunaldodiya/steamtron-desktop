@@ -469,3 +469,6 @@ body.fullscreen-mode #window-mode .icon-exit { display:block; }
 .game-detail .game-page-top { padding:12px 24px; flex:0 0 auto; }
 .game-detail .game-hero { flex:1 1 auto; min-height:0; border-radius:0; }
 .game-detail .game-hero-card { max-height:calc(100% - 56px); overflow:auto; }
+
+button.game-chip { border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; text-transform:uppercase; letter-spacing:.03em; font-size:11px; padding:6px 11px; border-radius:999px; }
+button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent); color:var(--text); }

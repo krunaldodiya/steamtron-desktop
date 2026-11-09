@@ -495,6 +495,52 @@ async function loadManagedFixes(gameId, host = detailEl) {
   }
 }
 
+const protonTierCache = new Map();
+
+async function protonTier(appid) {
+  if (!appid) return null;
+  if (protonTierCache.has(appid)) return protonTierCache.get(appid);
+  let tier = null;
+  try { tier = await invoke("proton_tier", { appid }); }
+  catch (_error) { tier = null; }
+  protonTierCache.set(appid, tier);
+  return tier;
+}
+
+function renderGameChips(node, chips) {
+  if (!node) return;
+  node.innerHTML = chips.map((chip) => chip.copy
+    ? `<button class="game-chip" data-copy="${escape(String(chip.copy))}" data-copy-label="${escape(chip.label || "Value")}" title="Click to copy ${escape(chip.label || "value")}">${escape(chip.text)}</button>`
+    : `<span class="game-chip">${escape(chip.text)}</span>`).join("");
+}
+
+async function copyToClipboard(value, label) {
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast(`${label} copied`);
+  } catch (_error) {
+    try {
+      const area = document.createElement("textarea");
+      area.value = value;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      showToast(`${label} copied`);
+    } catch (fallbackError) {
+      showToast(String(fallbackError), true);
+    }
+  }
+}
+
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-copy]");
+  if (!chip) return;
+  void copyToClipboard(chip.dataset.copy, chip.dataset.copyLabel || "Value");
+});
+
 function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
@@ -549,11 +595,20 @@ async function hydrateGameDetail(game) {
       else if (appId) coverNode.src = coverUrl(appId);
     }
   } catch (_error) { /* keep the gradient */ }
-  const chips = [];
-  if (appId) chips.push(`STEAM_ID: ${appId}`);
-  const proton = game.launch?.proton || game.installation?.proton || "";
-  if (proton) chips.push(`Proton: ${proton.split("/").filter(Boolean).pop()}`);
-  if (chipsNode) chipsNode.innerHTML = chips.map((chip) => `<span class="game-chip">${escape(chip)}</span>`).join("");
+  const chips = [{ text: "Proton: …" }];
+  if (appId) chips.push({ text: `STEAM_ID: ${appId}`, copy: String(appId), label: "STEAM_ID" });
+  renderGameChips(chipsNode, chips);
+  if (appId) {
+    void (async () => {
+      const tier = await protonTier(appId).catch(() => null);
+      chips[0].text = `Proton: ${tier || "Unknown"}`;
+      try {
+        const igdb = await invoke("igdb_id_for", { appid: appId, title: game.title });
+        if (igdb) chips.splice(1, 0, { text: `IGDB_ID: ${igdb}`, copy: String(igdb), label: "IGDB_ID" });
+      } catch (_error) { /* IGDB mapping is optional */ }
+      renderGameChips(chipsNode, chips);
+    })();
+  }
   if (appId) {
     try {
       const details = await appDetails(appId);
@@ -2592,8 +2647,8 @@ function renderStoreDetail() {
   const credits = [item.developers, item.publishers].filter(Boolean).join(" · ");
   const inLibrary = Boolean(item.steam_app_id
     && managedLibrary?.games.some((game) => game.metadata_app_id === item.steam_app_id));
-  const chips = [`IGDB_ID: ${item.id}`];
-  if (item.steam_app_id) chips.push(`STEAM_ID: ${item.steam_app_id}`);
+  const chips = [{ text: "Proton: …" }, { text: `IGDB_ID: ${item.id}`, copy: String(item.id), label: "IGDB_ID" }];
+  if (item.steam_app_id) chips.push({ text: `STEAM_ID: ${item.steam_app_id}`, copy: String(item.steam_app_id), label: "STEAM_ID" });
   const action = inLibrary
     ? '<button class="primary" disabled>In library</button>'
     : item.steam_app_id
@@ -2611,12 +2666,22 @@ function renderStoreDetail() {
           <p class="game-description">${escape(item.description || "")}</p>
           <p class="game-credits">${escape(credits)}</p>
           <div class="game-actions">${action}</div>
-          <div class="game-chips">${chips.map((chip) => `<span class="game-chip">${escape(chip)}</span>`).join("")}</div>
+          <div class="game-chips" id="store-chips"></div>
         </div>
       </div>
     </section>
   </div>`;
   detailEl.querySelector("#store-back").onclick = () => setView("store");
+  renderGameChips(detailEl.querySelector("#store-chips"), chips);
+  if (item.steam_app_id) {
+    void protonTier(item.steam_app_id).then((tier) => {
+      chips[0].text = `Proton: ${tier || "Unknown"}`;
+      renderGameChips(detailEl.querySelector("#store-chips"), chips);
+    }).catch(() => {});
+  } else {
+    chips[0].text = "Proton: Unknown";
+    renderGameChips(detailEl.querySelector("#store-chips"), chips);
+  }
   const add = detailEl.querySelector("#store-add");
   if (add) {
     add.onclick = () => showManagedAddGame({ app_id: item.steam_app_id, title: item.name });

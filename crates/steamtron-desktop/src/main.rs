@@ -2578,6 +2578,93 @@ async fn managed_game_size(game_id: String) -> Result<u64, String> {
         .map_err(|error| format!("size task failed: {error}"))
 }
 
+
+fn proton_cache_path(appid: u32) -> std::path::PathBuf {
+    steamtron_core::paths::layout()
+        .cache_dir()
+        .join("protondb")
+        .join(format!("{appid}.json"))
+}
+
+#[tauri::command]
+async fn proton_tier(appid: u32) -> Result<Option<String>, String> {
+    let path = proton_cache_path(appid);
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            let fresh = value
+                .get("at")
+                .and_then(|at| at.as_u64())
+                .map(|at| {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|elapsed| elapsed.as_secs())
+                        .unwrap_or(0);
+                    now.saturating_sub(at) < 7 * 24 * 60 * 60
+                })
+                .unwrap_or(false);
+            if fresh {
+                if let Some(tier) = value.get("tier").and_then(|tier| tier.as_str()) {
+                    return Ok(Some(tier.to_owned()));
+                }
+            }
+        }
+    }
+    let url = format!("https://www.protondb.com/api/v1/reports/summaries/{appid}.json");
+    let response = store_client()
+        .get(url)
+        .header("Accept", "application/json")
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let raw = payload
+        .get("tier")
+        .and_then(|tier| tier.as_str())
+        .or_else(|| payload.get("bestReportedTier").and_then(|tier| tier.as_str()));
+    let Some(raw) = raw else { return Ok(None) };
+    let mut chars = raw.chars();
+    let tier = match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => return Ok(None),
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let _ = std::fs::write(
+        &path,
+        serde_json::json!({ "tier": tier, "at": now }).to_string(),
+    );
+    Ok(Some(tier))
+}
+
+#[tauri::command]
+fn igdb_id_for(appid: u32, title: Option<String>) -> Option<String> {
+    let path = steamtron_core::paths::layout()
+        .data_home
+        .join("umutron/game-id-cache.json");
+    let text = std::fs::read_to_string(path).ok()?;
+    let cache: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let mut lookup = |key: &str| -> Option<String> {
+        let value = cache.get(key)?;
+        if let Some(number) = value.as_u64() {
+            return Some(number.to_string());
+        }
+        value.as_str().map(str::to_owned)
+    };
+    lookup(&appid.to_string()).or_else(|| {
+        let title = title?;
+        lookup(&title.to_lowercase())
+    })
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2773,6 +2860,8 @@ fn main() {
             reconcile_registrations,
             quit_app,
             managed_game_size,
+            proton_tier,
+            igdb_id_for,
             fullscreen_state,
             toggle_fullscreen,
             set_ui_scale,
