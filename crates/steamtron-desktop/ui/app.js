@@ -2397,27 +2397,34 @@ function renderStorePage() {
   const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : `${storeTotal ? storeTotal.toLocaleString() : storeItems.length} games · page ${storePage} of ${storePages}`;
   detailEl.innerHTML = `<div class="page store-page">
     <header class="page-head"><h1>Discover your next game</h1><p>Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
-    <div class="store-toolbar">
-      <input id="store-search" placeholder="Search the catalogue" value="${escape(storeQuery)}" aria-label="Search the catalogue">
-      <button id="store-search-button">Search</button>
-      <select id="store-genre" aria-label="Genre"><option value="">All genres</option>${genreOptions}</select>
-      <select id="store-sort" aria-label="Sort">${sortOptions}</select>
+    <div class="store-body">
+      <aside class="store-sidebar">
+        <label for="store-search">Search</label>
+        <input id="store-search" placeholder="Search the catalogue" value="${escape(storeQuery)}" aria-label="Search the catalogue">
+        <button id="store-search-button">Search</button>
+        <label for="store-genre">Genre</label>
+        <select id="store-genre" aria-label="Genre"><option value="">All genres</option>${genreOptions}</select>
+        <label for="store-sort">Sort</label>
+        <select id="store-sort" aria-label="Sort">${sortOptions}</select>
+        <p class="library-count">${escape(count)}</p>
+      </aside>
+      <section class="store-content">
+        ${storeRecent.length ? `<section class="managed-rail"><div class="rail-head"><h2>Recently viewed</h2></div><div class="rail-scroll" id="store-recent">${storeRecent.map(storeCard).join("")}</div></section>` : ""}
+        <div id="store-results" class="cover-grid store-grid">
+          ${storeError
+            ? `<div class="status error">${escape(storeError)}</div><button id="store-retry">Retry</button>`
+            : storeItems.map(storeCard).join("")}
+        </div>
+        <nav class="pager" aria-label="Store pages">
+          <button data-store-page="first"${storePage === 1 ? " disabled" : ""}>First</button>
+          <button data-store-page="prev"${storePage === 1 ? " disabled" : ""}>Previous</button>
+          <span class="pager-page">${storePage}</span>
+          <button data-store-page="next"${storePage === storePages ? " disabled" : ""}>Next</button>
+          <button data-store-page="last"${storePage === storePages ? " disabled" : ""}>Last</button>
+        </nav>
+        <p class="pager-hint">Page ${storePage} of ${storePages} · PgUp / PgDn</p>
+      </section>
     </div>
-    <p class="library-count">${escape(count)}</p>
-    ${storeRecent.length ? `<section class="managed-rail"><div class="rail-head"><h2>Recently viewed</h2></div><div class="rail-scroll" id="store-recent">${storeRecent.map(storeCard).join("")}</div></section>` : ""}
-    <div id="store-results" class="cover-grid store-grid">
-      ${storeError
-        ? `<div class="status error">${escape(storeError)}</div><button id="store-retry">Retry</button>`
-        : storeItems.map(storeCard).join("")}
-    </div>
-    <nav class="pager" aria-label="Store pages">
-      <button data-store-page="first"${storePage === 1 ? " disabled" : ""}>First</button>
-      <button data-store-page="prev"${storePage === 1 ? " disabled" : ""}>Previous</button>
-      <span class="pager-page">${storePage}</span>
-      <button data-store-page="next"${storePage === storePages ? " disabled" : ""}>Next</button>
-      <button data-store-page="last"${storePage === storePages ? " disabled" : ""}>Last</button>
-    </nav>
-    <p class="pager-hint">Page ${storePage} of ${storePages} · PgUp / PgDn</p>
   </div>`;
 
   const input = detailEl.querySelector("#store-search");
