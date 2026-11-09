@@ -222,7 +222,7 @@ All cited line numbers from the current package sources read in this session; no
 
 ## Fixes and Steam-free tooling
 
-## 1. Fixes location rules
+### 1. Fixes location rules
 
 ### Canonical path derivation
 - Managed layout is `<drive>/UmuLibrary/umuapps/` with `common/<Game>`, `compatdata/<Game>`, `<drive>/UmuLibrary/umuapps/appmanifest_<key>.json`; layout name constant `_LAYOUT = "UmuLibrary/umuapps"`, manifest prefix `"appmanifest_"`, max manifest size 256 KiB (game_assets.py:29-31).
@@ -255,7 +255,7 @@ All cited line numbers from the current package sources read in this session; no
 ### Safety checks summary
 - Every consumer re-checks symlinks on the fixes dir and its parent before use (fixes_path fixes_overlay.py:217-218; import fixes_overlay.py:285-296; Goldberg goldberg.py:517-523; Steamless steamless.py:337-343). Overlay dirs are created `0o700` and verified to be owned by the current UID on Linux (see §2). `remove_fixes`/`remove_orphan_fixes` never follow symlinks (fixes_overlay.py:471-480, 534-551).
 
-## 2. Overlay lifecycle
+### 2. Overlay lifecycle
 
 ### Backend
 - Only backend: `FuseOverlayBackend` (`name="fuse-overlayfs"`), because an outer bubblewrap namespace breaks UMU/pressure-vessel's own sandbox (fixes_overlay.py:592-599). Procurement check: `fuse-overlayfs` and `fusermount3`/`fusermount` on PATH, with install-hint message (fixes_overlay.py:601-612). `select_backend` honors env `UMUTRON_OVERLAY_BACKEND` (fixes_overlay.py:649-662); `capabilities()` returns the summary for UI (fixes_overlay.py:664-672).
@@ -290,7 +290,7 @@ and `"executable"` is rebased onto the mountpoint (launcher.py:993-1023; overlay
 
 Remove-after-play: only the mount and its work/private runtime directory are removed; upper persists ("Only the mount and its work directory are removed after Play", fixes_overlay.py:3-7).
 
-## 3. GoldBerg (gse_fork)
+### 3. GoldBerg (gse_fork)
 
 ### Asset constants (goldberg.py:38-46)
 - `GSE_TAG = "2026_02_16"`, `GSE_ASSET = "emu-win-release.7z"`, `GSE_ASSET_SHA256 = "cdcee5f8a01b837205aba4d0c6867da98975c74d4f767da60b1724c318cdc2e4"`, URL `https://github.com/alex47exe/gse_fork/releases/download/2026_02_16/emu-win-release.7z`. PE machines `_MACHINE_X32 = 0x014C`, `_MACHINE_X64 = 0x8664`.
@@ -323,7 +323,7 @@ Remove-after-play: only the mount and its work/private runtime directory are rem
 - Reset-on-reapply `_reset_applied(target)` (goldberg.py:320-346): removes `target.parent/steam_settings`, the target DLL itself (not symlink), stale `steam_interfaces.txt`, and any `.gse-apply-*` staging dirs — never other fixes (unpacked exes preserved, goldberg.py:19-21).
 - Removal `remove_goldberg` (goldberg.py:425-458): per payload location removes steam_settings dir, interface list, staging dirs, and **each steam_api(64).dll only when byte-identical to the cached release DLL** (`_is_release_library`); user-replaced DLLs survive. No match → `GoldbergError("No GoldBerg files were found in this fixes folder.")`. All touched paths refuse symlinks.
 
-## 4. Steamless
+### 4. Steamless
 
 ### Asset source & layout (steamless.py:26-61, 99-144)
 - `STEAMLESS_URL = "https://codeload.github.com/krunaldodiya/steamless-linux/tar.gz/refs/heads/main"` (no sha256 pin for this asset — `unknown`).
@@ -356,7 +356,7 @@ Remove-after-play: only the mount and its work/private runtime directory are rem
 ### Removal / hash rule (steamless.py:292-323)
 - `remove_steamless`: each manifest entry's file in fixes is unlinked **only while its SHA-256 equals the recorded hash**; changed files are `kept` (never destroyed) and if *nothing* was removed → `SteamlessError("The Steamless launchers were changed and were not removed.")`. Manifest deleted afterwards.
 
-## 5. Import/export ZIP (fixes_overlay.py:260-470)
+### 5. Import/export ZIP (fixes_overlay.py:260-470)
 
 - Limits: `_MAX_ARCHIVE_ENTRIES = 100_000`, `_MAX_ARCHIVE_BYTES = 4 GiB`, `_MAX_ARCHIVE_RATIO = 1000` (fixes_overlay.py:260-262). Encrypted entries (`flag_bits & 0x1`) rejected; symlink and non-regular, non-dir entries rejected; zero-file archives rejected; path safety `_archive_parts` rejects NUL, backslash, absolute, `..`, empty parts (fixes_overlay.py:265-274).
 - Import flow: staging `tempfile.mkdtemp(prefix=".fixes-import-", dir=fixes.parent)` with `tree/` child; existing fixes are **merged** into the tree unless `replace_existing=True` (fixes_overlay.py:276-340). Existing fixes containing a symlink abort the import first (fixes_overlay.py:296-299).
@@ -365,7 +365,7 @@ Remove-after-play: only the mount and its work/private runtime directory are rem
 - Swap: existing fixes renamed to `<fixes>.old-<hex8>`, tree renamed in; on failure old restored; old removed after success; returns `{"path","files","bytes"}` (fixes_overlay.py:374-396).
 - Export: `export_name(title)` maps forbidden chars `\/:*?"<>|` and `<ord 32` to space, collapses whitespace, trims `.` and spaces, caps 180 chars, falls back `Game`, suffix `.zip` (fixes_overlay.py:399-404). ZIP contains marker first as `steamtron-fixes.json` with content `{"format":1}\n`, then each regular file at its relative posix path; symlinks abort; temp-file + `os.replace` atomic; existing ZIP replaced (fixes_overlay.py:406-470).
 
-## 6. Porting notes and traps
+### 6. Porting notes and traps
 
 - Fixed layer order is always **fixes above game root** in `lowerdir` (fuse-overlayfs treats the first entry as top layer): `lowerdir=<fixes>:<root>` (fixes_overlay.py:621) — Rust must preserve this ordering or fixes will lose DLL shadowing.
 - Upper persistence is squeezed into the "no game writes touch the install" contract: work dirs are transient, upper dirs are keyed by a stable `sha256[:32]` of game identity and must survive cleanup (fixes_overlay.py:566-570, 681-688). Identity hierarchy matters: `id` → `metadata_app_id` → root.
