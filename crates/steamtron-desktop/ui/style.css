@@ -424,3 +424,9 @@ button.primary:hover { filter:brightness(1.06); }
 .store-recent-label { color:var(--muted); font-size:12px; margin-right:4px; }
 .store-chip { padding:7px 12px; border-radius:999px; border:1px solid var(--border); background:var(--surface-raised); color:var(--text); font-size:12px; }
 .store-chip:hover, .store-chip.nav-focus { border-color:var(--accent); }
+
+body.store-open { overflow:hidden; }
+.store-page { height:calc(100vh - 90px); min-height:0; overflow:hidden; }
+.store-body { min-height:0; }
+.store-content { min-height:0; overflow-y:auto; padding-right:10px; scrollbar-width:thin; }
+.store-sidebar { position:static; }

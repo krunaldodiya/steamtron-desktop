@@ -604,6 +604,7 @@ function openManagedGame(id) {
 
 function setView(view) {
   appView = view;
+  document.body.classList.toggle("store-open", view === "store");
   const navView = view === "game" ? "library" : view;
   for (const name of ["home", "library", "store"]) {
     const button = document.querySelector(`#nav-${name}`);
@@ -2436,6 +2437,12 @@ async function warmStore() {
 }
 
 function renderStorePage() {
+  const previousActive = document.activeElement;
+  const previousInDetail = previousActive && detailEl.contains(previousActive);
+  const previousId = previousInDetail ? previousActive.id : "";
+  const previousStoreId = previousInDetail ? previousActive.dataset?.storeId || "" : "";
+  const previousPage = previousInDetail ? previousActive.dataset?.storePage || "" : "";
+  const previousScroll = detailEl.querySelector(".store-content")?.scrollTop || 0;
   const genreOptions = storeGenres.map((genre) =>
     `<button class="store-option${String(genre.id) === storeGenre ? " selected" : ""}" data-store-genre="${escape(String(genre.id))}">${escape(genre.name)}</button>`
   ).join("");
@@ -2516,6 +2523,15 @@ function renderStorePage() {
     card.onclick = () => openStoreItem(card.dataset.storeId);
   }
   hydrateStoreCovers(detailEl);
+  const content = detailEl.querySelector(".store-content");
+  if (content) content.scrollTop = previousScroll;
+  if (previousInDetail) {
+    let restore = null;
+    if (previousStoreId) restore = detailEl.querySelector(`[data-store-id="${CSS.escape(previousStoreId)}"]`);
+    else if (previousPage) restore = detailEl.querySelector(`[data-store-page="${previousPage}"]`);
+    else if (previousId) restore = detailEl.querySelector(`#${CSS.escape(previousId)}`);
+    if (restore) focusControl(restore);
+  }
 }
 
 async function showManagedAddGame(prefill = {}) {
