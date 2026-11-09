@@ -291,7 +291,7 @@ body.managed .topbar { position:sticky; top:0; z-index:20; background:rgba(13,18
 .library-search input:focus { border-color:var(--accent); }
 .library-search button { padding:0 22px; border-radius:8px; border:1px solid var(--border-strong); background:var(--surface-raised); color:var(--text); }
 .library-count { margin:18px 0 0; color:var(--muted); font-size:13px; }
-.cover-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(112px, 1fr)); gap:24px 22px; margin-top:18px; }
+.cover-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(118px, 1fr)); gap:24px 22px; margin-top:18px; }
 .cover-card { display:flex; flex-direction:column; padding:6px 6px 10px; border:1px solid transparent; border-radius:12px; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
 .cover-card .cover { position:relative; aspect-ratio:2/3; border-radius:8px; overflow:hidden; background:linear-gradient(145deg,#1d3140,#101922); }
 .cover-card .cover img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -319,7 +319,8 @@ body.managed .topbar { position:sticky; top:0; z-index:20; background:rgba(13,18
 .rail-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .rail-head h2 { font-size:20px; }
 .rail-scroll { display:flex; gap:16px; overflow-x:auto; padding-bottom:10px; scrollbar-width:thin; scroll-behavior:smooth; }
-.rail-scroll .cover-card { flex:0 0 118px; }
+.rail-scroll .cover-card { flex:0 0 140px; }
+.rail-scroll::after { content:""; flex:0 0 calc(100% - 190px); }
 .game-page-top { padding:18px 0 14px; }
 .game-page .detail-hero { margin:0 0 20px; border-radius:var(--radius-lg); height:clamp(260px, 38vh, 360px); }
 .detail-hero-actions { margin-top:18px; }

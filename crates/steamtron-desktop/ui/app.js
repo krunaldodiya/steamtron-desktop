@@ -483,26 +483,27 @@ function pad2(value) {
 function renderManagedHome() {
   const games = managedLibrary.games;
   const installed = games.filter((game) => managedReady(game));
-  const featured = installed[0] || games[0];
+  const featured = games.find((game) => game.id === managedSelectedId) || installed[0] || games[0];
   const appId = featured?.metadata_app_id;
   const hero = appId ? heroUrl(appId) : "";
   const running = featured ? runningManaged.has(featured.id) : false;
-  const railPages = Math.max(1, Math.ceil(games.length / 10));
+  const recentIndex = Math.max(1, games.findIndex((game) => game.id === featured?.id) + 1);
+  const railCounter = `${pad2(games.length ? recentIndex : 0)} / ${pad2(games.length)}`;
   detailEl.innerHTML = `<div class="page home-page">
-    <section class="home-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}>
+    <section class="home-hero${hero ? "" : " no-artwork"}" id="home-hero"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}>
       <div class="home-hero-shade"></div>
       <div class="home-hero-content">
-        <p class="eyebrow">Recently played</p>
-        <h1>${escape(featured?.title || "Your next game")}</h1>
-        <p class="home-meta">${escape(appId ? `Steam App ${appId}` : "Managed entry")}${featured && managedReady(featured) ? " · Ready to play" : ""}</p>
+        <p class="eyebrow" id="home-eyebrow">Recently played</p>
+        <h1 id="home-title">${escape(featured?.title || "Your next game")}</h1>
+        <p class="home-meta" id="home-meta">${escape(appId ? `Steam App ${appId}` : "Managed entry")}${featured && managedReady(featured) ? " · Ready to play" : ""}</p>
         <div class="home-actions"><button class="primary" id="home-play"${featured ? "" : " disabled"}>${running ? "Stop" : "Play"}</button><button id="home-view"${featured ? "" : " disabled"}>View game</button></div>
       </div>
     </section>
-    <section class="managed-rail">
-      <div class="rail-head"><h2>Recently played</h2><span class="muted">${pad2(1)} / ${pad2(railPages)}</span></div>
+    <section class="managed-rail" data-rail="recent">
+      <div class="rail-head"><h2>Recently played</h2><span class="muted" id="home-counter">${railCounter}</span></div>
       <div class="rail-scroll">${games.map(coverCard).join("")}</div>
     </section>
-    <section class="managed-rail">
+    <section class="managed-rail" data-rail="setup">
       <div class="rail-head"><h2>Recently ready to play</h2></div>
       <p class="muted">Your ready games, newest completed setups first.</p>
       ${installed.length ? `<div class="rail-scroll">${installed.map(coverCard).join("")}</div>` : '<div class="status">No installed games yet.</div>'}
@@ -637,10 +638,16 @@ function scrollControlIntoView(node) {
   if (horizontal && horizontal !== document.body && horizontal !== document.documentElement) {
     const box = horizontal.getBoundingClientRect();
     const rect = node.getBoundingClientRect();
-    let delta = 0;
-    if (rect.left < box.left + margin) delta = rect.left - box.left - margin;
-    else if (rect.right > box.right - margin) delta = rect.right - box.right + margin;
-    if (delta) horizontal.scrollBy({ left: Math.round(delta), behavior: "smooth" });
+    if (horizontal.classList.contains("rail-scroll")) {
+      // UmuTron keeps the focused card anchored at the rail start and slides
+      // the row underneath it, so the outline stays put while cards move.
+      horizontal.scrollBy({ left: Math.round(rect.left - box.left), behavior: "smooth" });
+    } else {
+      let delta = 0;
+      if (rect.left < box.left + margin) delta = rect.left - box.left - margin;
+      else if (rect.right > box.right - margin) delta = rect.right - box.right + margin;
+      if (delta) horizontal.scrollBy({ left: Math.round(delta), behavior: "smooth" });
+    }
   }
   // Vertical reveal inside the nearest vertical scroller (settings) or the page.
   let vertical = node.parentElement;
@@ -671,6 +678,48 @@ function focusControl(node) {
   node.classList.add("nav-focus");
   node.focus({ preventScroll: true });
   scrollControlIntoView(node);
+  if (node.matches?.(".cover-card[data-managed]") && node.closest(".home-page")) {
+    syncHomeHero(node);
+  }
+}
+
+function syncHomeHero(card) {
+  if (!managedLibrary) return;
+  const game = managedLibrary.games.find((item) => item.id === card.dataset.managed);
+  if (!game) return;
+  const rail = card.closest(".managed-rail");
+  const railKind = rail?.dataset.rail || "recent";
+  const cards = rail ? [...rail.querySelectorAll(".cover-card")] : [];
+  const index = Math.max(1, cards.indexOf(card) + 1);
+  const total = cards.length;
+  managedSelectedId = game.id;
+  const appId = game.metadata_app_id;
+  const heroNode = document.querySelector("#home-hero");
+  if (heroNode) {
+    const hero = appId ? heroUrl(appId) : "";
+    heroNode.style.backgroundImage = hero ? `url('${hero}')` : "";
+    heroNode.classList.toggle("no-artwork", !hero);
+  }
+  const eyebrow = document.querySelector("#home-eyebrow");
+  if (eyebrow) eyebrow.textContent = railKind === "setup" ? "Recently ready to play" : "Recently played";
+  const title = document.querySelector("#home-title");
+  if (title) title.textContent = game.title;
+  const meta = document.querySelector("#home-meta");
+  if (meta) meta.textContent = `${appId ? `Steam App ${appId}` : "Managed entry"}${managedReady(game) ? " · Ready to play" : ""}`;
+  const counter = document.querySelector("#home-counter");
+  if (counter) counter.textContent = railKind === "setup" ? `${total} ready games` : `${pad2(index)} / ${pad2(total)}`;
+  const play = document.querySelector("#home-play");
+  const running = runningManaged.has(game.id);
+  if (play) {
+    play.textContent = running ? "Stop" : "Play";
+    play.disabled = false;
+    play.onclick = () => running ? stopManagedGame(game, play) : startManagedGame(game, play);
+  }
+  const view = document.querySelector("#home-view");
+  if (view) {
+    view.disabled = false;
+    view.onclick = () => openManagedGame(game.id);
+  }
 }
 
 function moveNavigation(action) {
