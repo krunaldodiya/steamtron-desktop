@@ -253,12 +253,17 @@ body {
 .brand-text .muted { font-size: 12px; margin-top: 2px; }
 .top-nav { display: flex; flex: 1; gap: 8px; }
 .nav-item {
-  border: 1px solid var(--border-strong); background: #1b2a38; color: var(--text);
+  border: 1px solid var(--border-strong); background: #2b3441; color: var(--text);
   padding: 9px 16px; border-radius: 10px; font-size: 14px;
 }
-.nav-item:hover { filter: brightness(1.08); }
-.nav-item.active { background: #1b2a38; border-color: var(--accent); }
-.nav-item.nav-focus, .topbar .nav-item:focus, .topbar .nav-item:focus-visible { outline: none; border-color: var(--accent); }
+.nav-item:hover { background: #333d4b; }
+.nav-item.active { background: #171e27; }
+.nav-item.nav-focus, .topbar .nav-item:focus, .topbar .nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--border-strong);
+  background: #171e27;
+}
 .panel {
   background: var(--surface-raised);
   border: 1px solid var(--border);
