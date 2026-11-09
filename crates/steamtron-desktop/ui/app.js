@@ -617,10 +617,15 @@ function openManagedGame(id) {
 function setView(view) {
   appView = view;
   const navView = view === "game" ? "library" : view;
-  document.querySelector("#nav-home").classList.toggle("active", navView === "home");
-  document.querySelector("#nav-library").classList.toggle("active", navView === "library");
-  document.querySelector("#nav-home").setAttribute("aria-current", navView === "home" ? "page" : "false");
-  document.querySelector("#nav-library").setAttribute("aria-current", navView === "library" ? "page" : "false");
+  for (const name of ["home", "library", "store"]) {
+    const button = document.querySelector(`#nav-${name}`);
+    button.classList.toggle("active", navView === name);
+    button.setAttribute("aria-current", navView === name ? "page" : "false");
+  }
+  if (view === "store") {
+    void renderManagedStore();
+    return;
+  }
   if (hasManagedLibrary()) {
     renderManagedMode();
   } else if (view === "library" || view === "game") {
@@ -682,6 +687,31 @@ const GAMEPAD_ACTIONS = new Map([
   [14, "right"],
 ]);
 
+function headerControls() {
+  return [...document.querySelectorAll(".topbar .nav-item, .topbar .top-actions button")]
+    .filter((node) => !node.disabled && node.getClientRects().length > 0);
+}
+
+function activeNavControl() {
+  const view = appView === "game" ? "library" : appView;
+  return document.querySelector(`.topbar #nav-${view}`) || document.querySelector(".topbar #nav-home");
+}
+
+function enterContentFromHeader() {
+  if (appView === "home") {
+    const card = document.querySelector(`.home-page .cover-card[data-managed="${CSS.escape(managedSelectedId || "")}"]`)
+      || document.querySelector(".home-page .cover-card");
+    if (card) { focusControl(card); return true; }
+  }
+  const search = document.querySelector("#managed-search, #store-search");
+  if (search) { focusControl(search); return true; }
+  const play = document.querySelector("#managed-play, #managed-stop");
+  if (play) { focusControl(play); return true; }
+  const card = document.querySelector(".library-page .cover-card");
+  if (card) { focusControl(card); return true; }
+  return false;
+}
+
 function navigationSurface() {
   const settings = document.querySelector("#settings-page");
   if (settings && !settings.classList.contains("hidden")) return settings;
@@ -689,10 +719,13 @@ function navigationSurface() {
 }
 
 function navigationControls() {
-  const surface = navigationSurface();
-  if (!surface) return [];
-  return [...surface.querySelectorAll("button, input, select, textarea, a[href], [tabindex='0']")]
-    .filter((node) => !node.disabled && node.getClientRects().length > 0 && !node.closest(".hidden"));
+  const settings = document.querySelector("#settings-page");
+  const root = settings && !settings.classList.contains("hidden") ? settings : document;
+  return [...root.querySelectorAll("button, input, select, textarea, a[href], [tabindex='0']")]
+    .filter((node) => !node.disabled
+      && node.getClientRects().length > 0
+      && !node.closest(".hidden")
+      && !node.closest("#auth-gate"));
 }
 
 function scrollControlIntoView(node) {
@@ -848,6 +881,17 @@ function moveNavigation(action) {
     focusControl(controls[0]);
     return true;
   }
+  const header = headerControls();
+  if (header.includes(current)) {
+    if (action === "left" || action === "right") {
+      const index = header.indexOf(current);
+      const next = Math.max(0, Math.min(header.length - 1, index + (action === "right" ? 1 : -1)));
+      focusControl(header[next]);
+      return true;
+    }
+    if (action === "down") return enterContentFromHeader();
+    if (action === "up") return true;
+  }
   if (action === "next" || action === "previous") {
     const index = controls.indexOf(current);
     const step = action === "next" ? 1 : -1;
@@ -890,8 +934,15 @@ function moveNavigation(action) {
     const score = along + across * 3;
     if (!best || score < best.score) best = { score, node };
   }
-  if (best) focusControl(best.node);
-  return Boolean(best);
+  if (best) {
+    focusControl(best.node);
+    return true;
+  }
+  if (action === "up") {
+    const nav = activeNavControl();
+    if (nav) { focusControl(nav); return true; }
+  }
+  return false;
 }
 
 function focusedManagedGame() {
@@ -904,7 +955,14 @@ function dispatchNavigation(action) {
   const typing = document.activeElement
     && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
   if (action === "back") {
-    if (typing) { document.activeElement.blur(); return; }
+    if (typing) {
+      document.activeElement.blur();
+      if (!document.body.classList.contains("settings-open")) {
+        const nav = activeNavControl();
+        if (nav) focusControl(nav);
+      }
+      return;
+    }
     if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
     if (appView === "game") { setView("library"); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");
@@ -2188,7 +2246,68 @@ for (const tab of document.querySelectorAll("[data-settings-tab]")) {
 }
 document.querySelector("#settings-close").onclick = closeSettingsPage;
 
-async function showManagedAddGame() {
+let storeQuery = "";
+let storeResults = [];
+
+function renderStoreResults() {
+  const host = detailEl.querySelector("#store-results");
+  if (!host) return;
+  if (!storeResults.length) {
+    host.innerHTML = '<div class="status">No matching Steam results.</div>';
+    return;
+  }
+  host.innerHTML = `<div class="store-grid">${storeResults.map((result) => `
+    <button class="store-card" data-store-app="${escape(result.appid)}">
+      <span class="store-cover">${result.image ? `<img data-store-image="${escape(result.image)}" alt="">` : ""}</span>
+      <span class="store-title">${escape(result.name)}</span>
+      <span class="store-meta">App ${escape(result.appid)}${result.installed ? " · In library" : ""}</span>
+    </button>`).join("")}</div>`;
+  for (const card of host.querySelectorAll("[data-store-app]")) {
+    card.onclick = () => {
+      const result = storeResults.find((item) => item.appid === card.dataset.storeApp);
+      if (!result) return;
+      if (result.installed) { showToast("This game is already in your library."); return; }
+      void showManagedAddGame({ app_id: Number(result.appid), title: result.name });
+    };
+  }
+  for (const image of host.querySelectorAll("img[data-store-image]")) {
+    image.src = image.dataset.storeImage;
+    image.addEventListener("error", () => {
+      const frame = image.parentElement;
+      image.remove();
+      if (frame) frame.classList.add("missing");
+    });
+  }
+}
+
+async function renderManagedStore() {
+  detailEl.innerHTML = `<div class="page store-page">
+    <header class="page-head"><h1>Discover your next game</h1><p>Search the Steam catalogue, then add a title to your library.</p></header>
+    <div class="library-search"><input id="store-search" placeholder="Search by game name, App ID, or Steam URL" value="${escape(storeQuery)}" aria-label="Search the Steam catalogue"><button id="store-search-button">Search</button></div>
+    <div id="store-results" class="store-results">${storeResults.length ? "" : '<div class="status">Search the Steam catalogue to find a game.</div>'}</div>
+  </div>`;
+  const input = detailEl.querySelector("#store-search");
+  const button = detailEl.querySelector("#store-search-button");
+  const run = async () => {
+    storeQuery = input.value.trim();
+    if (!storeQuery) return;
+    const stop = busy(button, "Searching…");
+    detailEl.querySelector("#store-results").innerHTML = '<div class="status">Searching Steam…</div>';
+    try {
+      storeResults = await invoke("search_games", { query: storeQuery });
+      renderStoreResults();
+    } catch (error) {
+      detailEl.querySelector("#store-results").innerHTML = `<div class="status error">${escape(String(error))}</div>`;
+    } finally {
+      stop();
+    }
+  };
+  button.onclick = run;
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
+  if (storeResults.length) renderStoreResults();
+}
+
+async function showManagedAddGame(prefill = {}) {
   try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { /* keep the last snapshot */ }
   const drives = managedLibrary?.drives || [];
   const backdrop = document.createElement("div");
@@ -2214,6 +2333,8 @@ async function showManagedAddGame() {
   const submit = backdrop.querySelector("#managed-add-submit");
   const statusNode = backdrop.querySelector(".modal-status");
   const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
+  if (prefill.app_id) appIdInput.value = String(prefill.app_id);
+  if (prefill.title) titleInput.value = prefill.title;
   const close = () => backdrop.remove();
   backdrop.querySelector("#managed-add-close").onclick = close;
   backdrop.querySelector("#managed-add-cancel").onclick = close;
@@ -2372,14 +2493,15 @@ function showAddGame() {
   queryInput.focus();
 }
 
-document.querySelector("#nav-library").onclick = () => { setView("library"); if (searchEl) searchEl.focus(); };
+document.querySelector("#nav-library").onclick = () => setView("library");
 document.querySelector("#nav-home").onclick = () => setView("home");
+document.querySelector("#nav-store").onclick = () => setView("store");
+document.querySelector("#profile").onclick = () => openSettingsPage();
 window.addEventListener("focus", async () => {
   if (!hasManagedLibrary()) return;
   await refreshManagedRunning();
-  if (appView === "library" || appView === "home") renderManagedMode();
+  if (appView === "library" || appView === "home" || appView === "game") renderManagedMode();
 });
-document.querySelector("#add-game").onclick = () => { if (hasManagedLibrary()) showManagedAddGame(); else showAddGame(); };
 document.querySelector("#settings").onclick = openSettingsPage;
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = () => { if (hasManagedLibrary()) renderManagedList(); else renderGames(); };
