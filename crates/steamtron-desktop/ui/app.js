@@ -773,8 +773,16 @@ function focusControl(node) {
   node.classList.add("nav-focus");
   node.focus({ preventScroll: true });
   scrollControlIntoView(node);
-  if (node.matches?.(".cover-card[data-managed]") && node.closest(".home-page")) {
-    syncHomeHero(node);
+  if (node.matches?.(".cover-card[data-managed]")) {
+    if (node.closest(".home-page")) {
+      syncHomeHero(node);
+    } else if (node.closest(".library-page")) {
+      // Selection follows focus: the previous card loses its outline.
+      managedSelectedId = node.dataset.managed;
+      for (const card of document.querySelectorAll(".library-page .cover-card")) {
+        card.classList.toggle("active", card.dataset.managed === managedSelectedId);
+      }
+    }
   }
 }
 
