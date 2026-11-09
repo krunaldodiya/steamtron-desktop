@@ -83,6 +83,78 @@ pub fn fetch_manifest_bundle(
     }
 }
 
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ReconcileReport {
+    pub checked: usize,
+    pub registered: usize,
+    pub pending: usize,
+    pub errors: Vec<String>,
+}
+
+/// Verify every stored Steam registration and update pending states.
+pub fn reconcile_registrations(
+    backend: &dyn RegistrationBackend,
+) -> Result<ReconcileReport, LibraryError> {
+    reconcile_registrations_at(&Library::default_path(), backend)
+}
+
+pub fn reconcile_registrations_at(
+    library_path: &Path,
+    backend: &dyn RegistrationBackend,
+) -> Result<ReconcileReport, LibraryError> {
+    let mut library = Library::open(library_path)
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let mut report = ReconcileReport {
+        checked: 0,
+        registered: 0,
+        pending: 0,
+        errors: Vec::new(),
+    };
+    let mut changed = false;
+    for game in library.games().to_vec() {
+        if game.steam.is_none() {
+            continue;
+        }
+        report.checked += 1;
+        let app_id = game
+            .steam
+            .as_ref()
+            .map(|registration| registration.app_id)
+            .unwrap_or_default();
+        match backend.verify(&app_id.to_string()) {
+            Ok(state) if state.registered => {
+                report.registered += 1;
+                if game
+                    .steam
+                    .as_ref()
+                    .is_some_and(|registration| registration.state != RegistrationState::Registered)
+                {
+                    let mut updated = game.clone();
+                    if let Some(registration) = updated.steam.as_mut() {
+                        registration.registered = true;
+                        registration.state = RegistrationState::Registered;
+                    }
+                    library
+                        .upsert_game(updated)
+                        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+                    changed = true;
+                }
+            }
+            Ok(_) => {
+                report.pending += 1;
+            }
+            Err(error) => report.errors.push(format!("{app_id}: {error}")),
+        }
+    }
+    if changed {
+        library
+            .save()
+            .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    }
+    Ok(report)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct ManagedAddRequest {
     pub app_id: u32,
@@ -390,6 +462,42 @@ mod tests {
             &library_path,
         );
         assert!(duplicate.is_err());
+    }
+
+
+    #[test]
+    fn reconcile_marks_registered_games_and_keeps_pending_ones() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 42,
+                title: "Sample".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                provider: ManifestProvider::SteamMl,
+                proton: String::new(),
+            },
+            sample_bundle("42"),
+            &backend,
+            &library_path,
+        )
+        .unwrap();
+        // The test backend already has the Lua, so reconcile clears the pending state.
+        let report = reconcile_registrations_at(&library_path, &backend).unwrap();
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.registered, 1);
+        assert_eq!(report.pending, 0);
+        let game = Library::open(&library_path).unwrap().game("42").unwrap().clone();
+        assert_eq!(game.steam.unwrap().state, RegistrationState::Registered);
+
+        backend.unregister("42").unwrap();
+        let report = reconcile_registrations_at(&library_path, &backend).unwrap();
+        assert_eq!(report.registered, 0);
+        assert_eq!(report.pending, 1);
     }
 
     #[test]

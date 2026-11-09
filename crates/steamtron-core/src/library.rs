@@ -479,6 +479,21 @@ pub fn steamtronapps_root(drive_root: &Path) -> PathBuf {
     drive_root.join("SteamTronLibrary").join("steamtronapps")
 }
 
+/// Drive root that owns a managed or imported library folder.
+///
+/// Walks up from a game root until it finds `SteamTronLibrary` or UmuTron's
+/// `UmuLibrary`, then returns the folder that contains it.
+pub fn drive_root_for(root: &Path) -> Option<PathBuf> {
+    root.ancestors().find_map(|ancestor| {
+        matches!(
+            ancestor.file_name().and_then(|name| name.to_str()),
+            Some("SteamTronLibrary" | "UmuLibrary")
+        )
+        .then(|| ancestor.parent().map(Path::to_path_buf))
+        .flatten()
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GameLayout {
     pub base: PathBuf,
@@ -752,6 +767,20 @@ mod tests {
         assert_eq!(safe_folder("A/B: C?").unwrap(), "A B C");
         assert!(safe_folder("...").is_err());
         assert!(safe_folder("   ").is_err());
+    }
+
+
+    #[test]
+    fn drive_root_is_found_for_both_library_names() {
+        assert_eq!(
+            drive_root_for(Path::new("/mnt/games/SteamTronLibrary/steamtronapps/common/Sample")),
+            Some(PathBuf::from("/mnt/games"))
+        );
+        assert_eq!(
+            drive_root_for(Path::new("/mnt/games/UmuLibrary/umuapps/common/Sample")),
+            Some(PathBuf::from("/mnt/games"))
+        );
+        assert_eq!(drive_root_for(Path::new("/mnt/games/common/Sample")), None);
     }
 
     #[test]

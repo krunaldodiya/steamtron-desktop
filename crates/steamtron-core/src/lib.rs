@@ -2,6 +2,7 @@ pub mod config;
 pub mod import;
 pub mod launch;
 pub mod paths;
+pub mod runtime;
 pub mod library;
 pub mod fixes;
 pub mod steam;

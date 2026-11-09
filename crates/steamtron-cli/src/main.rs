@@ -109,6 +109,17 @@ enum ManagedCommand {
         #[arg(long)]
         proton: Option<String>,
     },
+    /// Plan or start a managed game without Steam.
+    Play {
+        game_id: String,
+        #[arg(long)]
+        target: Option<String>,
+        /// Print the plan without starting the game.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Verify stored Steam registrations and clear pending states.
+    Reconcile,
 }
 
 #[derive(Debug, Subcommand)]
@@ -267,6 +278,67 @@ fn main() -> Result<()> {
                         &backend,
                     )?;
                     println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                ManagedCommand::Reconcile => {
+                    let report =
+                        steamtron_library::managed::reconcile_registrations(&backend)?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                ManagedCommand::Play {
+                    game_id,
+                    target,
+                    dry_run,
+                } => {
+                    let library =
+                        steamtron_core::library::Library::load().context("library not found")?;
+                    let game = library
+                        .game(&game_id)
+                        .with_context(|| format!("game {game_id} is not in the library"))?;
+                    let target = match target {
+                        Some(id) => game
+                            .launch_targets
+                            .iter()
+                            .find(|candidate| candidate.id == id)
+                            .with_context(|| format!("target {id} does not exist"))?,
+                        None => steamtron_core::runtime::primary_target(game)
+                            .context("game has no launch target")?,
+                    };
+                    let steam_root = steam::steam_root()?;
+                    let plan = steamtron_core::runtime::managed_launch_plan(game, target, &steam_root)?;
+                    let summary = serde_json::json!({
+                        "program": plan.program.display().to_string(),
+                        "arguments": plan.arguments,
+                        "environment": plan.environment,
+                        "cwd": plan.cwd.display().to_string(),
+                    });
+                    if dry_run {
+                        println!("{}", serde_json::to_string_pretty(&summary)?);
+                        return Ok(());
+                    }
+                    let logs = steamtron_core::paths::layout().diagnostics_for(&game.id);
+                    steamtron_core::paths::ensure_private_dir(&logs)?;
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|elapsed| elapsed.as_secs())
+                        .unwrap_or(0);
+                    let log = logs.join(format!("play-{stamp}.log"));
+                    let stdout = std::fs::File::create(&log)?;
+                    let stderr = stdout.try_clone()?;
+                    let mut child = plan
+                        .command()
+                        .stdin(std::process::Stdio::null())
+                        .stdout(stdout)
+                        .stderr(stderr)
+                        .spawn()
+                        .context("could not start the game")?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "pid": child.id(),
+                            "log": log.display().to_string(),
+                        }))?
+                    );
+                    let _ = child.wait();
                 }
             }
         }

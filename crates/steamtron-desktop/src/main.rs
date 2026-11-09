@@ -1533,6 +1533,11 @@ fn try_overlay_wrapper() -> Option<i32> {
     let mut command = Vec::new();
     let mut use_proton = false;
     let mut target_id = None;
+    let mut proton_path = None;
+    let mut compat = None;
+    let mut managed_cwd = None;
+    let mut managed_steam_root = None;
+    let mut managed = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -1541,6 +1546,10 @@ fn try_overlay_wrapper() -> Option<i32> {
             "--fixes" => { fixes = args.get(index + 1).cloned(); index += 2; }
             "--proton" => { use_proton = true; index += 1; }
             "--target-id" => { target_id = args.get(index + 1).cloned(); index += 2; }
+            "--proton-path" => { proton_path = args.get(index + 1).cloned(); managed = true; index += 2; }
+            "--compat" => { compat = args.get(index + 1).cloned(); index += 2; }
+            "--cwd" => { managed_cwd = args.get(index + 1).cloned(); managed = true; index += 2; }
+            "--steam-root" => { managed_steam_root = args.get(index + 1).cloned(); index += 2; }
             "--" => { command.extend_from_slice(&args[index + 1..]); break; }
             value => { command.push(value.to_owned()); index += 1; }
         }
@@ -1559,13 +1568,17 @@ fn try_overlay_wrapper() -> Option<i32> {
         // Only PlayTron launches pass --target-id. Steam launches must keep
         // using the command Steam prepared; otherwise a configured launcher
         // target silently overrides %command% for Steam Play.
-        let selected_target = Config::load().ok().and_then(|config| {
-            let entry = config.entry(&appid)?;
-            target_id
-                .as_deref()
-                .and_then(|id| entry.launch_targets.iter().find(|target| target.id == id))
-                .cloned()
-        });
+        let selected_target = if managed {
+            None
+        } else {
+            Config::load().ok().and_then(|config| {
+                let entry = config.entry(&appid)?;
+                target_id
+                    .as_deref()
+                    .and_then(|id| entry.launch_targets.iter().find(|target| target.id == id))
+                    .cloned()
+            })
+        };
         let mut source_command = command.clone();
         if let Some(target) = selected_target.as_ref() {
             // Steam wraps %command% (steam-launch-wrapper -> runtime -> Proton
@@ -1594,7 +1607,24 @@ fn try_overlay_wrapper() -> Option<i32> {
             .iter()
             .map(|value| overlay.game().rewrite_arg(value, &merged))
             .collect();
-        let mut process = if use_proton {
+        let mut process = if let Some(proton) = proton_path.as_deref() {
+            let compat = compat
+                .as_deref()
+                .ok_or("missing --compat for a managed Proton launch")?;
+            let client = match managed_steam_root.as_deref() {
+                Some(path) => std::path::PathBuf::from(path),
+                None => steam::steam_root().map_err(|e| e.to_string())?,
+            };
+            let mut process = Command::new(proton);
+            process
+                .arg("waitforexitandrun")
+                .arg(&rewritten[0])
+                .env("STEAM_COMPAT_DATA_PATH", compat)
+                .env("STEAM_COMPAT_CLIENT_INSTALL_PATH", client)
+                .env("SteamAppId", &appid)
+                .env("SteamGameId", &appid);
+            process
+        } else if use_proton {
             let (proton, compat) = proton_launcher(&appid)
                 .ok_or("could not resolve the Steam Proton runtime")?;
             let mut process = Command::new(proton);
@@ -1613,14 +1643,18 @@ fn try_overlay_wrapper() -> Option<i32> {
         // runs a nested executable from its own directory (e.g. Max Payne 3's
         // PlayMaxPayne3.exe); running it from the game root changes its
         // relative-path configuration and can terminate it immediately.
-        let workdir = selected_target
-            .as_ref()
-            .map(|target| overlay.game().rewrite_arg(
-                &target.executable.display().to_string(),
-                &merged,
-            ))
-            .and_then(|path| std::path::Path::new(&path).parent().map(std::path::Path::to_path_buf))
-            .unwrap_or_else(|| merged.clone());
+        let workdir = if let Some(cwd) = managed_cwd.as_deref() {
+            std::path::PathBuf::from(overlay.game().rewrite_arg(cwd, &merged))
+        } else {
+            selected_target
+                .as_ref()
+                .map(|target| overlay.game().rewrite_arg(
+                    &target.executable.display().to_string(),
+                    &merged,
+                ))
+                .and_then(|path| std::path::Path::new(&path).parent().map(std::path::Path::to_path_buf))
+                .unwrap_or_else(|| merged.clone())
+        };
         process.args(&rewritten[1..]).current_dir(workdir);
         if let Some(appid) = overlay.game().appid() {
             process.env("SteamAppId", appid);
@@ -1656,6 +1690,117 @@ fn try_overlay_wrapper() -> Option<i32> {
     })
 }
 
+
+
+#[tauri::command]
+fn managed_fixes_dir(game: &steamtron_core::library::Game) -> Option<std::path::PathBuf> {
+    let drive = steamtron_core::library::drive_root_for(&game.installation.root)?;
+    let layout = steamtron_core::library::game_layout(&drive, game).ok()?;
+    Some(layout.fixes)
+}
+
+fn dir_has_entries(path: &std::path::Path) -> bool {
+    std::fs::read_dir(path)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
+    use std::fs::File;
+    use std::process::Stdio;
+    use steamtron_core::library::Library;
+    use steamtron_core::runtime::{managed_launch_plan, primary_target};
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("Unknown game {game_id}"))?;
+    let target = primary_target(game)
+        .cloned()
+        .ok_or_else(|| "This game has no launch target yet.".to_string())?;
+    let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
+    let plan = managed_launch_plan(game, &target, &steam_root)
+        .map_err(|error| error.to_string())?;
+    let fixes = managed_fixes_dir(game);
+    let use_overlay = game.fixes_enabled && fixes.as_ref().is_some_and(|path| dir_has_entries(path));
+
+    let layout = steamtron_core::paths::layout();
+    let logs = layout.diagnostics_for(&game.id);
+    steamtron_core::paths::ensure_private_dir(&logs)
+        .map_err(|error| format!("{}: {error}", logs.display()))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let log = logs.join(format!("play-{stamp}.log"));
+    let stdout = File::create(&log).map_err(|error| format!("{}: {error}", log.display()))?;
+    let stderr = stdout
+        .try_clone()
+        .map_err(|error| format!("{}: {error}", log.display()))?;
+
+    let mut command = if use_overlay {
+        let fixes = fixes.as_ref().expect("checked above").clone();
+        let appid = game
+            .metadata_app_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| game.id.clone());
+        let exe = steamtron_executable()?;
+        let mut command = std::process::Command::new(&exe);
+        command
+            .arg("--steamtron-overlay")
+            .args([
+                "--appid",
+                &appid,
+                "--common",
+                &game.installation.root.display().to_string(),
+                "--fixes",
+                &fixes.display().to_string(),
+                "--proton-path",
+                &plan.program.display().to_string(),
+                "--compat",
+                &game.installation.prefix.display().to_string(),
+                "--cwd",
+                &game.installation.root.display().to_string(),
+                "--steam-root",
+                &steam_root.display().to_string(),
+                "--",
+                &plan.arguments[1],
+            ])
+            .args(&target.arguments);
+        command
+    } else {
+        plan.command()
+    };
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
+        .spawn()
+        .map_err(|error| format!("Could not start the game: {error}"))?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
+    Ok(serde_json::json!({
+        "pid": pid,
+        "log": log.display().to_string(),
+        "overlay": use_overlay,
+        "fixes": fixes.map(|path| path.display().to_string()),
+        "program": plan.program.display().to_string(),
+        "arguments": plan.arguments,
+    }))
+}
+
+
+#[tauri::command]
+fn reconcile_registrations() -> Result<steamtron_library::managed::ReconcileReport, String> {
+    let backend = platform_backend().map_err(|error| error.to_string())?;
+    steamtron_library::managed::reconcile_registrations(&backend)
+        .map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 fn add_managed_game(
@@ -1836,6 +1981,8 @@ fn main() {
             remove_fixes,
             library_snapshot,
             add_managed_game,
+            play_managed,
+            reconcile_registrations,
             registration_verify,
             library_import_preview,
             library_import_commit,

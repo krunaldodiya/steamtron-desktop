@@ -211,3 +211,12 @@ screen using real commands with fixtures where the backend is pending.
   exists, so the legacy Steam flow is never removed underneath the user.
 - Doctor now reports the Steam registration backend (SLSsteam-moon /
   BetterSteamTools) instead of calling it an unlock backend.
+
+## Phase 3 status
+
+- Managed entries with a launch target show Play. Launch writes a log under
+  `diagnostics/<game id>` and reports it in the toast.
+- Fixes-enabled games run through the overlay wrapper; others start Proton
+  directly. Missing target shows "No launch target yet." and disables Play.
+- Load reconciles stored Steam registrations so `pending_restart` clears once
+  the Lua is verified.

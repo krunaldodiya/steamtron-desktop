@@ -320,7 +320,24 @@ function managedDetails(game) {
 function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
   const hero = appId ? headerUrl(appId) : "";
-  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p></div></div>${managedDetails(game)}`;
+  const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
+  const canPlay = managedReady(game) && Boolean(target);
+  const play = `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${play}${target ? "" : '<span class="muted">No launch target yet.</span>'}</div></div></div>${managedDetails(game)}`;
+  const button = detailEl.querySelector("#managed-play");
+  if (button && canPlay) {
+    button.onclick = async () => {
+      const stop = busy(button, "Starting…");
+      try {
+        const result = await invoke("play_managed", { gameId: game.id });
+        showToast(`Started ${game.title} · ${result.log}`);
+      } catch (error) {
+        showToast(String(error), true);
+      } finally {
+        stop();
+      }
+    };
+  }
 }
 
 function renderManagedHome() {
@@ -1144,6 +1161,7 @@ async function load() {
       if (added.length) await loadFixes();
     } catch (_error) { /* non-fatal */ }
     try { await invoke("auto_pin_installed"); } catch (_error) { /* non-fatal */ }
+    try { await invoke("reconcile_registrations"); } catch (_error) { /* keep stored states */ }
     try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { managedLibrary = null; }
     if (hasManagedLibrary()) {
       renderManagedMode();
