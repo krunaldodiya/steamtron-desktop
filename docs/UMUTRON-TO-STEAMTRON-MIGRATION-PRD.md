@@ -410,3 +410,75 @@ struct DoctorCheck {
 4. Keep Lua/manifest and update pinning as optional features?
 5. Keep the account/catalog service?
 6. Minimum Windows/Linux matrix (Windows 10/11, glibc/SteamRT versions)?
+
+## 20. Delivery strategy
+
+**Recommendation: phase-wise vertical slices, not a big-bang rewrite.**
+
+### 20.1 Why not all at once
+
+- The two highest-risk pieces are external and version-sensitive: WinFsp overlay
+  fidelity on Windows and SLSsteam-moon/BetterSteamTools behavior across client
+  builds. They must be proven early, not at the end.
+- The data model (`library.json` v2) and the traits are consumed by every layer.
+  Writing UI and services against an unstable model guarantees rework.
+- Existing working features (fixes ZIP, overlay backends, doctor, backups,
+  Tauri shell) must keep working during the migration; a big-bang branch hides
+  regressions until the end.
+- Reviews, bisecting, and release notes are tractable per slice; a single
+  10k-line change is not.
+- Cross-platform work benefits from a Linux-first walking skeleton: every later
+  slice is a variation of a proven path.
+
+### 20.2 Rules
+
+1. Every phase ends with a **runnable app** and its acceptance test; no
+   half-merged layers.
+2. **Contracts freeze first**: `library.json` v2 schema, `RuntimeBackend`,
+   `OverlayBackend`, `RegistrationBackend`, `DoctorCheck`. Changes after the
+   freeze require a documented amendment.
+3. Each slice is vertical: model → planner → runtime → UI affordance → test.
+4. The current Steam mode stays available behind a setting until parity; no
+   long-lived branches, no feature removal before its replacement passes.
+5. Doctor is extended in the same slice that adds a registration backend
+   capability, never later.
+6. Importers are dry-run and land before any file movement.
+
+### 20.3 Walking skeleton order
+
+| Step | Slice | Platform |
+|---|---|---|
+| 1 | Add game (managed + registered) → Play via GoldBerg → Stop → Doctor | Linux |
+| 2 | Same slice | Windows |
+| 3 | Steamless section | both |
+| 4 | Steam client mode + registration verification | both |
+| 5 | Importers, backups, full UI parity, hardening | both |
+
+### 20.4 Parallel tracks after the freeze
+
+With the model and traits fixed, up to three tracks can proceed without blocking:
+
+- **Track A** — Linux runtime, supervisor, evidence, Steam prefix creation.
+- **Track B** — Windows runtime, WinFsp conformance, native supervisor.
+- **Track C** — registration backends, Doctor, emulator/unpacker tool managers.
+
+Tracks meet at the add flow, Play, and Doctor; those are the integration gates.
+
+### 20.5 Rough size
+
+| Phase | Size | Depends on |
+|---|---|---|
+| 0 Decisions | S | — |
+| 1 Core model + importers | M | 0 |
+| 2 Dual add + registration + Doctor | L | 1 |
+| 3 Linux runtime | M | 1 |
+| 4 Windows runtime + WinFsp | L | 1, overlay conformance |
+| 5 Emulation tooling | M | 1 |
+| 6 Steam client mode | S/M | 2, 3/4 |
+| 7 UI parity | L | 3, 4, 5 |
+| 8 Library services | M | 1, 7 |
+| 9 Hardening/release | M | all |
+
+Only phase 0 → 1 → 2 are strictly sequential. Phases 3–5 are parallelizable;
+7 follows the runtime and tooling slices; 8 follows the model.
+
