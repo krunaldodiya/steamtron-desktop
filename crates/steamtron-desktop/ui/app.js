@@ -2399,19 +2399,21 @@ function renderStorePage() {
     <header class="page-head"><h1>Discover your next game</h1><p>Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">
       <aside class="store-sidebar">
-        <div class="store-sidebar-head"><label for="store-search">Search</label><button type="button" tabindex="0" class="store-clear" id="store-clear-search">Clear search</button></div>
+        <label for="store-search">Search</label>
         <input id="store-search" placeholder="Search the catalogue and press Enter" value="${escape(storeQuery)}" aria-label="Search the catalogue">
-        <div class="store-sidebar-head"><label>Genre</label><button type="button" tabindex="0" class="store-clear" id="store-clear-genre">Clear genre</button></div>
+        <button class="store-option store-clear-row" id="store-clear-search">Clear search</button>
+        <label>Genre</label>
         <div class="store-option-list" data-list="genre" role="listbox" aria-label="Genre">
           <button class="store-option${storeGenre === "" ? " selected" : ""}" data-store-genre="">All genres</button>
           ${genreOptions}
         </div>
+        <button class="store-option store-clear-row" id="store-clear-genre">Clear genre</button>
         <label>Sort</label>
         <div class="store-option-list" data-list="sort" role="listbox" aria-label="Sort">${sortOptions}</div>
         <p class="library-count">${escape(count)}</p>
       </aside>
       <section class="store-content">
-        ${storeRecent.length ? `<section class="managed-rail"><div class="rail-head"><h2>Recently viewed</h2></div><div class="rail-scroll" id="store-recent">${storeRecent.map(storeCard).join("")}</div></section>` : ""}
+        ${storeRecent.length ? `<div class="store-recent"><span class="store-recent-label">Recently viewed</span>${storeRecent.map((item) => `<button class="store-chip" data-store-id="${escape(String(item.id))}">${escape(item.name)}</button>`).join("")}</div>` : ""}
         <div id="store-results" class="cover-grid store-grid">
           ${storeError
             ? `<div class="status error">${escape(storeError)}</div><button id="store-retry">Retry</button>`

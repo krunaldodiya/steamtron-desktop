@@ -401,11 +401,10 @@ button.primary:hover { filter:brightness(1.06); }
 .top-actions { gap:10px; position:relative; }
 .store-body { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:32px; align-items:stretch; margin-top:22px; }
 .store-sidebar { position:sticky; top:90px; display:flex; flex-direction:column; gap:6px; height:calc(100vh - 120px); min-height:460px; }
-.store-sidebar-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:6px; }
 .store-sidebar > .library-count { margin-top:auto; padding-top:6px; }
 .store-sidebar label { color:var(--muted); font-size:11px; letter-spacing:.09em; text-transform:uppercase; }
-.store-clear { flex-shrink:0; padding:5px 10px; border:1px solid var(--border); border-radius:7px; background:var(--surface-raised); color:var(--muted); font-size:11px; }
-.store-clear:hover, .store-clear.nav-focus { color:var(--text); border-color:var(--accent); }
+.store-clear-row { border:1px solid var(--border); background:var(--surface-raised); color:var(--muted); text-align:center; padding:8px 10px; }
+.store-clear-row:hover, .store-clear-row.nav-focus { color:var(--text); border-color:var(--accent); }
 .store-sidebar input { width:100%; padding:11px 13px; border:1px solid var(--border); border-radius:8px; background:var(--surface-raised); color:var(--text); font-size:14px; outline:none; }
 .store-sidebar input:focus { border-color:var(--accent); }
 .store-option-list { display:flex; flex-direction:column; gap:2px; overflow:auto; padding:4px; border:1px solid var(--border); border-radius:10px; background:var(--surface-raised); }
@@ -418,3 +417,8 @@ button.primary:hover { filter:brightness(1.06); }
 .store-content .managed-rail { margin-top:0; padding:0; }
 .store-grid { margin-top:0; }
 
+
+.store-recent { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+.store-recent-label { color:var(--muted); font-size:12px; margin-right:4px; }
+.store-chip { padding:7px 12px; border-radius:999px; border:1px solid var(--border); background:var(--surface-raised); color:var(--text); font-size:12px; }
+.store-chip:hover, .store-chip.nav-focus { border-color:var(--accent); }
