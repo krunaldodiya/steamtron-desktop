@@ -195,7 +195,7 @@ function migrationSummary(plan) {
     games: count("AddGame"),
     drives: count("AddDrive"),
     registrations: count("RegisterSteam"),
-    moves: count("MoveFixes"),
+    copies: count("CopyFixes"),
     needs: count("NeedsInput"),
   };
 }
@@ -212,12 +212,12 @@ function showMigration(sources) {
     const parts = [`${summary.games} game${summary.games === 1 ? "" : "s"}`];
     if (summary.drives) parts.push(`${summary.drives} drive${summary.drives === 1 ? "" : "s"}`);
     if (summary.registrations) parts.push(`${summary.registrations} Steam registration${summary.registrations === 1 ? "" : "s"}`);
-    if (summary.moves) parts.push(`${summary.moves} fixes move${summary.moves === 1 ? "" : "s"}`);
+    if (summary.copies) parts.push(`${summary.copies} fixes cop${summary.copies === 1 ? "y" : "ies"}`);
     if (summary.needs) parts.push(`${summary.needs} needing a folder`);
     const warnings = (source.plan.warnings || []).length;
     return `<div class="row"><strong>${escape(title)}</strong><div class="muted">${escape(source.path)}</div><div>${escape(parts.join(" · "))}</div>${warnings ? `<div class="muted">${warnings} warning${warnings === 1 ? "" : "s"}</div>` : ""}</div>`;
   }).join("");
-  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Bring your library over</h2><button class="modal-close" id="migrate-close" aria-label="Close">×</button></div><p class="muted">SteamTron keeps games in its own library. Existing entries are imported once; files move only when the destination is absent, and Steam registrations stay pending until the backend is available.</p><div class="migration-sources">${rows}</div><div class="modal-status"></div><div class="modal-actions"><button id="migrate-later">Not now</button><button id="migrate-import" class="primary">Import</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Bring your library over</h2><button class="modal-close" id="migrate-close" aria-label="Close">×</button></div><p class="muted">SteamTron keeps games in its own library under SteamTronLibrary/steamtronapps. Existing entries are imported once, fixes are copied (never deleted from the source), and Steam registrations stay pending until the backend is available.</p><div class="migration-sources">${rows}</div><div class="modal-status"></div><div class="modal-actions"><button id="migrate-later">Not now</button><button id="migrate-import" class="primary">Import</button></div></div>`;
   document.body.appendChild(backdrop);
   const statusNode = backdrop.querySelector(".modal-status");
   const close = () => backdrop.remove();
