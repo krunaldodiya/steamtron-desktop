@@ -637,7 +637,7 @@ function scrollControlIntoView(node) {
   let horizontal = node.parentElement;
   while (horizontal && horizontal !== document.body && horizontal !== document.documentElement) {
     const style = getComputedStyle(horizontal);
-    if (/(auto|scroll)/.test(style.overflowX) && horizontal.scrollWidth > horizontal.clientWidth + 1) break;
+    if (/(auto|scroll|hidden)/.test(style.overflowX) && horizontal.scrollWidth > horizontal.clientWidth + 1) break;
     horizontal = horizontal.parentElement;
   }
   if (horizontal && horizontal !== document.body && horizontal !== document.documentElement) {
