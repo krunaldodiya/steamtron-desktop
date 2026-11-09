@@ -253,11 +253,13 @@ body {
 .brand-text .muted { font-size: 12px; margin-top: 2px; }
 .top-nav { display: flex; flex: 1; gap: 8px; }
 .nav-item {
-  border: 0; background: transparent; color: var(--muted);
-  padding: 10px 16px; border-radius: var(--radius-pill); font-size: 14px;
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+  padding: 9px 16px; border-radius: 10px; font-size: 14px;
 }
 .nav-item:hover { background: var(--surface-raised); color: var(--text); }
-.nav-item.active { color: var(--text); background: var(--accent-soft); }
+.nav-item.active { color: var(--text); background: var(--accent-soft); border-color: var(--accent); }
+.nav-item.nav-focus, .topbar .nav-item:focus, .topbar .nav-item:focus-visible { outline: none; border-color: var(--accent); }
+.nav-item.active.nav-focus, .topbar .nav-item.active:focus-visible { background: var(--accent-soft); }
 .panel {
   background: var(--surface-raised);
   border: 1px solid var(--border);
