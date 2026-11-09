@@ -575,16 +575,254 @@ detailEl.addEventListener("click", (event) => {
   openManagedGame(button.dataset.managed);
 });
 
+
+
+// Keyboard and controller navigation, mirroring UmuTron's focus model:
+// arrow keys move to the nearest control in that direction, Enter activates,
+// Escape goes back, PageUp/PageDown page collections, and a gamepad maps to
+// the same actions with the same debounce/repeat timing.
+const navState = {
+  focused: null,
+  held: new Set(),
+  nextRepeat: new Map(),
+};
+
+const NAV_ACTIONS = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down",
+  Enter: "select",
+  " ": "select",
+  Escape: "back",
+  PageUp: "pageup",
+  PageDown: "pagedown",
+};
+
+const GAMEPAD_ACTIONS = new Map([
+  [0, "select"],
+  [1, "back"],
+  [2, "play"],
+  [6, "desktop"],
+  [9, "pageup"],
+  [10, "pagedown"],
+  [11, "up"],
+  [12, "down"],
+  [13, "left"],
+  [14, "right"],
+]);
+
+function navigationSurface() {
+  const settings = document.querySelector("#settings-page");
+  if (settings && !settings.classList.contains("hidden")) return settings;
+  return document.querySelector("#detail");
+}
+
+function navigationControls() {
+  const surface = navigationSurface();
+  if (!surface) return [];
+  return [...surface.querySelectorAll("button, input, select, textarea, a[href], [tabindex='0']")]
+    .filter((node) => !node.disabled && node.getClientRects().length > 0 && !node.closest(".hidden"));
+}
+
+function scrollControlIntoView(node) {
+  const margin = 28;
+  // Horizontal rails scroll themselves; the page must not move sideways.
+  let horizontal = node.parentElement;
+  while (horizontal && horizontal !== document.body && horizontal !== document.documentElement) {
+    const style = getComputedStyle(horizontal);
+    if (/(auto|scroll)/.test(style.overflowX) && horizontal.scrollWidth > horizontal.clientWidth + 1) break;
+    horizontal = horizontal.parentElement;
+  }
+  if (horizontal && horizontal !== document.body && horizontal !== document.documentElement) {
+    const box = horizontal.getBoundingClientRect();
+    const rect = node.getBoundingClientRect();
+    let delta = 0;
+    if (rect.left < box.left + margin) delta = rect.left - box.left - margin;
+    else if (rect.right > box.right - margin) delta = rect.right - box.right + margin;
+    if (delta) horizontal.scrollBy({ left: Math.round(delta), behavior: "smooth" });
+  }
+  // Vertical reveal inside the nearest vertical scroller (settings) or the page.
+  let vertical = node.parentElement;
+  while (vertical && vertical !== document.body && vertical !== document.documentElement) {
+    const style = getComputedStyle(vertical);
+    if (/(auto|scroll)/.test(style.overflowY) && vertical.scrollHeight > vertical.clientHeight + 1) break;
+    vertical = vertical.parentElement;
+  }
+  const header = document.querySelector(".topbar")?.getBoundingClientRect().height || 0;
+  const rect = node.getBoundingClientRect();
+  if (vertical && vertical !== document.body && vertical !== document.documentElement) {
+    const box = vertical.getBoundingClientRect();
+    let delta = 0;
+    if (rect.top < box.top + 16) delta = rect.top - box.top - 16;
+    else if (rect.bottom > box.bottom - 16) delta = rect.bottom - box.bottom + 16;
+    if (delta) vertical.scrollBy({ top: Math.round(delta), behavior: "smooth" });
+  } else if (rect.top < header + 16) {
+    window.scrollBy({ top: rect.top - header - 16, behavior: "smooth" });
+  } else if (rect.bottom > window.innerHeight - 16) {
+    window.scrollBy({ top: rect.bottom - (window.innerHeight - 16), behavior: "smooth" });
+  }
+}
+
+function focusControl(node) {
+  if (!node) return;
+  if (navState.focused && navState.focused !== node) navState.focused.classList.remove("nav-focus");
+  navState.focused = node;
+  node.classList.add("nav-focus");
+  node.focus({ preventScroll: true });
+  scrollControlIntoView(node);
+}
+
+function moveNavigation(action) {
+  const controls = navigationControls();
+  if (!controls.length) return false;
+  const active = document.activeElement;
+  const current = controls.includes(active)
+    ? active
+    : navState.focused && controls.includes(navState.focused)
+      ? navState.focused
+      : null;
+  if (!current) {
+    focusControl(controls[0]);
+    return true;
+  }
+  if (action === "next" || action === "previous") {
+    const index = controls.indexOf(current);
+    const step = action === "next" ? 1 : -1;
+    focusControl(controls[(index + step + controls.length) % controls.length]);
+    return true;
+  }
+  const center = (node) => {
+    const rect = node.getBoundingClientRect();
+    return [rect.left + rect.width / 2, rect.top + rect.height / 2];
+  };
+  const [x, y] = center(current);
+  let best = null;
+  for (const node of controls) {
+    if (node === current) continue;
+    const [cx, cy] = center(node);
+    const dx = cx - x;
+    const dy = cy - y;
+    const along = action === "right" ? dx : action === "left" ? -dx : action === "down" ? dy : -dy;
+    const across = action === "left" || action === "right" ? Math.abs(dy) : Math.abs(dx);
+    if (along <= 1) continue;
+    const score = along + across * 3;
+    if (!best || score < best.score) best = { score, node };
+  }
+  if (best) focusControl(best.node);
+  return Boolean(best);
+}
+
+function focusedManagedGame() {
+  const card = document.activeElement?.closest?.("[data-managed]") || navState.focused?.closest?.("[data-managed]");
+  if (!card || !managedLibrary) return null;
+  return managedLibrary.games.find((game) => game.id === card.dataset.managed) || null;
+}
+
+function dispatchNavigation(action) {
+  const typing = document.activeElement
+    && ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
+  if (action === "back") {
+    if (typing) { document.activeElement.blur(); return; }
+    if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
+    if (appView === "game") { setView("library"); return; }
+    if (navState.focused) navState.focused.classList.remove("nav-focus");
+    navState.focused = null;
+    document.activeElement?.blur?.();
+    return;
+  }
+  if (typing) return;
+  if (action === "select") {
+    const control = document.activeElement;
+    if (control && typeof control.click === "function" && !control.disabled) control.click();
+    else moveNavigation("next");
+    return;
+  }
+  if (action === "play") {
+    const game = focusedManagedGame();
+    if (game) { void startManagedGame(game, null); return; }
+    const play = document.querySelector("#managed-play, #home-play");
+    if (play && !play.disabled) play.click();
+    return;
+  }
+  if (action === "pageup" || action === "pagedown") {
+    if (hasManagedLibrary() && appView === "library") {
+      const pages = libraryPages();
+      libraryPage = action === "pagedown"
+        ? Math.min(pages, libraryPage + 1)
+        : Math.max(1, libraryPage - 1);
+      renderManagedLibrary();
+    } else {
+      window.scrollBy({ top: (action === "pagedown" ? 1 : -1) * window.innerHeight * 0.9 });
+    }
+    return;
+  }
+  moveNavigation(action);
+}
+
+function sampleGamepad(pressed, now) {
+  const directions = new Set(["left", "right", "up", "down"]);
+  const actions = [];
+  for (const action of [...pressed].sort()) {
+    if (!navState.held.has(action)) {
+      actions.push(action);
+      navState.nextRepeat.set(action, now + 400);
+    } else if (directions.has(action) && now >= (navState.nextRepeat.get(action) || now)) {
+      actions.push(action);
+      navState.nextRepeat.set(action, now + 160);
+    }
+  }
+  navState.held = new Set(pressed);
+  for (const action of [...navState.nextRepeat.keys()]) {
+    if (!pressed.has(action)) navState.nextRepeat.delete(action);
+  }
+  return actions;
+}
+
+function pollGamepad(now) {
+  requestAnimationFrame(pollGamepad);
+  if (!document.hasFocus()) {
+    navState.held = new Set();
+    navState.nextRepeat.clear();
+    return;
+  }
+  const gate = document.querySelector("#auth-gate");
+  if (gate && !gate.classList.contains("hidden")) {
+    navState.held = new Set();
+    navState.nextRepeat.clear();
+    return;
+  }
+  const pads = navigator.getGamepads ? [...navigator.getGamepads()] : [];
+  const pressed = new Set();
+  for (const pad of pads) {
+    if (!pad || !pad.connected) continue;
+    for (const [index, action] of GAMEPAD_ACTIONS) {
+      if (pad.buttons[index]?.pressed) pressed.add(action);
+    }
+    const [ax = 0, ay = 0] = pad.axes || [];
+    if (Math.abs(ax) > 0.5 || Math.abs(ay) > 0.5) {
+      pressed.add(Math.abs(ax) >= Math.abs(ay)
+        ? (ax > 0 ? "right" : "left")
+        : (ay > 0 ? "down" : "up"));
+    }
+  }
+  for (const action of sampleGamepad(pressed, now)) dispatchNavigation(action);
+}
+
 window.addEventListener("keydown", (event) => {
-  if (!hasManagedLibrary() || appView !== "library") return;
-  if (event.key !== "PageDown" && event.key !== "PageUp") return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  const action = NAV_ACTIONS[event.key];
+  if (!action) return;
+  const gate = document.querySelector("#auth-gate");
+  if (gate && !gate.classList.contains("hidden")) return;
+  const typing = event.target && ["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName);
+  if (typing && action === "select") return;
+  if (event.key === " " && typing) return;
   event.preventDefault();
-  const pages = libraryPages();
-  libraryPage = event.key === "PageDown"
-    ? Math.min(pages, libraryPage + 1)
-    : Math.max(1, libraryPage - 1);
-  renderManagedLibrary();
+  dispatchNavigation(action);
 });
+
+requestAnimationFrame(pollGamepad);
 
 async function boot() {
   try {
@@ -1460,82 +1698,314 @@ async function loadDoctor(target = null) {
   }
 }
 
-async function renderProfile(host) {
-  host.innerHTML = `<div class="status">Loading profile…</div>`;
+
+let settingsTab = "general";
+let settingsLibrary = null;
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function settingsRow(title, detail, control = "") {
+  return `<div class="settings-row"><div class="row-text"><strong>${escape(title)}</strong>${detail ? `<span>${escape(detail)}</span>` : ""}</div><div class="row-control">${control}</div></div>`;
+}
+
+function settingsStatusBadge(status) {
+  const cls = status === "ok" ? " ok" : status === "error" || status === "warning" ? " error" : "";
+  return `<span class="settings-badge${cls}">${escape(status)}</span>`;
+}
+
+function settingsPage() {
+  return document.querySelector("#settings-page");
+}
+
+async function openSettingsPage() {
+  document.body.classList.add("settings-open");
+  settingsPage().classList.remove("hidden");
+  await renderSettingsPage();
+  const activeTab = settingsPage().querySelector(".settings-tab.active");
+  if (activeTab) focusControl(activeTab);
+}
+
+function closeSettingsPage() {
+  const page = settingsPage();
+  if (page) page.classList.add("hidden");
+  document.body.classList.remove("settings-open");
+  if (navState.focused) navState.focused.classList.remove("nav-focus");
+  navState.focused = null;
+}
+
+async function refreshSettingsLibrary() {
+  try { settingsLibrary = await invoke("library_snapshot"); }
+  catch (_error) { settingsLibrary = null; }
+  return settingsLibrary;
+}
+
+async function renderSettingsPage() {
+  const page = settingsPage();
+  if (!page) return;
+  for (const tab of page.querySelectorAll("[data-settings-tab]")) {
+    tab.classList.toggle("active", tab.dataset.settingsTab === settingsTab);
+  }
+  const body = page.querySelector("#settings-body");
+  body.innerHTML = '<div class="settings-loading">Loading…</div>';
   try {
-    const auth = await invoke("profile_status");
-    host.innerHTML = auth.authenticated
-      ? `<div class="label">Signed in as</div><div class="profile-email">${escape(auth.email || "SteamTron account")}</div><p class="muted">Session expires ${auth.expires_at ? new Date(auth.expires_at * 1000).toLocaleString() : "later"}.</p><div class="profile-actions"><button class="danger" id="signout">Sign out</button></div>`
-      : `<div class="label">SteamTron account</div><p class="muted">Sign in to add games and download manifests.</p><div class="profile-actions"><button class="primary" id="signin">Sign in</button></div>`;
-    const signin = host.querySelector("#signin");
-    const signout = host.querySelector("#signout");
-    if (signin) signin.onclick = async () => {
-      signin.disabled = true;
-      host.innerHTML = `<div class="status">Complete sign-in in your browser…</div>`;
-      try { await invoke("profile_login"); hideAuthGate(); await boot(); await renderProfile(host); }
-      catch (error) { host.innerHTML = `<div class="status error">${escape(error)}</div>`; }
-    };
-    if (signout) signout.onclick = async () => {
-      const stop = busy(signout, "Signing out…");
-      try { await invoke("profile_logout"); stop(); showAuthGate("Signed out. Sign in to continue."); }
-      catch (error) { stop(); host.innerHTML = `<div class="status error">${escape(error)}</div>`; }
-    };
+    if (settingsTab === "general") await renderGeneralSettings(body);
+    else if (settingsTab === "storage") await renderStorageSettings(body);
+    else await renderProtonSettings(body);
   } catch (error) {
-    host.innerHTML = `<div class="status error">${escape(error)}</div>`;
+    body.innerHTML = `<div class="status error">${escape(error)}</div>`;
   }
 }
 
-function renderSettingsMessage(message, isError = false) {
-  const node = document.querySelector("#settings-content .settings-message");
-  if (node) { node.textContent = message; node.classList.toggle("error", isError); }
-}
+async function renderGeneralSettings(host) {
+  const [snapshot, diagnostics, profile, version] = await Promise.all([
+    invoke("library_snapshot").catch(() => null),
+    invoke("diagnostics_summary").catch(() => null),
+    invoke("profile_status").catch(() => null),
+    invoke("app_version").catch(() => ""),
+  ]);
+  settingsLibrary = snapshot;
+  const settings = snapshot?.settings || {};
+  const mode = settings.default_display_mode || "desktop";
+  const gamemode = settings.gamemode !== false;
+  const email = profile?.email || (profile?.authenticated ? "Signed in" : "Signed out");
+  const activity = diagnostics
+    ? `${diagnostics.games} games · ${diagnostics.files} files · ${formatBytes(diagnostics.bytes)}`
+    : "Unavailable";
+  host.innerHTML = `
+    <section class="settings-section"><h2>Display mode</h2><p>Default mode applies on the next app start. Enter fullscreen from the mode button; leave through fullscreen options or the tray.</p><div class="settings-card">
+      ${settingsRow("Default launch mode", "Desktop or fullscreen when a game starts.", `<select id="setting-display-mode"><option value="desktop"${mode === "desktop" ? " selected" : ""}>Desktop</option><option value="fullscreen"${mode === "fullscreen" ? " selected" : ""}>Fullscreen</option></select>`)}
+      ${settingsRow("Feral GameMode", "Automatically optimize CPU governor, GPU performance, and process priorities while gaming, then revert on exit.", `<label class="switch"><input type="checkbox" id="setting-gamemode"${gamemode ? " checked" : ""}><span></span></label>`)}
+    </div></section>
+    <section class="settings-section"><h2>Account</h2><p>Session used for manifests, library actions and Steam registration.</p><div class="settings-card">
+      ${settingsRow(email, profile?.base_url || "SteamTron account", '<button id="setting-signout">Sign out</button>')}
+    </div></section>
+    <section class="settings-section"><h2>Maintenance</h2><p>Library backup, restore and desktop integration.</p><div class="settings-card">
+      <div class="settings-row"><div class="row-text"><strong>Library metadata</strong><span>Back up or restore Lua manifests, appmanifests and fixes.</span></div><div class="row-control settings-inline"><button id="setting-backup">Backup…</button><button id="setting-restore">Restore…</button></div></div>
+      ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
+      ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
+    </div></section>
+    <section class="settings-section"><h2>Steam diagnostics</h2><p>Validate Steam, fixes and the registration backend.</p><div class="settings-card">
+      ${settingsRow("Doctor", "Checks Steam, the Lua folder, fixes and the registration backend.", '<button id="setting-doctor-run">Run checks</button>')}
+      <div id="setting-doctor-results"></div>
+    </div></section>
+    <section class="settings-section"><h2>Diagnostic logs</h2><p>One local folder per game. Completed logs: 8 MiB per file, 100 MiB total, 14-day retention. Cleanup runs before and after launches; active logs are never cleared.</p><div class="settings-card">
+      ${settingsRow("Activity", activity, '<button id="setting-open-logs">Open logs folder</button>')}
+      <button id="setting-clear-logs" class="danger-row">Clear all diagnostic logs</button>
+    </div></section>
+    <p class="settings-version">SteamTron ${escape(version)}</p>`;
 
-function renderSettings() {
-  detailEl.innerHTML = `<div class="doctor-head"><div><h2>Settings</h2><p class="muted">Account and Steam diagnostics.</p></div><div class="update-actions"><button id="settings-backup">Backup library</button><button id="settings-restore">Restore backup</button><button id="settings-shortcut">Install desktop shortcut</button><button id="settings-restart">Restart Steam</button></div></div><div class="settings-tabs"><button class="settings-tab active" id="tab-profile">Profile</button><button class="settings-tab" id="tab-doctor">Doctor</button></div><div id="settings-content"><div class="settings-message status"></div><div id="settings-panel"></div></div>`;
-  const panel = detailEl.querySelector("#settings-panel");
-  const profileTab = detailEl.querySelector("#tab-profile");
-  const doctorTab = detailEl.querySelector("#tab-doctor");
-  const settingsRestart = detailEl.querySelector("#settings-restart");
-  settingsRestart.onclick = () => restartSteam(settingsRestart);
-  const settingsBackup = detailEl.querySelector("#settings-backup");
-  settingsBackup.onclick = async () => {
-    const stop = busy(settingsBackup, "Backing up…");
+  host.querySelector("#setting-display-mode").onchange = async (event) => {
+    try {
+      await invoke("update_library_settings", { defaultDisplayMode: event.target.value });
+      showToast(`Default launch mode: ${event.target.value}`);
+    } catch (error) { showToast(String(error), true); }
+  };
+  host.querySelector("#setting-gamemode").onchange = async (event) => {
+    try {
+      await invoke("update_library_settings", { gamemode: event.target.checked });
+      showToast(event.target.checked ? "GameMode optimization enabled" : "GameMode optimization disabled");
+    } catch (error) { showToast(String(error), true); }
+  };
+  host.querySelector("#setting-signout").onclick = async () => {
+    try {
+      await invoke("profile_logout");
+      closeSettingsPage();
+      showAuthGate("Signed out. Sign in to continue.");
+    } catch (error) { showToast(String(error), true); }
+  };
+  host.querySelector("#setting-backup").onclick = async (event) => {
+    const stop = busy(event.target, "Backing up…");
     try {
       const result = await invoke("export_backup");
       stop();
-      if (!result) { renderSettingsMessage("Backup cancelled."); return; }
-      renderSettingsMessage(`Backup written: ${result.path} (${result.games} games, ${result.files} files).`);
-    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+      if (!result) { showToast("Backup cancelled."); return; }
+      showToast(`Backup written: ${result.path} (${result.games} games, ${result.files} files)`);
+    } catch (error) { stop(); showToast(String(error), true); }
   };
-  const settingsRestore = detailEl.querySelector("#settings-restore");
-  settingsRestore.onclick = async () => {
-    if (!window.confirm("Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest, and fixes files may be overwritten.")) return;
-    const stop = busy(settingsRestore, "Restoring…");
+  host.querySelector("#setting-restore").onclick = async (event) => {
+    if (!window.confirm("Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest and fixes files may be overwritten.")) return;
+    const stop = busy(event.target, "Restoring…");
     try {
       const result = await invoke("restore_backup");
       stop();
-      if (!result) { renderSettingsMessage("Restore cancelled."); return; }
+      if (!result) { showToast("Restore cancelled."); return; }
       markRestartRequired("Library metadata restored. Start Steam to apply the restored files.");
       await load();
-      renderSettingsMessage(`Restored ${result.games} games (${result.lua_files} Lua, ${result.appmanifests} appmanifest, ${result.fixes} fixes).`);
-    } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+      showToast(`Restored ${result.games} games (${result.lua_files} Lua, ${result.appmanifests} appmanifest, ${result.fixes} fixes)`);
+    } catch (error) { stop(); showToast(String(error), true); }
   };
-  const settingsShortcut = detailEl.querySelector("#settings-shortcut");
-  settingsShortcut.onclick = async () => {
-    const stop = busy(settingsShortcut, "Installing…");
-    try { const path = await invoke("install_desktop_entry"); stop(); renderSettingsMessage(`Desktop shortcut installed: ${path}. Pin SteamTron from the application menu.`); }
-    catch (error) { stop(); renderSettingsMessage(String(error), true); }
+  host.querySelector("#setting-shortcut").onclick = async (event) => {
+    const stop = busy(event.target, "Installing…");
+    try {
+      const path = await invoke("install_desktop_entry");
+      stop();
+      showToast(`Desktop shortcut installed: ${path}`);
+    } catch (error) { stop(); showToast(String(error), true); }
   };
-  const select = (active) => {
-    profileTab.classList.toggle("active", active === "profile");
-    doctorTab.classList.toggle("active", active === "doctor");
+  host.querySelector("#setting-restart").onclick = () => restartSteam(host.querySelector("#setting-restart"));
+  host.querySelector("#setting-open-logs").onclick = async () => {
+    if (!diagnostics?.path) return;
+    try { await invoke("open_path", { path: diagnostics.path }); }
+    catch (error) { showToast(String(error), true); }
   };
-  profileTab.onclick = () => { select("profile"); renderProfile(panel); };
-  doctorTab.onclick = () => { select("doctor"); loadDoctor(panel); };
-  select("profile");
-  renderProfile(panel);
+  host.querySelector("#setting-clear-logs").onclick = async (event) => {
+    if (!window.confirm("Clear all diagnostic logs? Active logs are kept.")) return;
+    const stop = busy(event.target, "Clearing…");
+    try {
+      const result = await invoke("clear_diagnostics");
+      stop();
+      showToast(`Cleared ${result.removed_files} files (${formatBytes(result.removed_bytes)})`);
+      await renderSettingsPage();
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  host.querySelector("#setting-doctor-run").onclick = async (event) => {
+    const stop = busy(event.target, "Checking…");
+    try {
+      const report = await invoke("doctor_report");
+      stop();
+      const rows = (report.checks || []).map((check) =>
+        `<div class="settings-row"><div class="row-text"><strong>${escape(check.title)}</strong><span>${escape(check.detail)}</span></div><div class="row-control">${settingsStatusBadge(check.status)}</div></div>`
+      ).join("");
+      host.querySelector("#setting-doctor-results").innerHTML = rows || '<div class="settings-row"><div class="row-text"><span>No checks reported.</span></div></div>';
+      showToast(report.healthy ? "Steam checks passed" : "Steam checks need attention", !report.healthy);
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
 }
 
+async function renderStorageSettings(host) {
+  const snapshot = await refreshSettingsLibrary();
+  const drives = snapshot?.drives || [];
+  const games = snapshot?.games || [];
+  const libraryPath = snapshot?.path || "";
+  const dataDir = libraryPath.replace(/\/[^/]+$/, "");
+  const gamesOn = (drive) => games.filter((game) => {
+    const root = game.installation?.root || "";
+    return root === drive.root || root.startsWith(`${drive.root.replace(/\/+$/, "")}/`);
+  }).length;
+  const rows = drives.map((drive) => settingsRow(
+    `${drive.label || drive.id}${drive.default ? " · Default" : ""}`,
+    `${drive.root} · ${gamesOn(drive)} game${gamesOn(drive) === 1 ? "" : "s"}`,
+    `<button data-open-drive="${escape(drive.root)}">Open</button>${drive.default ? "" : `<button data-default-drive="${escape(drive.id)}">Make default</button>`}`,
+  )).join("");
+  host.innerHTML = `
+    <section class="settings-section"><h2>Drives</h2><p>Game content, prefixes and fixes live under <code>SteamTronLibrary/steamtronapps</code> on each drive. Adding a drive never moves existing games.</p><div class="settings-card">
+      ${rows || '<div class="settings-row"><div class="row-text"><span>No drives registered yet.</span></div></div>'}
+      <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted drive or folder for new games.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
+    </div></section>
+    <section class="settings-section"><h2>Data folder</h2><p>Library index, tools, diagnostics and launch state for this installation.</p><div class="settings-card">
+      ${settingsRow("SteamTron data", dataDir || "Unavailable", `<button id="setting-open-data">Open folder</button>`)}
+      ${settingsRow("Library file", libraryPath || "Unavailable", "")}
+    </div></section>`;
+
+  for (const button of host.querySelectorAll("[data-open-drive]")) {
+    button.onclick = async () => {
+      try { await invoke("open_path", { path: button.dataset.openDrive }); }
+      catch (error) { showToast(String(error), true); }
+    };
+  }
+  for (const button of host.querySelectorAll("[data-default-drive]")) {
+    button.onclick = async () => {
+      try {
+        await invoke("set_default_library_drive", { id: button.dataset.defaultDrive });
+        await load();
+        await renderSettingsPage();
+        showToast("Default drive updated");
+      } catch (error) { showToast(String(error), true); }
+    };
+  }
+  const add = host.querySelector("#setting-add-drive");
+  if (add) add.onclick = async () => {
+    const stop = busy(add, "Choosing…");
+    try {
+      const result = await invoke("add_library_drive");
+      stop();
+      if (!result) return;
+      managedLibrary = result;
+      await renderSettingsPage();
+      showToast("Drive added");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  const openData = host.querySelector("#setting-open-data");
+  if (openData) openData.onclick = async () => {
+    try { await invoke("open_path", { path: dataDir }); }
+    catch (error) { showToast(String(error), true); }
+  };
+}
+
+async function renderProtonSettings(host) {
+  const data = await invoke("proton_runners").catch(() => ({ runners: [], default: "" }));
+  const runners = data.runners || [];
+  const defaultPath = data.default || "";
+  const options = runners.map((runner) =>
+    `<option value="${escape(runner.path)}"${runner.path === defaultPath ? " selected" : ""}>${escape(runner.name)}</option>`
+  ).join("");
+  const rows = runners.map((runner) => settingsRow(
+    runner.name,
+    `${runner.path} · ${runner.source}${runner.exists ? "" : " · missing"}`,
+    `${runner.path === defaultPath ? "" : `<button data-use-runner="${escape(runner.path)}">Use</button>`}${runner.source === "custom" ? `<button data-remove-runner="${escape(runner.path)}">Remove</button>` : ""}`,
+  )).join("");
+  host.innerHTML = `
+    <section class="settings-section"><h2>Default Proton runner</h2><p>Used for new managed games unless a game overrides it.</p><div class="settings-card">
+      <div class="settings-row"><div class="row-text"><strong>Default runner</strong><span>${escape(defaultPath || "Not selected")}</span></div><div class="row-control"><select id="setting-default-runner">${options || '<option value="">No runners found</option>'}</select></div></div>
+    </div></section>
+    <section class="settings-section"><h2>Runners</h2><p>Detected from Steam and UmuTron, plus folders you add.</p><div class="settings-card">
+      ${rows || '<div class="settings-row"><div class="row-text"><span>No Proton runners detected.</span></div></div>'}
+      <div class="settings-row"><div class="row-text"><strong>Add runner</strong><span>Choose a Proton folder or the proton executable.</span></div><div class="row-control"><button id="setting-add-runner">Add runner…</button></div></div>
+    </div></section>`;
+
+  const select = host.querySelector("#setting-default-runner");
+  select.onchange = async () => {
+    if (!select.value) return;
+    try {
+      await invoke("set_default_proton_runner", { path: select.value });
+      await renderSettingsPage();
+      showToast("Default Proton runner updated");
+    } catch (error) { showToast(String(error), true); }
+  };
+  for (const button of host.querySelectorAll("[data-use-runner]")) {
+    button.onclick = async () => {
+      try {
+        await invoke("set_default_proton_runner", { path: button.dataset.useRunner });
+        await renderSettingsPage();
+        showToast("Default Proton runner updated");
+      } catch (error) { showToast(String(error), true); }
+    };
+  }
+  for (const button of host.querySelectorAll("[data-remove-runner]")) {
+    button.onclick = async () => {
+      try {
+        await invoke("remove_proton_runner", { path: button.dataset.removeRunner });
+        await renderSettingsPage();
+        showToast("Runner removed");
+      } catch (error) { showToast(String(error), true); }
+    };
+  }
+  host.querySelector("#setting-add-runner").onclick = async (event) => {
+    const stop = busy(event.target, "Choosing…");
+    try {
+      const result = await invoke("add_proton_runner");
+      stop();
+      if (!result) return;
+      await renderSettingsPage();
+      showToast("Proton runner added");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+}
+
+for (const tab of document.querySelectorAll("[data-settings-tab]")) {
+  tab.onclick = () => {
+    settingsTab = tab.dataset.settingsTab;
+    void renderSettingsPage();
+  };
+}
+document.querySelector("#settings-close").onclick = closeSettingsPage;
 
 async function showManagedAddGame() {
   try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { /* keep the last snapshot */ }
@@ -1729,7 +2199,7 @@ window.addEventListener("focus", async () => {
   if (appView === "library" || appView === "home") renderManagedMode();
 });
 document.querySelector("#add-game").onclick = () => { if (hasManagedLibrary()) showManagedAddGame(); else showAddGame(); };
-document.querySelector("#settings").onclick = renderSettings;
+document.querySelector("#settings").onclick = openSettingsPage;
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = () => { if (hasManagedLibrary()) renderManagedList(); else renderGames(); };
 document.querySelector("#restart-banner-button").onclick = (event) => restartSteam(event.currentTarget);

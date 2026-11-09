@@ -1972,6 +1972,304 @@ fn remove_managed_fixes(game_id: String) -> Result<steamtron_library::managed::F
     steamtron_library::managed::remove_fixes(&game_id).map_err(|error| error.to_string())
 }
 
+
+fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value {
+    serde_json::json!({
+        "path": library.path().display().to_string(),
+        "settings": library.settings(),
+        "drives": library.drives(),
+        "games": library.games(),
+    })
+}
+
+fn diagnostics_totals(root: &std::path::Path) -> (u64, u64) {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(meta) = entry.metadata() {
+                files += 1;
+                bytes += meta.len();
+            }
+        }
+    }
+    (files, bytes)
+}
+
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_owned()
+}
+
+#[tauri::command]
+fn update_library_settings(
+    default_display_mode: Option<String>,
+    gamemode: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    if let Some(mode) = default_display_mode {
+        if mode != "desktop" && mode != "fullscreen" {
+            return Err("display mode must be desktop or fullscreen".into());
+        }
+        library.settings_mut().default_display_mode = mode;
+    }
+    if let Some(gamemode) = gamemode {
+        library.settings_mut().gamemode = gamemode;
+    }
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!(library.settings()))
+}
+
+#[tauri::command]
+fn add_library_drive() -> Result<Option<serde_json::Value>, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let Some(root) = rfd::FileDialog::new()
+        .set_title("Choose a drive or folder for SteamTron games")
+        .pick_folder()
+    else {
+        return Ok(None);
+    };
+    let label = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Drive")
+        .to_owned();
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    library
+        .add_drive(&root, label, library.drives().is_empty())
+        .map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(Some(library_json(&library)))
+}
+
+#[tauri::command]
+fn set_default_library_drive(id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    library
+        .set_default_drive(&id)
+        .map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(library_json(&library))
+}
+
+#[tauri::command]
+fn diagnostics_summary() -> Result<serde_json::Value, String> {
+    let root = steamtron_core::paths::layout().diagnostics();
+    let games = std::fs::read_dir(&root)
+        .map(|entries| entries.flatten().filter(|entry| entry.path().is_dir()).count())
+        .unwrap_or(0);
+    let (files, bytes) = diagnostics_totals(&root);
+    Ok(serde_json::json!({
+        "path": root.display().to_string(),
+        "games": games,
+        "files": files,
+        "bytes": bytes,
+    }))
+}
+
+#[tauri::command]
+fn clear_diagnostics() -> Result<serde_json::Value, String> {
+    let root = steamtron_core::paths::layout().diagnostics();
+    let (files, bytes) = diagnostics_totals(&root);
+    if root.exists() {
+        std::fs::remove_dir_all(&root)
+            .map_err(|error| format!("{}: {error}", root.display()))?;
+    }
+    std::fs::create_dir_all(&root).map_err(|error| format!("{}: {error}", root.display()))?;
+    Ok(serde_json::json!({ "removed_files": files, "removed_bytes": bytes }))
+}
+
+fn runner_entry(path: &std::path::Path, source: &str) -> serde_json::Value {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| *name != "proton")
+        .map(str::to_owned)
+        .or_else(|| {
+            path.parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| path.display().to_string());
+    serde_json::json!({
+        "path": path.display().to_string(),
+        "name": name,
+        "source": source,
+        "exists": path.exists(),
+    })
+}
+
+fn detect_proton_runners() -> Vec<serde_json::Value> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut runners = Vec::new();
+    let mut push = |path: std::path::PathBuf, source: &str| {
+        if seen.insert(path.clone()) {
+            runners.push(runner_entry(&path, source));
+        }
+    };
+    if let Ok(libraries) = steam::libraries() {
+        for library in libraries {
+            let common = library.join("common");
+            if let Ok(entries) = std::fs::read_dir(&common) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                    if !name.contains("proton") {
+                        continue;
+                    }
+                    let runner = path.join("proton");
+                    if runner.is_file() {
+                        push(runner, "steam");
+                    }
+                }
+            }
+        }
+    }
+    let umutron = steamtron_core::paths::layout()
+        .data_home
+        .join("umutron/proton-manager/runners");
+    if let Ok(entries) = std::fs::read_dir(&umutron) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let runner = path.join("proton");
+                if runner.is_file() {
+                    push(runner, "umutron");
+                }
+            } else if path.is_file() {
+                push(path, "umutron");
+            }
+        }
+    }
+    runners
+}
+
+fn proton_runners_json() -> serde_json::Value {
+    use steamtron_core::library::Library;
+    let settings = Library::load()
+        .map(|library| library.settings().clone())
+        .unwrap_or_default();
+    let mut detected = detect_proton_runners();
+    for runner in &settings.proton_runners {
+        if !detected.iter().any(|entry| entry["path"] == runner.as_str()) {
+            detected.push(runner_entry(std::path::Path::new(runner), "custom"));
+        }
+    }
+    serde_json::json!({
+        "runners": detected,
+        "default": settings.default_proton,
+    })
+}
+
+#[tauri::command]
+fn proton_runners() -> serde_json::Value {
+    proton_runners_json()
+}
+
+#[tauri::command]
+fn add_proton_runner() -> Result<Option<serde_json::Value>, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose a Proton runner")
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let runner = if path.join("proton").is_file() {
+        path.join("proton")
+    } else {
+        path
+    };
+    if !runner.is_file() {
+        return Err(format!("not a Proton runner: {}", runner.display()));
+    }
+    let value = runner.display().to_string();
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    {
+        let settings = library.settings_mut();
+        if !settings.proton_runners.contains(&value) {
+            settings.proton_runners.push(value.clone());
+        }
+        if settings.default_proton.is_empty() {
+            settings.default_proton = value;
+        }
+    }
+    library.save().map_err(|error| error.to_string())?;
+    Ok(Some(proton_runners_json()))
+}
+
+#[tauri::command]
+fn set_default_proton_runner(path: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let runner = std::path::Path::new(&path);
+    if !runner.exists() {
+        return Err(format!("runner does not exist: {path}"));
+    }
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    library.settings_mut().default_proton = path;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(proton_runners_json())
+}
+
+#[tauri::command]
+fn remove_proton_runner(path: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    {
+        let settings = library.settings_mut();
+        settings.proton_runners.retain(|runner| runner != &path);
+        if settings.default_proton == path {
+            settings.default_proton.clear();
+        }
+    }
+    library.save().map_err(|error| error.to_string())?;
+    Ok(proton_runners_json())
+}
+
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let target = std::path::Path::new(&path);
+    if !target.is_dir() {
+        return Err(format!("folder does not exist: {path}"));
+    }
+    #[cfg(target_os = "linux")]
+    let mut command = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut command = std::process::Command::new("explorer");
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    return Err("opening folders is not supported on this platform".into());
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        command
+            .arg(target)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not open {}: {error}", target.display()))?;
+        Ok(())
+    }
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2166,6 +2464,17 @@ fn main() {
             play_managed,
             reconcile_registrations,
             quit_app,
+            app_version,
+            update_library_settings,
+            add_library_drive,
+            set_default_library_drive,
+            diagnostics_summary,
+            clear_diagnostics,
+            proton_runners,
+            add_proton_runner,
+            set_default_proton_runner,
+            remove_proton_runner,
+            open_path,
             running_managed,
             stop_managed,
             managed_fixes,

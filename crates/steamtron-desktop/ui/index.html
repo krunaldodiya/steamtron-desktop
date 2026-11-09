@@ -44,6 +44,18 @@
     <button id="restart-banner-dismiss" class="banner-dismiss" aria-label="Dismiss">×</button>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="settings-page" class="settings-page hidden" role="dialog" aria-modal="true" aria-label="Settings">
+    <header class="settings-topbar">
+      <div class="settings-search-icon" aria-hidden="true">⌕</div>
+      <nav class="settings-tabs" aria-label="Settings sections">
+        <button class="settings-tab active" data-settings-tab="general">General</button>
+        <button class="settings-tab" data-settings-tab="storage">Storage</button>
+        <button class="settings-tab" data-settings-tab="proton">Proton Manager</button>
+      </nav>
+      <button id="settings-close" class="settings-close" aria-label="Close settings">×</button>
+    </header>
+    <div class="settings-scroll"><div id="settings-body"></div></div>
+  </div>
   <main class="layout">
     <aside class="panel library-panel">
       <div class="library-toolbar">

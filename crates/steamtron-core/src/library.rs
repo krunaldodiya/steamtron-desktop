@@ -220,6 +220,10 @@ pub struct LibrarySettings {
     pub default_display_mode: String,
     #[serde(default = "default_true")]
     pub gamemode: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proton_runners: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_proton: String,
     #[serde(default)]
     pub picker_folders: BTreeMap<String, String>,
 }
@@ -233,6 +237,8 @@ impl Default for LibrarySettings {
         Self {
             default_display_mode: default_display_mode(),
             gamemode: true,
+            proton_runners: Vec::new(),
+            default_proton: String::new(),
             picker_folders: BTreeMap::new(),
         }
     }
@@ -410,6 +416,16 @@ impl Library {
         Ok(())
     }
 
+    pub fn set_default_drive(&mut self, id: &str) -> Result<(), LibraryError> {
+        if !self.drives.iter().any(|drive| drive.id == id) {
+            return Err(LibraryError::Invalid(format!("unknown drive: {id}")));
+        }
+        for drive in &mut self.drives {
+            drive.default = drive.id == id;
+        }
+        Ok(())
+    }
+
     pub fn save(&self) -> Result<(), LibraryError> {
         let document = Document {
             version: LIBRARY_VERSION,
@@ -522,6 +538,25 @@ pub fn game_layout(drive_root: &Path, game: &Game) -> Result<GameLayout, Library
 fn validate(settings: &LibrarySettings, drives: &[Drive], games: &[Game]) -> Result<(), LibraryError> {
     if settings.default_display_mode != "desktop" && settings.default_display_mode != "fullscreen" {
         return Err(LibraryError::Invalid("invalid default display mode".into()));
+    }
+    if settings.proton_runners.len() > 32 {
+        return Err(LibraryError::Invalid("too many Proton runners".into()));
+    }
+    for runner in &settings.proton_runners {
+        let path = Path::new(runner);
+        if runner.len() > 4096 || !path.is_absolute() || has_parent(path) {
+            return Err(LibraryError::Invalid(format!(
+                "invalid Proton runner path: {runner}"
+            )));
+        }
+    }
+    if !settings.default_proton.is_empty() {
+        let path = Path::new(&settings.default_proton);
+        if !path.is_absolute() || has_parent(path) {
+            return Err(LibraryError::Invalid(
+                "default Proton runner must be an absolute path".into(),
+            ));
+        }
     }
     if settings.picker_folders.len() > 64 {
         return Err(LibraryError::Invalid("too many remembered picker folders".into()));
@@ -769,6 +804,23 @@ mod tests {
         assert!(safe_folder("   ").is_err());
     }
 
+
+
+    #[test]
+    fn default_drive_is_unique() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut library = Library::open(temp.path().join("library.json")).unwrap();
+        assert!(library.add_drive("/mnt/one", "one", true).is_ok());
+        assert!(library.add_drive("/mnt/two", "two", false).is_ok());
+        let second = library.drives()[1].id.clone();
+        library.set_default_drive(&second).unwrap();
+        assert_eq!(
+            library.drives().iter().filter(|drive| drive.default).count(),
+            1
+        );
+        assert_eq!(library.default_drive().unwrap().id, second);
+        assert!(library.set_default_drive("missing").is_err());
+    }
 
     #[test]
     fn drive_root_is_found_for_both_library_names() {
