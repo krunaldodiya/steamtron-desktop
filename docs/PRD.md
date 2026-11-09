@@ -5,7 +5,13 @@ Version: 0.1
 Last updated: 2026-11-03
 
 This document is the source of truth for product scope, platform decisions, and
-development conventions. If an implementation conflicts with this document,
+development conventions.
+
+> 2026-11-09 — Steam-agnostic migration: the desktop app moves to a managed,
+> Steam-free library (runtime adapters, GoldBerg, Steamless) while keeping the
+> Steam client path as an optional integration. See
+> [`UMUTRON-TO-STEAMTRON-MIGRATION-PRD.md`](UMUTRON-TO-STEAMTRON-MIGRATION-PRD.md).
+> That document is the source of truth for the migration phases and contracts. If an implementation conflicts with this document,
 either fix the implementation or amend the document with a dated decision.
 
 ## 1. Purpose
