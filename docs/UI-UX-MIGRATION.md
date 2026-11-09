@@ -231,3 +231,10 @@ screen using real commands with fixtures where the backend is pending.
   show `Play via Steam`; Play verifies the registration first and explains
   missing registrations with a Doctor pointer.
 
+## Setup status
+
+- Entries without a launch target show the setup form (executable picker,
+  arguments, optional Proton runner) instead of a disabled Play button.
+- Saving validates containment and existence, stores the primary target and
+  re-renders the preview with Play enabled.
+

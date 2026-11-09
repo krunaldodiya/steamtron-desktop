@@ -323,6 +323,44 @@ function managedDetails(game) {
   </div>`;
 }
 
+function managedSetupMarkup(game) {
+  return `<div class="status" id="managed-setup"><div class="row"><div class="label">Launch target</div><div class="value">Not configured</div></div><label for="managed-exe">Executable</label><div class="search-row"><input id="managed-exe" placeholder="Game.exe"><button id="managed-exe-browse">Browse…</button></div><label for="managed-args">Arguments</label><input id="managed-args" placeholder="-windowed (space separated)"><label for="managed-proton">Proton runner (optional)</label><input id="managed-proton" value="${escape(game.launch?.proton || "")}"><div class="update-actions"><button class="primary" id="managed-setup-save">Save setup</button></div></div>`;
+}
+
+async function wireManagedSetup(game) {
+  const host = detailEl.querySelector("#managed-setup");
+  if (!host) return;
+  const exeInput = host.querySelector("#managed-exe");
+  const argsInput = host.querySelector("#managed-args");
+  const protonInput = host.querySelector("#managed-proton");
+  host.querySelector("#managed-exe-browse").onclick = async () => {
+    try {
+      const path = await invoke("pick_managed_executable", { gameId: game.id });
+      if (path) exeInput.value = path;
+    } catch (error) { showToast(String(error), true); }
+  };
+  host.querySelector("#managed-setup-save").onclick = async () => {
+    const executable = exeInput.value.trim();
+    if (!executable) { showToast("Choose the game executable first.", true); return; }
+    const button = host.querySelector("#managed-setup-save");
+    const stop = busy(button, "Saving…");
+    try {
+      const result = await invoke("set_managed_launch_target", { request: {
+        game_id: game.id,
+        executable,
+        arguments: argsInput.value.trim().split(/\s+/).filter(Boolean),
+        proton: protonInput.value.trim(),
+        name: "",
+      } });
+      showToast(`Launch target saved: ${result.name}`);
+      renderManagedMode();
+    } catch (error) {
+      showToast(String(error), true);
+      stop();
+    }
+  };
+}
+
 async function loadManagedFixes(gameId) {
   const host = detailEl.querySelector("#managed-fixes");
   if (!host) return;
@@ -364,8 +402,9 @@ function renderManagedPreview(game) {
   const action = running
     ? '<button id="managed-stop" class="primary">Stop</button>'
     : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
-  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target || steamMode ? "" : '<span class="muted">No launch target yet.</span>'}${steamMode ? '<span class="muted">Steam client required</span>' : ""}</div></div></div>${managedDetails(game)}<div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>`;
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target || steamMode ? "" : '<span class="muted">No launch target yet.</span>'}${steamMode ? '<span class="muted">Steam client required</span>' : ""}</div></div></div>${managedDetails(game)}${target ? "" : managedSetupMarkup(game)}<div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>`;
   void loadManagedFixes(game.id);
+  void wireManagedSetup(game);
   const play = detailEl.querySelector("#managed-play");
   if (play && canPlay) {
     play.onclick = async () => {

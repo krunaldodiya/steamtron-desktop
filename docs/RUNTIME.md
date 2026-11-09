@@ -112,3 +112,26 @@ steamtron-overlay managed fixes remove 3468650
 Verified end-to-end in the isolated tree: install wrote `fix.dll` and
 `readme.txt`, the view listed both, and remove deleted the folder.
 
+## Setup for newly added games
+
+A game added by the managed flow has no launch target yet. Setup records one:
+
+- executable must exist and live inside the game folder (relative paths are
+  joined to the root; absolute paths are checked for containment);
+- arguments are stored verbatim;
+- an optional Proton runner must exist and becomes `launch.proton` +
+  `installation.proton`.
+
+Desktop: the managed preview shows the setup form (Browse uses a native picker)
+until a target exists; Play turns on after saving.
+
+CLI:
+
+```bash
+steamtron-overlay managed setup 3468650 --executable "<root>/Game.exe" \
+  --proton /path/to/proton "--arguments=-windowed"
+```
+
+Verified: add → Play refuses without a target → setup → dry-run plan contains
+`waitforexitandrun`, the executable and both arguments → real spawn logged.
+

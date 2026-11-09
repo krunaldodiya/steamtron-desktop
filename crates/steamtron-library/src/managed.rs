@@ -212,6 +212,102 @@ pub fn remove_fixes(game_id: &str) -> Result<FixesRemoved, LibraryError> {
     remove_fixes_at(game_id, &Library::default_path())
 }
 
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SetTargetRequest {
+    pub game_id: String,
+    pub executable: PathBuf,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    #[serde(default)]
+    pub proton: String,
+    #[serde(default)]
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct TargetReport {
+    pub game_id: String,
+    pub executable: String,
+    pub arguments: Vec<String>,
+    pub proton: String,
+    pub name: String,
+}
+
+/// Record the primary launch target for a managed game.
+pub fn set_launch_target_at(
+    request: SetTargetRequest,
+    library_path: &Path,
+) -> Result<TargetReport, LibraryError> {
+    let mut library =
+        Library::open(library_path).map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let game = library
+        .game(&request.game_id)
+        .cloned()
+        .ok_or_else(|| LibraryError::Invalid(format!("unknown game {}", request.game_id)))?;
+    let root = &game.installation.root;
+    let executable = if request.executable.is_absolute() {
+        request.executable.clone()
+    } else {
+        root.join(&request.executable)
+    };
+    if !executable.is_file() {
+        return Err(LibraryError::Invalid(format!(
+            "executable does not exist: {}",
+            executable.display()
+        )));
+    }
+    if !executable.starts_with(root) {
+        return Err(LibraryError::Invalid(
+            "executable must be inside the game folder".into(),
+        ));
+    }
+    if !request.proton.trim().is_empty() && !Path::new(request.proton.trim()).exists() {
+        return Err(LibraryError::Invalid(format!(
+            "Proton runner does not exist: {}",
+            request.proton.trim()
+        )));
+    }
+    let name = if request.name.trim().is_empty() {
+        executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Game")
+            .to_owned()
+    } else {
+        request.name.trim().to_owned()
+    };
+    let mut updated = game;
+    updated.launch_targets = vec![steamtron_core::library::LaunchTarget {
+        id: "t1".into(),
+        name: name.clone(),
+        executable: executable.clone(),
+        arguments: request.arguments.clone(),
+        primary: true,
+    }];
+    if !request.proton.trim().is_empty() {
+        updated.launch.proton = request.proton.trim().to_owned();
+        updated.installation.proton = request.proton.trim().to_owned();
+    }
+    library
+        .upsert_game(updated)
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    library
+        .save()
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    Ok(TargetReport {
+        game_id: request.game_id,
+        executable: executable.display().to_string(),
+        arguments: request.arguments,
+        proton: request.proton.trim().to_owned(),
+        name,
+    })
+}
+
+pub fn set_launch_target(request: SetTargetRequest) -> Result<TargetReport, LibraryError> {
+    set_launch_target_at(request, &Library::default_path())
+}
+
 /// Steam client route: the game needs an App ID and a verified registration.
 pub fn steam_ready(game: &Game, backend: &dyn RegistrationBackend) -> Result<u32, LibraryError> {
     let app_id = game
@@ -603,6 +699,62 @@ mod tests {
 
 
 
+
+
+    #[test]
+    fn records_a_launch_target_inside_the_game_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 42,
+                title: "Sample".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                provider: ManifestProvider::SteamMl,
+                proton: String::new(),
+            },
+            sample_bundle("42"),
+            &backend,
+            &library_path,
+        )
+        .unwrap();
+        let game = Library::open(&library_path).unwrap().game("42").unwrap().clone();
+        std::fs::create_dir_all(&game.installation.root).unwrap();
+        std::fs::write(game.installation.root.join("game.exe"), b"MZ").unwrap();
+
+        let report = set_launch_target_at(
+            SetTargetRequest {
+                game_id: "42".into(),
+                executable: PathBuf::from("game.exe"),
+                arguments: vec!["-windowed".into()],
+                proton: String::new(),
+                name: String::new(),
+            },
+            &library_path,
+        )
+        .unwrap();
+        assert!(report.executable.ends_with("game.exe"));
+        let stored = Library::open(&library_path).unwrap().game("42").unwrap().clone();
+        assert_eq!(stored.launch_targets.len(), 1);
+        assert!(stored.launch_targets[0].primary);
+        assert_eq!(stored.launch_targets[0].arguments, vec!["-windowed"]);
+
+        let outside = set_launch_target_at(
+            SetTargetRequest {
+                game_id: "42".into(),
+                executable: temp.path().join("outside.exe"),
+                arguments: Vec::new(),
+                proton: String::new(),
+                name: String::new(),
+            },
+            &library_path,
+        );
+        assert!(outside.is_err());
+    }
 
     #[test]
     fn installs_lists_and_removes_managed_fixes() {

@@ -1918,6 +1918,33 @@ fn stop_managed(game_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn pick_managed_executable(game_id: String) -> Result<Option<String>, String> {
+    use steamtron_core::library::Library;
+
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("Unknown game {game_id}"))?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose the game executable")
+        .set_directory(&game.installation.root)
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+fn set_managed_launch_target(
+    request: steamtron_library::managed::SetTargetRequest,
+) -> Result<steamtron_library::managed::TargetReport, String> {
+    require_auth()?;
+    steamtron_library::managed::set_launch_target(request)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn managed_fixes(game_id: String) -> Result<steamtron_library::managed::FixesView, String> {
     steamtron_library::managed::fixes_view(&game_id).map_err(|error| error.to_string())
 }
@@ -2138,6 +2165,8 @@ fn main() {
             managed_fixes,
             install_managed_fixes,
             remove_managed_fixes,
+            pick_managed_executable,
+            set_managed_launch_target,
             registration_verify,
             library_import_preview,
             library_import_commit,

@@ -125,6 +125,16 @@ enum ManagedCommand {
         #[command(subcommand)]
         command: ManagedFixesCommand,
     },
+    /// Record the game executable and runner for Play.
+    Setup {
+        game_id: String,
+        #[arg(long)]
+        executable: PathBuf,
+        #[arg(long)]
+        proton: Option<String>,
+        #[arg(long, value_delimiter = ' ')]
+        arguments: Vec<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -295,6 +305,23 @@ fn main() -> Result<()> {
                             proton: proton.unwrap_or_default(),
                         },
                         &backend,
+                    )?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                ManagedCommand::Setup {
+                    game_id,
+                    executable,
+                    proton,
+                    arguments,
+                } => {
+                    let report = steamtron_library::managed::set_launch_target(
+                        steamtron_library::managed::SetTargetRequest {
+                            game_id,
+                            executable,
+                            arguments,
+                            proton: proton.unwrap_or_default(),
+                            name: String::new(),
+                        },
                     )?;
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 }
