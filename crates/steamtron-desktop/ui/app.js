@@ -611,7 +611,8 @@ function setView(view) {
     button.setAttribute("aria-current", navView === name ? "page" : "false");
   }
   if (view === "store") {
-    void renderManagedStore();
+    if (!storeTried && !storeLoading) void refreshStore(true);
+    else renderStorePage();
     return;
   }
   if (hasManagedLibrary()) {
@@ -998,6 +999,11 @@ function dispatchNavigation(action, fromGamepad = false) {
     return;
   }
   if (action === "pageup" || action === "pagedown") {
+    if (appView === "store") {
+      const next = action === "pagedown" ? Math.min(storePages, storePage + 1) : Math.max(1, storePage - 1);
+      if (next !== storePage) { storePage = next; void refreshStore(false); }
+      return;
+    }
     if (hasManagedLibrary() && appView === "library") {
       const pages = libraryPages();
       libraryPage = action === "pagedown"
@@ -2303,64 +2309,139 @@ for (const tab of document.querySelectorAll("[data-settings-tab]")) {
 document.querySelector("#settings-close").onclick = closeSettingsPage;
 
 let storeQuery = "";
-let storeResults = [];
+let storeGenre = "";
+let storeSort = "popular";
+let storePage = 1;
+let storePages = 1;
+let storeTotal = 0;
+let storeItems = [];
+let storeGenres = [];
+let storeLoading = false;
+let storeError = "";
+let storeTried = false;
+let storeRecent = (() => { try { return JSON.parse(localStorage.getItem("steamtron.storeRecent.v1") || "[]"); } catch (_error) { return []; } })();
 
-function renderStoreResults() {
-  const host = detailEl.querySelector("#store-results");
-  if (!host) return;
-  if (!storeResults.length) {
-    host.innerHTML = '<div class="status">No matching Steam results.</div>';
-    return;
-  }
-  host.innerHTML = `<div class="store-grid">${storeResults.map((result) => `
-    <button class="store-card" data-store-app="${escape(result.appid)}">
-      <span class="store-cover">${result.image ? `<img data-store-image="${escape(result.image)}" alt="">` : ""}</span>
-      <span class="store-title">${escape(result.name)}</span>
-      <span class="store-meta">App ${escape(result.appid)}${result.installed ? " · In library" : ""}</span>
-    </button>`).join("")}</div>`;
-  for (const card of host.querySelectorAll("[data-store-app]")) {
-    card.onclick = () => {
-      const result = storeResults.find((item) => item.appid === card.dataset.storeApp);
-      if (!result) return;
-      if (result.installed) { showToast("This game is already in your library."); return; }
-      void showManagedAddGame({ app_id: Number(result.appid), title: result.name });
-    };
-  }
-  for (const image of host.querySelectorAll("img[data-store-image]")) {
-    image.src = image.dataset.storeImage;
+function saveStoreRecent() {
+  try { localStorage.setItem("steamtron.storeRecent.v1", JSON.stringify(storeRecent)); } catch (_error) { /* ignore */ }
+}
+
+function rememberStoreItem(item) {
+  storeRecent = [item, ...storeRecent.filter((entry) => entry.id !== item.id)].slice(0, 12);
+  saveStoreRecent();
+}
+
+function storeCard(item) {
+  const cover = item.images?.portrait || "";
+  return `<button class="cover-card" data-store-id="${escape(String(item.id))}" title="${escape(item.name)}">
+    <span class="cover">${cover ? `<img loading="lazy" data-store-cover="${escape(cover)}" alt="">` : ""}<span class="play-glyph" aria-hidden="true">▶</span></span>
+    <span class="cover-title">${escape(item.name)}</span>
+  </button>`;
+}
+
+function hydrateStoreCovers(host) {
+  for (const image of host.querySelectorAll("img[data-store-cover]")) {
+    image.src = image.dataset.storeCover;
     image.addEventListener("error", () => {
       const frame = image.parentElement;
       image.remove();
-      if (frame) frame.classList.add("missing");
+      if (frame) frame.classList.add("cover-missing");
     });
   }
 }
 
-async function renderManagedStore() {
-  detailEl.innerHTML = `<div class="page store-page">
-    <header class="page-head"><h1>Discover your next game</h1><p>Search the Steam catalogue, then add a title to your library.</p></header>
-    <div class="library-search"><input id="store-search" placeholder="Search by game name, App ID, or Steam URL" value="${escape(storeQuery)}" aria-label="Search the Steam catalogue"><button id="store-search-button">Search</button></div>
-    <div id="store-results" class="store-results">${storeResults.length ? "" : '<div class="status">Search the Steam catalogue to find a game.</div>'}</div>
-  </div>`;
-  const input = detailEl.querySelector("#store-search");
-  const button = detailEl.querySelector("#store-search-button");
-  const run = async () => {
-    storeQuery = input.value.trim();
-    if (!storeQuery) return;
-    const stop = busy(button, "Searching…");
-    detailEl.querySelector("#store-results").innerHTML = '<div class="status">Searching Steam…</div>';
-    try {
-      storeResults = await invoke("search_games", { query: storeQuery });
-      renderStoreResults();
-    } catch (error) {
-      detailEl.querySelector("#store-results").innerHTML = `<div class="status error">${escape(String(error))}</div>`;
-    } finally {
-      stop();
+function openStoreItem(id) {
+  const item = [...storeItems, ...storeRecent].find((entry) => String(entry.id) === String(id));
+  if (!item) return;
+  rememberStoreItem(item);
+  if (item.steam_app_id) {
+    void showManagedAddGame({ app_id: item.steam_app_id, title: item.name });
+  } else {
+    showToast("This title has no Steam App ID and cannot be added to the managed library.");
+  }
+}
+
+async function refreshStore(resetPage = false) {
+  if (resetPage) storePage = 1;
+  storeLoading = true;
+  storeError = "";
+  storeTried = true;
+  try {
+    if (!storeGenres.length) {
+      try { storeGenres = await invoke("store_genres"); } catch (_error) { storeGenres = []; }
     }
-  };
-  button.onclick = run;
+    const data = await invoke("store_catalog", {
+      query: storeQuery,
+      genre: storeGenre,
+      sort: storeSort,
+      page: storePage,
+    });
+    storeItems = data.items || [];
+    storePage = data.page || storePage;
+    storePages = data.total_pages || 1;
+    storeTotal = data.total_items || 0;
+  } catch (error) {
+    storeError = String(error);
+    storeItems = [];
+  }
+  storeLoading = false;
+  renderStorePage();
+}
+
+function renderStorePage() {
+  const genreOptions = storeGenres.map((genre) =>
+    `<option value="${escape(String(genre.id))}"${String(genre.id) === storeGenre ? " selected" : ""}>${escape(genre.name)}</option>`
+  ).join("");
+  const sortOptions = [["popular", "Most popular"], ["rating", "Top rated"], ["latest", "Newest"], ["name_asc", "A–Z"], ["name_desc", "Z–A"]]
+    .map(([value, label]) => `<option value="${value}"${value === storeSort ? " selected" : ""}>${label}</option>`)
+    .join("");
+  const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : `${storeTotal ? storeTotal.toLocaleString() : storeItems.length} games · page ${storePage} of ${storePages}`;
+  detailEl.innerHTML = `<div class="page store-page">
+    <header class="page-head"><h1>Discover your next game</h1><p>Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
+    <div class="store-toolbar">
+      <input id="store-search" placeholder="Search the catalogue" value="${escape(storeQuery)}" aria-label="Search the catalogue">
+      <button id="store-search-button">Search</button>
+      <select id="store-genre" aria-label="Genre"><option value="">All genres</option>${genreOptions}</select>
+      <select id="store-sort" aria-label="Sort">${sortOptions}</select>
+    </div>
+    <p class="library-count">${escape(count)}</p>
+    ${storeRecent.length ? `<section class="managed-rail"><div class="rail-head"><h2>Recently viewed</h2></div><div class="rail-scroll" id="store-recent">${storeRecent.map(storeCard).join("")}</div></section>` : ""}
+    <div id="store-results" class="cover-grid store-grid">
+      ${storeError
+        ? `<div class="status error">${escape(storeError)}</div><button id="store-retry">Retry</button>`
+        : storeItems.map(storeCard).join("")}
+    </div>
+    <nav class="pager" aria-label="Store pages">
+      <button data-store-page="first"${storePage === 1 ? " disabled" : ""}>First</button>
+      <button data-store-page="prev"${storePage === 1 ? " disabled" : ""}>Previous</button>
+      <span class="pager-page">${storePage}</span>
+      <button data-store-page="next"${storePage === storePages ? " disabled" : ""}>Next</button>
+      <button data-store-page="last"${storePage === storePages ? " disabled" : ""}>Last</button>
+    </nav>
+    <p class="pager-hint">Page ${storePage} of ${storePages} · PgUp / PgDn</p>
+  </div>`;
+
+  const input = detailEl.querySelector("#store-search");
+  const run = () => { storeQuery = input.value.trim(); void refreshStore(true); };
+  detailEl.querySelector("#store-search-button").onclick = run;
   input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
-  if (storeResults.length) renderStoreResults();
+  detailEl.querySelector("#store-genre").onchange = (event) => { storeGenre = event.target.value; void refreshStore(true); };
+  detailEl.querySelector("#store-sort").onchange = (event) => { storeSort = event.target.value; void refreshStore(true); };
+  const retry = detailEl.querySelector("#store-retry");
+  if (retry) retry.onclick = () => { void refreshStore(false); };
+  for (const button of detailEl.querySelectorAll("[data-store-page]")) {
+    button.onclick = () => {
+      const action = button.dataset.storePage;
+      if (action === "first") storePage = 1;
+      else if (action === "prev") storePage = Math.max(1, storePage - 1);
+      else if (action === "next") storePage = Math.min(storePages, storePage + 1);
+      else storePage = storePages;
+      void refreshStore(false);
+    };
+  }
+  for (const card of detailEl.querySelectorAll("[data-store-id]")) {
+    card.onclick = () => openStoreItem(card.dataset.storeId);
+  }
+  hydrateStoreCovers(detailEl);
 }
 
 async function showManagedAddGame(prefill = {}) {

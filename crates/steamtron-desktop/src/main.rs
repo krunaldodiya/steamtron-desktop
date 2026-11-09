@@ -2344,6 +2344,61 @@ async fn managed_artwork(game_id: String) -> Result<serde_json::Value, String> {
     }))
 }
 
+
+async fn store_get(path: &str, query: &[(&str, String)]) -> Result<serde_json::Value, String> {
+    let token = steamtron_auth::access_token();
+    if token.is_empty() {
+        return Err("Sign in to browse the Store.".into());
+    }
+    let base = steamtron_auth::api_base();
+    let response = reqwest::Client::new()
+        .get(format!("{base}{path}"))
+        .query(query)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err("The Store rejected this session. Sign in again.".into());
+    }
+    if !status.is_success() {
+        return Err(format!("Store returned HTTP {status}"));
+    }
+    response.json().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn store_genres() -> Result<serde_json::Value, String> {
+    store_get("/v1/genres", &[]).await
+}
+
+#[tauri::command]
+async fn store_catalog(
+    query: String,
+    genre: Option<String>,
+    sort: Option<String>,
+    page: u32,
+) -> Result<serde_json::Value, String> {
+    let genre = genre.unwrap_or_default();
+    let mut params = vec![
+        ("q", query),
+        ("genre", genre),
+        ("page", page.max(1).to_string()),
+    ];
+    if let Some(sort) = sort.filter(|value| !value.is_empty()) {
+        params.push(("sort", sort));
+    }
+    store_get("/v1/games", &params).await
+}
+
+#[tauri::command]
+async fn store_game(id: u64) -> Result<serde_json::Value, String> {
+    store_get(&format!("/v1/games/{id}"), &[]).await
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2539,6 +2594,9 @@ fn main() {
             reconcile_registrations,
             quit_app,
             managed_artwork,
+            store_genres,
+            store_catalog,
+            store_game,
             app_details,
             app_version,
             update_library_settings,
