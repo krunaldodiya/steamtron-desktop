@@ -430,3 +430,7 @@ body.store-open { overflow:hidden; }
 .store-body { min-height:0; }
 .store-content { min-height:0; overflow-y:auto; padding-right:10px; scrollbar-width:thin; }
 .store-sidebar { position:static; }
+
+.fullscreen-options { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
+.fullscreen-options button { width:100%; padding:12px 16px; }
+body.fullscreen-mode .topbar { padding:10px 20px; }

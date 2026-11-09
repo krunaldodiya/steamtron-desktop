@@ -2465,6 +2465,30 @@ async fn store_game(id: u64) -> Result<serde_json::Value, String> {
     store_get(&format!("/v1/games/{id}"), &[]).await
 }
 
+
+fn main_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    use tauri::Manager;
+    app.get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())
+}
+
+#[tauri::command]
+fn fullscreen_state(app: tauri::AppHandle) -> Result<bool, String> {
+    main_window(&app)?
+        .is_fullscreen()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn toggle_fullscreen(app: tauri::AppHandle) -> Result<bool, String> {
+    let window = main_window(&app)?;
+    let current = window.is_fullscreen().map_err(|error| error.to_string())?;
+    window
+        .set_fullscreen(!current)
+        .map_err(|error| error.to_string())?;
+    Ok(!current)
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2659,6 +2683,8 @@ fn main() {
             play_managed,
             reconcile_registrations,
             quit_app,
+            fullscreen_state,
+            toggle_fullscreen,
             managed_artwork,
             store_genres,
             store_cached_genres,

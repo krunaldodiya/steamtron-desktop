@@ -1016,6 +1016,7 @@ function dispatchNavigation(action, fromGamepad = false) {
     if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
     const modal = document.querySelector(".modal-backdrop");
     if (modal) { modal.remove(); return; }
+    if (document.body.classList.contains("fullscreen-mode")) { openFullscreenOptions(); return; }
     if (appView === "game") { setView("library"); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");
     navState.focused = null;
@@ -1084,6 +1085,7 @@ function sampleGamepad(pressed, now) {
 
 function pollGamepad(now) {
   requestAnimationFrame(pollGamepad);
+void refreshFullscreenState();
   if (!document.hasFocus()) {
     navState.held = new Set();
     navState.nextRepeat.clear();
@@ -1114,6 +1116,7 @@ function pollGamepad(now) {
 
 window.addEventListener("keydown", (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "F11") { event.preventDefault(); void toggleFullscreenMode(); return; }
   const action = NAV_ACTIONS[event.key];
   if (!action) return;
   const gate = document.querySelector("#auth-gate");
@@ -1182,6 +1185,52 @@ document.querySelector("#profile-logout").onclick = async () => {
 profileDialog.addEventListener("click", (event) => {
   if (event.target === profileDialog) closeProfileDialog();
 });
+
+function applyFullscreenState(fullscreen) {
+  document.body.classList.toggle("fullscreen-mode", fullscreen);
+  const button = document.querySelector("#window-mode");
+  if (button) {
+    const label = fullscreen ? "Exit fullscreen mode (F11)" : "Switch to fullscreen mode (F11)";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+}
+
+async function refreshFullscreenState() {
+  try { applyFullscreenState(await invoke("fullscreen_state")); }
+  catch (_error) { applyFullscreenState(false); }
+}
+
+async function toggleFullscreenMode() {
+  try { applyFullscreenState(await invoke("toggle_fullscreen")); }
+  catch (error) { showToast(String(error), true); }
+}
+
+function openFullscreenOptions() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal" style="max-width:380px">
+    <div class="modal-head"><h2>Fullscreen options</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <div class="fullscreen-options">
+      <button id="fullscreen-exit" class="primary">Exit fullscreen</button>
+      <button id="fullscreen-quit" class="danger">Exit SteamTron</button>
+    </div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const close = () => backdrop.remove();
+  backdrop.querySelector(".modal-close").onclick = close;
+  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  backdrop.querySelector("#fullscreen-exit").onclick = () => {
+    close();
+    void toggleFullscreenMode();
+  };
+  backdrop.querySelector("#fullscreen-quit").onclick = () => {
+    void invoke("quit_app").catch(() => window.close());
+  };
+  focusControl(backdrop.querySelector("#fullscreen-exit"));
+}
+
+document.querySelector("#window-mode").onclick = () => { void toggleFullscreenMode(); };
 
 async function boot() {
   try {
