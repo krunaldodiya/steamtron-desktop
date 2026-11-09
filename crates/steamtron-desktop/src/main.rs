@@ -2489,6 +2489,46 @@ fn toggle_fullscreen(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(!current)
 }
 
+
+#[tauri::command]
+fn set_ui_scale(app: tauri::AppHandle, scale: f64) -> Result<(), String> {
+    let scale = scale.clamp(0.5, 2.0);
+    main_window(&app)?
+        .set_zoom(scale)
+        .map_err(|error| error.to_string())
+}
+
+fn spawn_system(command: &str, args: &[&str]) -> Result<(), String> {
+    std::process::Command::new(command)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("could not run {command}: {error}"))
+}
+
+#[tauri::command]
+fn reboot_system() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    return spawn_system("systemctl", &["reboot"]);
+    #[cfg(target_os = "windows")]
+    return spawn_system("shutdown", &["/r", "/t", "0"]);
+    #[allow(unreachable_code)]
+    Err("reboot is not supported on this platform".into())
+}
+
+#[tauri::command]
+fn shutdown_system() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    return spawn_system("systemctl", &["poweroff"]);
+    #[cfg(target_os = "windows")]
+    return spawn_system("shutdown", &["/s", "/t", "0"]);
+    #[allow(unreachable_code)]
+    Err("shutdown is not supported on this platform".into())
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2685,6 +2725,9 @@ fn main() {
             quit_app,
             fullscreen_state,
             toggle_fullscreen,
+            set_ui_scale,
+            reboot_system,
+            shutdown_system,
             managed_artwork,
             store_genres,
             store_cached_genres,

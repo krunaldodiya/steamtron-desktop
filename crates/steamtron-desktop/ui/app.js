@@ -1086,6 +1086,7 @@ function sampleGamepad(pressed, now) {
 function pollGamepad(now) {
   requestAnimationFrame(pollGamepad);
 void refreshFullscreenState();
+void applyUiScale(uiScale, false);
   if (!document.hasFocus()) {
     navState.held = new Set();
     navState.nextRepeat.clear();
@@ -1206,20 +1207,54 @@ async function toggleFullscreenMode() {
   catch (error) { showToast(String(error), true); }
 }
 
+let uiScale = (() => {
+  const stored = parseFloat(localStorage.getItem("steamtron.uiScale.v1"));
+  return Number.isFinite(stored) && stored > 0 ? stored : 1;
+})();
+
+function uiScaleLabel() {
+  return Math.abs(uiScale - 1) < 0.001 ? "Auto" : `${Math.round(uiScale * 100)}%`;
+}
+
+async function applyUiScale(scale, persist = true) {
+  uiScale = Math.min(1.5, Math.max(0.75, Math.round(scale * 100) / 100));
+  try { await invoke("set_ui_scale", { scale: uiScale }); } catch (_error) { /* keep the label */ }
+  if (persist) {
+    try { localStorage.setItem("steamtron.uiScale.v1", String(uiScale)); } catch (_error) { /* ignore */ }
+  }
+  const label = document.querySelector("#fullscreen-scale-label");
+  if (label) label.textContent = `UI Scale: ${uiScaleLabel()}`;
+}
+
 function openFullscreenOptions() {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal" style="max-width:380px">
     <div class="modal-head"><h2>Fullscreen options</h2><button class="modal-close" aria-label="Close">×</button></div>
     <div class="fullscreen-options">
-      <button id="fullscreen-exit" class="primary">Exit fullscreen</button>
-      <button id="fullscreen-quit" class="danger">Exit SteamTron</button>
+      <button id="fullscreen-reboot">Reboot</button>
+      <button id="fullscreen-shutdown">Shutdown</button>
+      <button id="fullscreen-exit">Exit fullscreen</button>
+      <button id="fullscreen-quit">Exit</button>
+      <div class="fullscreen-scale">
+        <button id="fullscreen-scale-down" class="scale-button" aria-label="Decrease UI scale">−</button>
+        <span id="fullscreen-scale-label">UI Scale: ${uiScaleLabel()}</span>
+        <button id="fullscreen-scale-up" class="scale-button" aria-label="Increase UI scale">+</button>
+      </div>
     </div>
   </div>`;
   document.body.appendChild(backdrop);
   const close = () => backdrop.remove();
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  backdrop.querySelector("#fullscreen-reboot").onclick = async () => {
+    if (!window.confirm("Reboot the system? Save any work in other applications first.")) return;
+    try { await invoke("reboot_system"); } catch (error) { showToast(String(error), true); }
+  };
+  backdrop.querySelector("#fullscreen-shutdown").onclick = async () => {
+    if (!window.confirm("Shut down the system? Save any work in other applications first.")) return;
+    try { await invoke("shutdown_system"); } catch (error) { showToast(String(error), true); }
+  };
   backdrop.querySelector("#fullscreen-exit").onclick = () => {
     close();
     void toggleFullscreenMode();
@@ -1227,6 +1262,8 @@ function openFullscreenOptions() {
   backdrop.querySelector("#fullscreen-quit").onclick = () => {
     void invoke("quit_app").catch(() => window.close());
   };
+  backdrop.querySelector("#fullscreen-scale-down").onclick = () => { void applyUiScale(uiScale - 0.05); };
+  backdrop.querySelector("#fullscreen-scale-up").onclick = () => { void applyUiScale(uiScale + 0.05); };
   focusControl(backdrop.querySelector("#fullscreen-exit"));
 }
 
