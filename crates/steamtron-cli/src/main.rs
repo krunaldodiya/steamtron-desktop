@@ -8,7 +8,7 @@ use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
 use steamtron_doctor::run as run_doctor;
 use steamtron_overlay::{OverlayGame, PlatformOverlay};
-use steamtron_unlock::{UnlockBackend, platform_backend};
+use steamtron_register::{platform_backend, RegistrationBackend};
 
 #[derive(Debug, Parser)]
 #[command(name = "steamtron-overlay", version)]
@@ -56,6 +56,58 @@ enum CommandKind {
     Fixes {
         #[command(subcommand)]
         command: FixesCommand,
+    },
+    /// Register App IDs with the platform backend.
+    Register {
+        #[command(subcommand)]
+        command: RegisterCommand,
+    },
+    /// Add a game to the managed SteamTron library.
+    Managed {
+        #[command(subcommand)]
+        command: ManagedCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RegisterCommand {
+    /// Show the backend status.
+    Status,
+    /// Report whether one App ID is registered.
+    Verify {
+        appid: String,
+    },
+    /// Register one App ID from a Lua file.
+    Add {
+        appid: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        lua: PathBuf,
+    },
+    /// Remove one App ID registration.
+    Remove {
+        appid: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ManagedCommand {
+    /// Download a manifest, register it, and write the library entry.
+    Add {
+        appid: u32,
+        #[arg(long)]
+        title: Option<String>,
+        /// Drive root, e.g. /mnt/games
+        #[arg(long)]
+        drive: PathBuf,
+        #[arg(long)]
+        label: Option<String>,
+        /// api (signed in) or steamml (public)
+        #[arg(long, default_value = "steamml")]
+        provider: String,
+        #[arg(long)]
+        proton: Option<String>,
     },
 }
 
@@ -148,6 +200,74 @@ fn main() -> Result<()> {
                     game.build_id,
                     game.common.display()
                 );
+            }
+        }
+        CommandKind::Register { command } => {
+            let backend = platform_backend()?;
+            match command {
+                RegisterCommand::Status => {
+                    println!("{}", serde_json::to_string_pretty(&backend.status()?)?);
+                }
+                RegisterCommand::Verify { appid } => {
+                    println!("{}", serde_json::to_string_pretty(&backend.verify(&appid)?)?);
+                }
+                RegisterCommand::Add { appid, title, lua } => {
+                    let lua = std::fs::read_to_string(&lua)
+                        .with_context(|| format!("could not read {}", lua.display()))?;
+                    let title = title.unwrap_or_else(|| format!("Steam App {appid}"));
+                    let manifests = std::collections::BTreeMap::new();
+                    let request = steamtron_register::RegistrationRequest {
+                        app_id: &appid,
+                        title: &title,
+                        lua: &lua,
+                        manifests: &manifests,
+                    };
+                    let registration = backend.register(&request)?;
+                    let state = backend.verify(&appid)?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "backend": registration.backend,
+                            "lua": registration.lua_path.display().to_string(),
+                            "registered": state.registered,
+                        }))?
+                    );
+                }
+                RegisterCommand::Remove { appid } => {
+                    backend.unregister(&appid)?;
+                    println!("{}", serde_json::to_string_pretty(&backend.verify(&appid)?)?);
+                }
+            }
+        }
+        CommandKind::Managed { command } => {
+            let backend = platform_backend()?;
+            match command {
+                ManagedCommand::Add {
+                    appid,
+                    title,
+                    drive,
+                    label,
+                    provider,
+                    proton,
+                } => {
+                    let provider = match provider.as_str() {
+                        "api" => steamtron_library::managed::ManifestProvider::Api,
+                        "steamml" => steamtron_library::managed::ManifestProvider::SteamMl,
+                        other => anyhow::bail!("unknown provider {other}; use api or steamml"),
+                    };
+                    let report = steamtron_library::managed::add_managed_game(
+                        steamtron_library::managed::ManagedAddRequest {
+                            app_id: appid,
+                            title: title.unwrap_or_default(),
+                            drive_root: drive,
+                            drive_label: label.unwrap_or_default(),
+                            provider,
+                            proton: proton.unwrap_or_default(),
+                        },
+                        &backend,
+                    )?;
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
             }
         }
         CommandKind::Config { command } => {

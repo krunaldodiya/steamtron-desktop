@@ -1,5 +1,5 @@
 [package]
-name = "steamtron-unlock"
+name = "steamtron-register"
 version.workspace = true
 edition.workspace = true
 

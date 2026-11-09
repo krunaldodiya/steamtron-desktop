@@ -2,7 +2,7 @@
 members = [
     "crates/steamtron-overlay",
     "crates/steamtron-core",
-    "crates/steamtron-unlock",
+    "crates/steamtron-register",
     "crates/steamtron-doctor",
     "crates/steamtron-auth",
     "crates/steamtron-library",

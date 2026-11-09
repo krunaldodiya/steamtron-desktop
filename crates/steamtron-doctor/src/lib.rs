@@ -8,7 +8,7 @@ use std::process::Command;
 use serde::Serialize;
 use steamtron_core::config::Config;
 use steamtron_core::steam;
-use steamtron_unlock::{platform_backend, UnlockBackend};
+use steamtron_register::{platform_backend, RegistrationBackend};
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

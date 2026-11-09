@@ -12,12 +12,13 @@ use thiserror::Error;
 use zip::ZipArchive;
 
 use steamtron_core::steam;
-use steamtron_unlock::UnlockBackend;
+use steamtron_register::{RegistrationBackend, RegistrationRequest};
 
 pub mod updates;
+pub mod managed;
 pub mod backup;
 
-const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;
+pub(crate) const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum LibraryError {
@@ -43,6 +44,8 @@ pub enum LibraryError {
     },
     #[error("ZIP error: {0}")]
     Zip(#[from] zip::result::ZipError),
+    #[error("{0}")]
+    Invalid(String),
 }
 
 impl LibraryError {
@@ -343,7 +346,7 @@ pub fn repair_missing_appmanifests() -> Result<Vec<RepairedGame>, LibraryError> 
     Ok(repaired)
 }
 
-pub fn remove_game(appid: &str, backend: &dyn UnlockBackend) -> Result<RemovedGame, LibraryError> {
+pub fn remove_game(appid: &str, backend: &dyn RegistrationBackend) -> Result<RemovedGame, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
     }
@@ -396,7 +399,7 @@ pub fn remove_game(appid: &str, backend: &dyn UnlockBackend) -> Result<RemovedGa
     }
 
     if lua_path.exists() {
-        backend.remove_lua(appid).map_err(|error| LibraryError::Backend(error.to_string()))?;
+        backend.unregister(appid).map_err(|error| LibraryError::Backend(error.to_string()))?;
         removed.push(lua_path.display().to_string());
     }
 
@@ -600,7 +603,7 @@ fn non_windows_depots(appid: &str) -> Result<BTreeSet<String>, LibraryError> {
     Ok(result)
 }
 
-fn windows_only_lua(appid: &str, lua: &str) -> Result<String, LibraryError> {
+pub(crate) fn windows_only_lua(appid: &str, lua: &str) -> Result<String, LibraryError> {
     let blocked = non_windows_depots(appid)?;
     if blocked.is_empty() {
         return Ok(lua.to_owned());
@@ -627,7 +630,7 @@ pub fn add_bundle(
     appid: &str,
     title: &str,
     bundle: Bundle,
-    backend: &dyn UnlockBackend,
+    backend: &dyn RegistrationBackend,
 ) -> Result<AddedGame, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
@@ -654,9 +657,24 @@ pub fn add_bundle(
     // build. UmuTron-style Windows-only libraries must strip native Linux and
     // macOS depots from the provider Lua before Steam sees it.
     let lua = windows_only_lua(appid, &bundle.lua)?;
-    let installed = backend
-        .install_lua(appid, &lua, &bundle.manifests)
+    let request = RegistrationRequest {
+        app_id: appid,
+        title: &title,
+        lua: &lua,
+        manifests: &bundle.manifests,
+    };
+    let registration = backend
+        .register(&request)
         .map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let state = backend
+        .verify(appid)
+        .map_err(|error| LibraryError::Archive(error.to_string()))?;
+    if !state.registered {
+        return Err(LibraryError::Archive(format!(
+            "{} did not keep the registration for App {appid}",
+            backend.id()
+        )));
+    }
 
     let depots = parse_depots(&lua)?;
     let text = acf_text(appid, &title, &depots, &steamapps.join("common").join(&title));
@@ -676,8 +694,8 @@ pub fn add_bundle(
         title,
         library: steamapps.display().to_string(),
         appmanifest: acf.display().to_string(),
-        lua: installed.lua_path.display().to_string(),
-        manifests: installed.manifests.len(),
+        lua: registration.lua_path.display().to_string(),
+        manifests: registration.manifests.len(),
         pinned,
         pin_error,
     })
@@ -706,14 +724,14 @@ fn parse_depots(lua: &str) -> Result<BTreeMap<String, (String, u64)>, LibraryErr
     Ok(depots)
 }
 
-fn lua_declares_appid(lua: &str, appid: &str) -> bool {
+pub(crate) fn lua_declares_appid(lua: &str, appid: &str) -> bool {
     Regex::new(r"addappid\s*\(\s*(\d+)")
         .unwrap()
         .captures_iter(lua)
         .any(|captures| &captures[1] == appid)
 }
 
-fn sanitize_title(title: &str) -> String {
+pub(crate) fn sanitize_title(title: &str) -> String {
     let value: String = title
         .chars()
         .map(|character| match character {

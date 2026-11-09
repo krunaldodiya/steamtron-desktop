@@ -3940,7 +3940,7 @@ dependencies = [
  "steamtron-doctor",
  "steamtron-library",
  "steamtron-overlay",
- "steamtron-unlock",
+ "steamtron-register",
  "tauri",
  "tauri-build",
 ]
@@ -3951,7 +3951,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "steamtron-core",
- "steamtron-unlock",
+ "steamtron-register",
  "thiserror 2.0.21",
 ]
 
@@ -3966,7 +3966,7 @@ dependencies = [
  "serde_json",
  "steamtron-auth",
  "steamtron-core",
- "steamtron-unlock",
+ "steamtron-register",
  "tempfile",
  "thiserror 2.0.21",
  "zip",
@@ -3992,13 +3992,14 @@ dependencies = [
  "serde_json",
  "steamtron-core",
  "steamtron-doctor",
+ "steamtron-library",
  "steamtron-overlay",
- "steamtron-unlock",
+ "steamtron-register",
  "thiserror 2.0.21",
 ]
 
 [[package]]
-name = "steamtron-unlock"
+name = "steamtron-register"
 version = "0.1.0"
 dependencies = [
  "serde",

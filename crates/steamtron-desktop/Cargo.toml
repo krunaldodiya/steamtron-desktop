@@ -13,7 +13,7 @@ serde_json = "1"
 rfd = "0.15"
 steamtron-core = { path = "../steamtron-core" }
 steamtron-overlay = { path = "../steamtron-overlay" }
-steamtron-unlock = { path = "../steamtron-unlock" }
+steamtron-register = { path = "../steamtron-register" }
 steamtron-doctor = { path = "../steamtron-doctor" }
 steamtron-auth = { path = "../steamtron-auth" }
 steamtron-library = { path = "../steamtron-library" }

@@ -1,23 +1,24 @@
 //! Linux adapter for SLSsteam/Lumen.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    validate_appid, write_atomic, BackendStatus, InstalledLua, UnlockBackend, UnlockError,
+    validate_appid, write_atomic, write_manifests, BackendStatus, Registration, RegistrationBackend,
+    RegistrationError, RegistrationRequest, RegistrationState,
 };
 
 #[derive(Clone, Debug)]
-pub struct LinuxUnlock {
+pub struct SlsteamBackend {
     steam_root: PathBuf,
     data_home: PathBuf,
     config_home: PathBuf,
 }
 
-impl LinuxUnlock {
-    pub fn discover() -> Result<Self, UnlockError> {
-        let steam_root = steamtron_core::steam::steam_root().map_err(|_| UnlockError::SteamNotFound)?;
+impl SlsteamBackend {
+    pub fn discover() -> Result<Self, RegistrationError> {
+        let steam_root =
+            steamtron_core::steam::steam_root().map_err(|_| RegistrationError::SteamNotFound)?;
         let data_home = PathBuf::from(
             std::env::var_os("XDG_DATA_HOME")
                 .map(PathBuf::from)
@@ -73,10 +74,18 @@ impl LinuxUnlock {
     fn depotcache(&self) -> PathBuf {
         self.steam_root.join("steamapps/depotcache")
     }
+
+    fn lua_path(&self, appid: &str) -> PathBuf {
+        self.lua_dir().join(format!("{appid}.lua"))
+    }
 }
 
-impl UnlockBackend for LinuxUnlock {
-    fn status(&self) -> Result<BackendStatus, UnlockError> {
+impl RegistrationBackend for SlsteamBackend {
+    fn id(&self) -> &'static str {
+        "slssteam-moon"
+    }
+
+    fn status(&self) -> Result<BackendStatus, RegistrationError> {
         let sls = self.sls_root().join("SLSsteam.so");
         let lumen = self.lumen_root().join("lumen");
         let lua_dir = self.lua_dir();
@@ -89,7 +98,7 @@ impl UnlockBackend for LinuxUnlock {
         };
         Ok(BackendStatus {
             platform: "linux",
-            backend: "SLSsteam",
+            backend: self.id(),
             installed,
             ready,
             steam_root: self.steam_root.display().to_string(),
@@ -102,31 +111,18 @@ impl UnlockBackend for LinuxUnlock {
         })
     }
 
-    fn install_lua(
-        &self,
-        appid: &str,
-        lua: &str,
-        manifests: &BTreeMap<String, Vec<u8>>,
-    ) -> Result<InstalledLua, UnlockError> {
-        validate_appid(appid)?;
-        if lua.trim().is_empty() {
-            return Err(UnlockError::NotInstalled("empty Lua manifest".into()));
+    fn register(&self, request: &RegistrationRequest<'_>) -> Result<Registration, RegistrationError> {
+        validate_appid(request.app_id)?;
+        if request.lua.trim().is_empty() {
+            return Err(RegistrationError::NotInstalled("empty Lua manifest".into()));
         }
-        let lua_path = self.lua_dir().join(format!("{appid}.lua"));
-        write_atomic(&lua_path, lua.as_bytes(), 0o600)?;
+        let lua_path = self.lua_path(request.app_id);
+        write_atomic(&lua_path, request.lua.as_bytes(), 0o600)?;
         let store = self.manifest_store();
         let depotcache = self.depotcache();
-        let mut written = Vec::new();
-        for (name, data) in manifests {
-            if name.contains('/') || name.contains('\\') || !name.ends_with(".manifest") {
-                return Err(UnlockError::NotInstalled(format!(
-                    "invalid manifest name: {name}"
-                )));
-            }
-            let target = store.join(name);
-            write_atomic(&target, data, 0o600)?;
-            let cache = depotcache.join(name);
-            write_atomic(&cache, data, 0o600)?;
+        let mut written = write_manifests(&store, request.manifests)?;
+        written.extend(write_manifests(&depotcache, request.manifests)?);
+        for name in request.manifests.keys() {
             if let Some((depot, gid)) = name
                 .strip_suffix(".manifest")
                 .and_then(|value| value.split_once('_'))
@@ -136,20 +132,32 @@ impl UnlockBackend for LinuxUnlock {
                     write_atomic(&preferred, format!("{gid}\n").as_bytes(), 0o600)?;
                 }
             }
-            written.push(target);
         }
-        Ok(InstalledLua {
-            appid: appid.to_owned(),
+        Ok(Registration {
+            app_id: request.app_id.to_owned(),
+            title: request.title.to_owned(),
+            backend: self.id().to_owned(),
             lua_path,
             manifests: written,
         })
     }
 
-    fn remove_lua(&self, appid: &str) -> Result<(), UnlockError> {
-        validate_appid(appid)?;
-        let lua = self.lua_dir().join(format!("{appid}.lua"));
+    fn verify(&self, app_id: &str) -> Result<RegistrationState, RegistrationError> {
+        validate_appid(app_id)?;
+        let lua_path = self.lua_path(app_id);
+        Ok(RegistrationState {
+            app_id: app_id.to_owned(),
+            backend: self.id().to_owned(),
+            registered: lua_path.is_file(),
+            lua_path: lua_path.display().to_string(),
+        })
+    }
+
+    fn unregister(&self, app_id: &str) -> Result<(), RegistrationError> {
+        validate_appid(app_id)?;
+        let lua = self.lua_path(app_id);
         if lua.exists() {
-            fs::remove_file(&lua).map_err(|error| UnlockError::io(&lua, error))?;
+            fs::remove_file(&lua).map_err(|error| RegistrationError::io(&lua, error))?;
         }
         Ok(())
     }
@@ -158,22 +166,59 @@ impl UnlockBackend for LinuxUnlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
-    #[test]
-    fn writes_lua_and_manifests() {
+    fn backend() -> (tempfile::TempDir, SlsteamBackend) {
         let temp = tempfile::tempdir().unwrap();
         let steam = temp.path().join("Steam");
         let data = temp.path().join("data");
         fs::create_dir_all(steam.join("config")).unwrap();
-        let backend = LinuxUnlock::with_paths(&steam, &data);
+        let backend = SlsteamBackend::with_paths(&steam, &data);
+        (temp, backend)
+    }
+
+    #[test]
+    fn registers_verifies_and_removes_one_app() {
+        let (_temp, backend) = backend();
         let mut manifests = BTreeMap::new();
         manifests.insert("42_7.manifest".to_owned(), b"manifest".to_vec());
-        let result = backend
-            .install_lua("42", "addappid(42)\n", &manifests)
-            .unwrap();
+        let request = RegistrationRequest {
+            app_id: "42",
+            title: "Sample",
+            lua: "addappid(42, 1, \"key\")\n",
+            manifests: &manifests,
+        };
+        let result = backend.register(&request).unwrap();
+        assert_eq!(result.backend, "slssteam-moon");
         assert!(result.lua_path.is_file());
-        assert!(backend.lua_dir().join("42.lua").is_file());
         assert!(backend.manifest_store().join("42_7.manifest").is_file());
         assert!(backend.depotcache().join("42_7.manifest").is_file());
+        assert_eq!(backend.manifest_store().join(".preferred_42").is_file(), true);
+
+        let state = backend.verify("42").unwrap();
+        assert!(state.registered);
+
+        backend.unregister("42").unwrap();
+        assert!(!backend.verify("42").unwrap().registered);
+    }
+
+    #[test]
+    fn rejects_invalid_app_ids_and_empty_lua() {
+        let (_temp, backend) = backend();
+        let manifests = BTreeMap::new();
+        let invalid = RegistrationRequest {
+            app_id: "abc",
+            title: "Sample",
+            lua: "addappid(1)\n",
+            manifests: &manifests,
+        };
+        assert!(backend.register(&invalid).is_err());
+        let empty = RegistrationRequest {
+            app_id: "42",
+            title: "Sample",
+            lua: "  \n",
+            manifests: &manifests,
+        };
+        assert!(backend.register(&empty).is_err());
     }
 }

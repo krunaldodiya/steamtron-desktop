@@ -11,7 +11,7 @@ use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
 use steamtron_core::steam;
-use steamtron_unlock::{platform_backend, UnlockBackend};
+use steamtron_register::{platform_backend, RegistrationBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
 use steamtron_library::updates::{available_updates, clear_pin, pin_update, Updates};
@@ -342,7 +342,7 @@ async fn repair_steam_library() -> Result<String, String> {
     .map_err(|error| format!("Repair task failed: {error}"))?
 }
 
-fn unlock_backend() -> Result<impl UnlockBackend, String> {
+fn unlock_backend() -> Result<impl RegistrationBackend, String> {
     let backend = platform_backend().map_err(|error| error.to_string())?;
     let status = backend.status().map_err(|error| error.to_string())?;
     if !status.ready {
@@ -678,7 +678,7 @@ fn import_game_file(appid_or_url: String, title: String) -> Result<Option<AddedG
 }
 
 #[tauri::command]
-fn backend_status() -> Result<steamtron_unlock::BackendStatus, String> {
+fn backend_status() -> Result<steamtron_register::BackendStatus, String> {
     require_auth()?;
     platform_backend()
         .and_then(|backend| backend.status())
@@ -1656,6 +1656,34 @@ fn try_overlay_wrapper() -> Option<i32> {
     })
 }
 
+
+#[tauri::command]
+fn add_managed_game(
+    request: steamtron_library::managed::ManagedAddRequest,
+) -> Result<steamtron_library::managed::ManagedAdded, String> {
+    use steamtron_library::managed::ManifestProvider;
+
+    if request.provider == ManifestProvider::Api {
+        require_auth()?;
+    }
+    let backend = platform_backend().map_err(|error| error.to_string())?;
+    let status = backend.status().map_err(|error| error.to_string())?;
+    if !status.ready {
+        return Err(format!(
+            "Registration backend is not ready: {}. Open Settings → Doctor.",
+            status.details
+        ));
+    }
+    steamtron_library::managed::add_managed_game(request, &backend)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn registration_verify(appid: String) -> Result<steamtron_register::RegistrationState, String> {
+    let backend = platform_backend().map_err(|error| error.to_string())?;
+    backend.verify(&appid).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn library_snapshot() -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
@@ -1807,6 +1835,8 @@ fn main() {
             apply_launch_option,
             remove_fixes,
             library_snapshot,
+            add_managed_game,
+            registration_verify,
             library_import_preview,
             library_import_commit,
             library_remember_picker,
