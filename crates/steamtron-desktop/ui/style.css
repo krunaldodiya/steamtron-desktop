@@ -319,7 +319,7 @@ body.managed .topbar { position:sticky; top:0; z-index:20; background:rgba(13,18
 .managed-rail { margin-top:38px; padding:0 40px; }
 .rail-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
 .rail-head h2 { font-size:20px; }
-.rail-scroll { display:flex; gap:20px; overflow-x:auto; padding-bottom:8px; scrollbar-width:none; -ms-overflow-style:none; scroll-behavior:smooth; }
+.rail-scroll { display:flex; gap:20px; overflow-x:auto; padding-bottom:8px; scrollbar-width:none; -ms-overflow-style:none; scroll-behavior:auto; }
 .rail-scroll::-webkit-scrollbar { display:none; }
 .rail-scroll .cover-card { flex:0 0 136px; background:#141c26; }
 .rail-scroll .cover-card:hover { background:#1a2431; }
@@ -336,7 +336,7 @@ button.primary:hover { filter:brightness(1.06); }
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.cover-card.nav-focus { outline:none; }
+.cover-card.nav-focus, body.managed .cover-card:focus, body.managed .cover-card:focus-visible { outline:none; }
 
 
 /* Settings page (UmuTron-style full-screen overlay) */

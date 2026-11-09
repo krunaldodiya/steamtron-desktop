@@ -13,6 +13,7 @@ let managedLibrary = null;
 let managedSelectedId = null;
 let runningManaged = new Set();
 let libraryPage = 1;
+let homeFocusSection = "recent";
 let managedQuery = "";
 const LIBRARY_PAGE_SIZE = 60;
 let appView = "library";
@@ -283,10 +284,12 @@ function managedReady(game) {
   return Boolean(game.installation?.root);
 }
 
-function coverCard(game) {
+function coverCard(game, section) {
   const appId = game.metadata_app_id;
   const cover = appId ? coverUrl(appId) : "";
-  const active = game.id === managedSelectedId ? " active" : "";
+  const selected = game.id === managedSelectedId
+    && (!section || section === homeFocusSection);
+  const active = selected ? " active" : "";
   return `<button class="cover-card${active}" data-managed="${escape(game.id)}" title="${escape(game.title)}">
     <span class="cover">${cover ? `<img loading="lazy" src="${escape(cover)}" alt="">` : ""}<span class="play-glyph" aria-hidden="true">▶</span></span>
     <span class="cover-title">${escape(game.title)}</span>
@@ -314,7 +317,7 @@ function renderManagedLibrary() {
     <header class="page-head"><h1>Your library</h1><p>Every game, one place. Pick up where you left off.</p></header>
     <div class="library-search"><input id="managed-search" placeholder="Search your library" value="${escape(managedQuery)}" aria-label="Search your library"><button id="managed-search-button">Search</button></div>
     <p class="library-count">${escape(countText)}</p>
-    ${visible.length ? `<div class="cover-grid">${visible.map(coverCard).join("")}</div>` : '<div class="empty">No games match your search.</div>'}
+    ${visible.length ? `<div class="cover-grid">${visible.map((game) => coverCard(game)).join("")}</div>` : '<div class="empty">No games match your search.</div>'}
     <nav class="pager" aria-label="Library pages">
       <button data-page="first"${libraryPage === 1 ? " disabled" : ""}>First</button>
       <button data-page="prev"${libraryPage === 1 ? " disabled" : ""}>Previous</button>
@@ -502,12 +505,12 @@ function renderManagedHome() {
     </section>
     <section class="managed-rail" data-rail="recent">
       <div class="rail-head"><h2>Recently played</h2><span class="muted" id="home-counter">${railCounter}</span></div>
-      <div class="rail-scroll">${games.map(coverCard).join("")}</div>
+      <div class="rail-scroll">${games.map((game) => coverCard(game, "recent")).join("")}</div>
     </section>
     <section class="managed-rail" data-rail="setup">
       <div class="rail-head"><h2>Recently ready to play</h2></div>
       <p class="muted">Your ready games, newest completed setups first.</p>
-      ${installed.length ? `<div class="rail-scroll">${installed.map(coverCard).join("")}</div>` : '<div class="status">No installed games yet.</div>'}
+      ${installed.length ? `<div class="rail-scroll">${installed.map((game) => coverCard(game, "setup")).join("")}</div>` : '<div class="status">No installed games yet.</div>'}
     </section>
   </div>`;
   const play = detailEl.querySelector("#home-play");
@@ -643,7 +646,9 @@ function scrollControlIntoView(node) {
     if (horizontal.classList.contains("rail-scroll")) {
       // UmuTron keeps the focused card anchored at the rail start and slides
       // the row underneath it, so the outline stays put while cards move.
-      horizontal.scrollBy({ left: Math.round(rect.left - box.left), behavior: "smooth" });
+      // The adjustment is applied immediately; only the outline starts
+      // travelling right once the rail can no longer scroll.
+      horizontal.scrollBy({ left: Math.round(rect.left - box.left), behavior: "auto" });
     } else {
       let delta = 0;
       if (rect.left < box.left + margin) delta = rect.left - box.left - margin;
@@ -719,6 +724,15 @@ async function applyHeroDetails(game) {
   }
 }
 
+function setHomeSelection(section, id) {
+  homeFocusSection = section;
+  managedSelectedId = id;
+  for (const card of document.querySelectorAll(".home-page .cover-card")) {
+    const railSection = card.closest(".managed-rail")?.dataset.rail;
+    card.classList.toggle("active", card.dataset.managed === id && railSection === section);
+  }
+}
+
 function syncHomeHero(card) {
   if (!managedLibrary) return;
   const game = managedLibrary.games.find((item) => item.id === card.dataset.managed);
@@ -728,7 +742,7 @@ function syncHomeHero(card) {
   const cards = rail ? [...rail.querySelectorAll(".cover-card")] : [];
   const index = Math.max(1, cards.indexOf(card) + 1);
   const total = cards.length;
-  managedSelectedId = game.id;
+  setHomeSelection(railKind, game.id);
   const appId = game.metadata_app_id;
   const heroNode = document.querySelector("#home-hero");
   if (heroNode) {
