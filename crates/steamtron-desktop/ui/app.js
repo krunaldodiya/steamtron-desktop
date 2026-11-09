@@ -611,7 +611,7 @@ function setView(view) {
     button.setAttribute("aria-current", navView === name ? "page" : "false");
   }
   if (view === "store") {
-    if (!storeTried && !storeLoading) void refreshStore(true);
+    if (!storeTried && !storeLoading) void reloadStore(true);
     else renderStorePage();
     return;
   }
@@ -1001,7 +1001,7 @@ function dispatchNavigation(action, fromGamepad = false) {
   if (action === "pageup" || action === "pagedown") {
     if (appView === "store") {
       const next = action === "pagedown" ? Math.min(storePages, storePage + 1) : Math.max(1, storePage - 1);
-      if (next !== storePage) { storePage = next; void refreshStore(false); }
+      if (next !== storePage) { storePage = next; void reloadStore(false); }
       return;
     }
     if (hasManagedLibrary() && appView === "library") {
@@ -1919,6 +1919,7 @@ async function load() {
       document.body.classList.add("managed");
       renderManagedMode();
       void loadArtwork();
+      setTimeout(() => { void warmStore(); }, 1200);
       return true;
     }
     document.body.classList.remove("managed");
@@ -1927,6 +1928,7 @@ async function load() {
       detailTab = "general";
     }
     renderGames();
+    setTimeout(() => { void warmStore(); }, 1200);
     if (selected) {
       const game = games.find((item) => item.appid === selected);
       if (game) renderDetail(game, detailTab);
@@ -2360,31 +2362,77 @@ function openStoreItem(id) {
   }
 }
 
-async function refreshStore(resetPage = false) {
-  if (resetPage) storePage = 1;
-  storeLoading = true;
+function applyStorePage(data) {
+  storeItems = data.items || [];
+  storePage = data.page || storePage;
+  storePages = data.total_pages || 1;
+  storeTotal = data.total_items || 0;
+}
+
+async function fetchStoreNetwork() {
   storeError = "";
-  storeTried = true;
   try {
-    if (!storeGenres.length) {
-      try { storeGenres = await invoke("store_genres"); } catch (_error) { storeGenres = []; }
-    }
-    const data = await invoke("store_catalog", {
-      query: storeQuery,
-      genre: storeGenre,
-      sort: storeSort,
-      page: storePage,
-    });
-    storeItems = data.items || [];
-    storePage = data.page || storePage;
-    storePages = data.total_pages || 1;
-    storeTotal = data.total_items || 0;
+    const [genres, data] = await Promise.all([
+      storeGenres.length ? Promise.resolve(storeGenres) : invoke("store_genres").catch(() => storeGenres),
+      invoke("store_catalog", { query: storeQuery, genre: storeGenre, sort: storeSort, page: storePage }),
+    ]);
+    if (Array.isArray(genres) && genres.length) storeGenres = genres;
+    applyStorePage(data);
   } catch (error) {
     storeError = String(error);
-    storeItems = [];
   }
   storeLoading = false;
+  storeRefreshing = false;
+  storeTried = true;
+  if (appView === "store") renderStorePage();
+}
+
+async function paintStoreFromCache() {
+  const [cachedGenres, cachedPage] = await Promise.all([
+    storeGenres.length ? Promise.resolve(storeGenres) : invoke("store_cached_genres").catch(() => null),
+    invoke("store_cached_catalog", { query: storeQuery, genre: storeGenre, sort: storeSort, page: storePage }).catch(() => null),
+  ]);
+  if (Array.isArray(cachedGenres) && cachedGenres.length) storeGenres = cachedGenres;
+  if (cachedPage) {
+    applyStorePage(cachedPage);
+    storeLoading = false;
+    storeRefreshing = true;
+  }
+  return Boolean(cachedPage);
+}
+
+async function openStore() {
+  storeTried = true;
+  storeLoading = true;
+  await paintStoreFromCache();
   renderStorePage();
+  void fetchStoreNetwork();
+}
+
+async function reloadStore(resetPage = false) {
+  if (resetPage) storePage = 1;
+  storeLoading = true;
+  storeRefreshing = false;
+  const cached = await invoke("store_cached_catalog", {
+    query: storeQuery,
+    genre: storeGenre,
+    sort: storeSort,
+    page: storePage,
+  }).catch(() => null);
+  if (cached) {
+    applyStorePage(cached);
+    storeLoading = false;
+    storeRefreshing = true;
+  }
+  renderStorePage();
+  void fetchStoreNetwork();
+}
+
+async function warmStore() {
+  if (storeTried || storeLoading) return;
+  storeTried = true;
+  await paintStoreFromCache();
+  void fetchStoreNetwork();
 }
 
 function renderStorePage() {
@@ -2394,7 +2442,7 @@ function renderStorePage() {
   const sortOptions = [["popular", "Most popular"], ["rating", "Top rated"], ["latest", "Newest"], ["name_asc", "A–Z"], ["name_desc", "Z–A"]]
     .map(([value, label]) => `<button class="store-option${value === storeSort ? " selected" : ""}" data-store-sort="${value}">${label}</button>`)
     .join("");
-  const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : `${storeTotal ? storeTotal.toLocaleString() : storeItems.length} games · page ${storePage} of ${storePages}`;
+  const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : storeRefreshing ? "Saved catalogue · refreshing…" : `${storeTotal ? storeTotal.toLocaleString() : storeItems.length} games · page ${storePage} of ${storePages}`;
   detailEl.innerHTML = `<div class="page store-page">
     <header class="page-head"><h1>Discover your next game</h1><p>Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">
@@ -2417,7 +2465,9 @@ function renderStorePage() {
         <div id="store-results" class="cover-grid store-grid">
           ${storeError
             ? `<div class="status error">${escape(storeError)}</div><button id="store-retry">Retry</button>`
-            : storeItems.map(storeCard).join("")}
+            : storeItems.length
+              ? storeItems.map(storeCard).join("")
+              : storeLoading ? '<div class="status">Loading the catalogue…</div>' : '<div class="status">No games match these filters.</div>'}
         </div>
         <nav class="pager" aria-label="Store pages">
           <button data-store-page="first"${storePage === 1 ? " disabled" : ""}>First</button>
@@ -2432,25 +2482,25 @@ function renderStorePage() {
   </div>`;
 
   const input = detailEl.querySelector("#store-search");
-  const run = () => { storeQuery = input.value.trim(); void refreshStore(true); };
+  const run = () => { storeQuery = input.value.trim(); void reloadStore(true); };
   input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
   for (const button of detailEl.querySelectorAll("[data-store-genre]")) {
-    button.onclick = () => { storeGenre = button.dataset.storeGenre; void refreshStore(true); };
+    button.onclick = () => { storeGenre = button.dataset.storeGenre; void reloadStore(true); };
   }
   for (const button of detailEl.querySelectorAll("[data-store-sort]")) {
-    button.onclick = () => { storeSort = button.dataset.storeSort; void refreshStore(true); };
+    button.onclick = () => { storeSort = button.dataset.storeSort; void reloadStore(true); };
   }
   detailEl.querySelector("#store-clear-search").onclick = () => {
     storeQuery = "";
     input.value = "";
-    void refreshStore(true);
+    void reloadStore(true);
   };
   detailEl.querySelector("#store-clear-genre").onclick = () => {
     storeGenre = "";
-    void refreshStore(true);
+    void reloadStore(true);
   };
   const retry = detailEl.querySelector("#store-retry");
-  if (retry) retry.onclick = () => { void refreshStore(false); };
+  if (retry) retry.onclick = () => { void reloadStore(false); };
   for (const button of detailEl.querySelectorAll("[data-store-page]")) {
     button.onclick = () => {
       const action = button.dataset.storePage;
@@ -2458,7 +2508,7 @@ function renderStorePage() {
       else if (action === "prev") storePage = Math.max(1, storePage - 1);
       else if (action === "next") storePage = Math.min(storePages, storePage + 1);
       else storePage = storePages;
-      void refreshStore(false);
+      void reloadStore(false);
     };
   }
   for (const card of detailEl.querySelectorAll("[data-store-id]")) {

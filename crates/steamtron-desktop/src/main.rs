@@ -2345,13 +2345,50 @@ async fn managed_artwork(game_id: String) -> Result<serde_json::Value, String> {
 }
 
 
+
+fn store_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .build()
+            .expect("store HTTP client")
+    })
+}
+
+fn catalog_cache_path(key: &str) -> std::path::PathBuf {
+    steamtron_core::paths::layout().cache_dir().join("catalog").join(key)
+}
+
+fn catalog_cache_key(params: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    params.hash(&mut hasher);
+    format!("{:016x}.json", hasher.finish())
+}
+
+fn read_catalog_cache(path: std::path::PathBuf) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn write_catalog_cache(path: std::path::PathBuf, value: &serde_json::Value) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string(value) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
 async fn store_get(path: &str, query: &[(&str, String)]) -> Result<serde_json::Value, String> {
     let token = steamtron_auth::access_token();
     if token.is_empty() {
         return Err("Sign in to browse the Store.".into());
     }
     let base = steamtron_auth::api_base();
-    let response = reqwest::Client::new()
+    let response = store_client()
         .get(format!("{base}{path}"))
         .query(query)
         .bearer_auth(token)
@@ -2372,7 +2409,14 @@ async fn store_get(path: &str, query: &[(&str, String)]) -> Result<serde_json::V
 
 #[tauri::command]
 async fn store_genres() -> Result<serde_json::Value, String> {
-    store_get("/v1/genres", &[]).await
+    let value = store_get("/v1/genres", &[]).await?;
+    write_catalog_cache(catalog_cache_path("genres.json"), &value);
+    Ok(value)
+}
+
+#[tauri::command]
+fn store_cached_genres() -> Option<serde_json::Value> {
+    read_catalog_cache(catalog_cache_path("genres.json"))
 }
 
 #[tauri::command]
@@ -2382,16 +2426,38 @@ async fn store_catalog(
     sort: Option<String>,
     page: u32,
 ) -> Result<serde_json::Value, String> {
+    let page = page.max(1);
     let genre = genre.unwrap_or_default();
+    let sort = sort.unwrap_or_default();
     let mut params = vec![
-        ("q", query),
-        ("genre", genre),
-        ("page", page.max(1).to_string()),
+        ("q", query.clone()),
+        ("genre", genre.clone()),
+        ("page", page.to_string()),
     ];
-    if let Some(sort) = sort.filter(|value| !value.is_empty()) {
-        params.push(("sort", sort));
+    if !sort.is_empty() {
+        params.push(("sort", sort.clone()));
     }
-    store_get("/v1/games", &params).await
+    // Must match store_cached_catalog exactly: query|genre|sort|page.
+    let key = catalog_cache_key(&format!("{query}|{genre}|{sort}|{page}"));
+    let value = store_get("/v1/games", &params).await?;
+    write_catalog_cache(catalog_cache_path(&key), &value);
+    Ok(value)
+}
+
+#[tauri::command]
+fn store_cached_catalog(
+    query: String,
+    genre: Option<String>,
+    sort: Option<String>,
+    page: u32,
+) -> Option<serde_json::Value> {
+    let key = catalog_cache_key(&format!(
+        "{query}|{}|{}|{}",
+        genre.unwrap_or_default(),
+        sort.unwrap_or_default(),
+        page.max(1)
+    ));
+    read_catalog_cache(catalog_cache_path(&key))
 }
 
 #[tauri::command]
@@ -2595,6 +2661,8 @@ fn main() {
             quit_app,
             managed_artwork,
             store_genres,
+            store_cached_genres,
+            store_cached_catalog,
             store_catalog,
             store_game,
             app_details,
