@@ -220,3 +220,14 @@ screen using real commands with fixtures where the backend is pending.
   directly. Missing target shows "No launch target yet." and disables Play.
 - Load reconciles stored Steam registrations so `pending_restart` clears once
   the Lua is verified.
+
+## Phase 4 status (Linux)
+
+- Managed previews list the fixes folder and file count, with `Install ZIP…`
+  (native file picker) and `Remove`.
+- Play routes through the overlay wrapper whenever fixes exist; otherwise it
+  starts Proton directly.
+- Steam client mode: games with `requires_steam` or `steam_client` launch mode
+  show `Play via Steam`; Play verifies the registration first and explains
+  missing registrations with a Doctor pointer.
+

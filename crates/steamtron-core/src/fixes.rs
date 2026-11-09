@@ -91,15 +91,32 @@ fn safe_name(name: &str) -> Result<String, FixesError> {
 
 /// Extract a ZIP exactly as structured, excluding the SteamTron marker.
 pub fn install_zip(appid: &str, zip_path: &Path) -> Result<PathBuf, FixesError> {
-    let target = fixes_path(appid)?;
+    install_zip_into(appid, zip_path, &fixes_path(appid)?)
+}
+
+/// Extract a fixes ZIP into an explicit target folder (managed games).
+///
+/// Staging and backups live beside the target so a rename never crosses
+/// filesystems when the fixes folder is on a game drive.
+pub fn install_zip_into(
+    appid: &str,
+    zip_path: &Path,
+    target: &Path,
+) -> Result<PathBuf, FixesError> {
+    if appid.is_empty() || !appid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(FixesError::InvalidAppId);
+    }
     let archive_size = fs::metadata(zip_path)
         .map_err(|error| FixesError::io(zip_path, error))?
         .len();
     if archive_size > MAX_ARCHIVE {
         return Err(FixesError::Invalid("archive is too large".into()));
     }
-    let root = fixes_root();
-    prepare_root(&root)?;
+    let root = target
+        .parent()
+        .ok_or_else(|| FixesError::Invalid("fixes target has no parent".into()))?;
+    prepare_root(root)?;
+    let target = target.to_path_buf();
     let staging = root.join(format!(
         ".{appid}.staging-{}",
         SystemTime::now()

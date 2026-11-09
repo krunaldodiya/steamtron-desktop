@@ -4,6 +4,7 @@
 //! platform backend, writes the managed library entry, and reports the exact
 //! registration state so the UI can ask for a Steam restart.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -90,6 +91,142 @@ pub struct ReconcileReport {
     pub registered: usize,
     pub pending: usize,
     pub errors: Vec<String>,
+}
+
+
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FixFile {
+    pub name: String,
+    pub size: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FixesView {
+    pub path: String,
+    pub files: Vec<FixFile>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FixesRemoved {
+    pub path: String,
+    pub files: usize,
+}
+
+fn fixes_dir_for(game: &Game) -> Result<PathBuf, LibraryError> {
+    let drive = steamtron_core::library::drive_root_for(&game.installation.root)
+        .ok_or_else(|| LibraryError::Invalid("game is not inside a library folder".into()))?;
+    steamtron_core::library::game_layout(&drive, game)
+        .map(|layout| layout.fixes)
+        .map_err(|error| LibraryError::Invalid(error.to_string()))
+}
+
+fn app_id_for(game: &Game) -> String {
+    game.metadata_app_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| game.id.clone())
+}
+
+fn collect_files(root: &Path, current: &Path, files: &mut Vec<FixFile>) -> std::io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if files.len() >= 5000 {
+            return Ok(());
+        }
+        if path.is_dir() {
+            collect_files(root, &path, files)?;
+        } else {
+            let name = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            files.push(FixFile {
+                name,
+                size: entry.metadata().map(|meta| meta.len()).unwrap_or(0),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub fn fixes_view_at(game_id: &str, library_path: &Path) -> Result<FixesView, LibraryError> {
+    let library =
+        Library::open(library_path).map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let game = library
+        .game(game_id)
+        .ok_or_else(|| LibraryError::Invalid(format!("unknown game {game_id}")))?;
+    let dir = fixes_dir_for(game)?;
+    let mut files = Vec::new();
+    if dir.is_dir() {
+        collect_files(&dir, &dir, &mut files)
+            .map_err(|error| LibraryError::Io { path: dir.clone(), source: error })?;
+    }
+    files.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(FixesView {
+        path: dir.display().to_string(),
+        files,
+    })
+}
+
+pub fn install_fixes_at(
+    game_id: &str,
+    zip_path: &Path,
+    library_path: &Path,
+) -> Result<FixesView, LibraryError> {
+    let library =
+        Library::open(library_path).map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let game = library
+        .game(game_id)
+        .ok_or_else(|| LibraryError::Invalid(format!("unknown game {game_id}")))?;
+    let dir = fixes_dir_for(game)?;
+    steamtron_core::fixes::install_zip_into(&app_id_for(game), zip_path, &dir)
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    fixes_view_at(game_id, library_path)
+}
+
+pub fn remove_fixes_at(game_id: &str, library_path: &Path) -> Result<FixesRemoved, LibraryError> {
+    let view = fixes_view_at(game_id, library_path)?;
+    let dir = PathBuf::from(&view.path);
+    let files = view.files.len();
+    if dir.exists() {
+        fs::remove_dir_all(&dir)
+            .map_err(|error| LibraryError::Io { path: dir.clone(), source: error })?;
+    }
+    Ok(FixesRemoved {
+        path: view.path,
+        files,
+    })
+}
+
+pub fn fixes_view(game_id: &str) -> Result<FixesView, LibraryError> {
+    fixes_view_at(game_id, &Library::default_path())
+}
+
+pub fn install_fixes(game_id: &str, zip_path: &Path) -> Result<FixesView, LibraryError> {
+    install_fixes_at(game_id, zip_path, &Library::default_path())
+}
+
+pub fn remove_fixes(game_id: &str) -> Result<FixesRemoved, LibraryError> {
+    remove_fixes_at(game_id, &Library::default_path())
+}
+
+/// Steam client route: the game needs an App ID and a verified registration.
+pub fn steam_ready(game: &Game, backend: &dyn RegistrationBackend) -> Result<u32, LibraryError> {
+    let app_id = game
+        .metadata_app_id
+        .ok_or_else(|| LibraryError::Invalid("this game has no Steam App ID".into()))?;
+    let state = backend
+        .verify(&app_id.to_string())
+        .map_err(|error| LibraryError::Backend(error.to_string()))?;
+    if !state.registered {
+        return Err(LibraryError::Backend(format!(
+            "App {app_id} is not registered with {}. Re-add the game or open Settings → Doctor.",
+            backend.id()
+        )));
+    }
+    Ok(app_id)
 }
 
 /// Verify every stored Steam registration and update pending states.
@@ -464,6 +601,92 @@ mod tests {
         assert!(duplicate.is_err());
     }
 
+
+
+
+    #[test]
+    fn installs_lists_and_removes_managed_fixes() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 42,
+                title: "Sample".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                provider: ManifestProvider::SteamMl,
+                proton: String::new(),
+            },
+            sample_bundle("42"),
+            &backend,
+            &library_path,
+        )
+        .unwrap();
+        let zip_path = temp.path().join("fixes.zip");
+        {
+            let file = std::fs::File::create(&zip_path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            zip.start_file("fix.dll", SimpleFileOptions::default()).unwrap();
+            zip.write_all(b"dll").unwrap();
+            zip.start_file("nested/readme.txt", SimpleFileOptions::default()).unwrap();
+            zip.write_all(b"readme").unwrap();
+            zip.finish().unwrap();
+        }
+        let view = install_fixes_at("42", &zip_path, &library_path).unwrap();
+        assert_eq!(view.files.len(), 2);
+        assert!(view.path.ends_with("fixes/Sample"));
+        assert!(view.files.iter().any(|file| file.name == "fix.dll"));
+
+        let removed = remove_fixes_at("42", &library_path).unwrap();
+        assert_eq!(removed.files, 2);
+        assert!(!Path::new(&view.path).exists());
+    }
+
+    #[test]
+    fn steam_ready_requires_a_verified_registration() {
+        let temp = tempfile::tempdir().unwrap();
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        let mut game = Game {
+            id: "42".into(),
+            title: "Sample".into(),
+            metadata_app_id: Some(42),
+            metadata_source: None,
+            installation: Installation {
+                mode: InstallMode::Managed,
+                root: temp.path().to_path_buf(),
+                prefix: PathBuf::new(),
+                proton: String::new(),
+                manifest: PathBuf::new(),
+                confirmed: false,
+            },
+            steam: None,
+            launch: LaunchSettings::default(),
+            launch_targets: Vec::new(),
+            fixes_enabled: true,
+            artwork: Artwork::default(),
+        };
+        assert!(steam_ready(&game, &backend).is_err());
+        let manifests = BTreeMap::new();
+        backend
+            .register(&RegistrationRequest {
+                app_id: "42",
+                title: "Sample",
+                lua: "addappid(42)\n",
+                manifests: &manifests,
+            })
+            .unwrap();
+        assert_eq!(steam_ready(&game, &backend).unwrap(), 42);
+        game.metadata_app_id = None;
+        assert!(steam_ready(&game, &backend).is_err());
+    }
 
     #[test]
     fn reconcile_marks_registered_games_and_keeps_pending_ones() {

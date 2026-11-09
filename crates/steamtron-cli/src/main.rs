@@ -120,6 +120,25 @@ enum ManagedCommand {
     },
     /// Verify stored Steam registrations and clear pending states.
     Reconcile,
+    /// List, install or remove managed fixes.
+    Fixes {
+        #[command(subcommand)]
+        command: ManagedFixesCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ManagedFixesCommand {
+    List {
+        game_id: String,
+    },
+    Install {
+        game_id: String,
+        zip: PathBuf,
+    },
+    Remove {
+        game_id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -279,6 +298,22 @@ fn main() -> Result<()> {
                     )?;
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 }
+                ManagedCommand::Fixes { command } => match command {
+                    ManagedFixesCommand::List { game_id } => {
+                        let view = steamtron_library::managed::fixes_view(&game_id)?;
+                        println!("{}", serde_json::to_string_pretty(&view)?);
+                    }
+                    ManagedFixesCommand::Install { game_id, zip } => {
+                        let view =
+                            steamtron_library::managed::install_fixes(&game_id, &zip)?;
+                        println!("{}", serde_json::to_string_pretty(&view)?);
+                    }
+                    ManagedFixesCommand::Remove { game_id } => {
+                        let removed =
+                            steamtron_library::managed::remove_fixes(&game_id)?;
+                        println!("{}", serde_json::to_string_pretty(&removed)?);
+                    }
+                },
                 ManagedCommand::Reconcile => {
                     let report =
                         steamtron_library::managed::reconcile_registrations(&backend)?;
@@ -304,8 +339,57 @@ fn main() -> Result<()> {
                             .context("game has no launch target")?,
                     };
                     let steam_root = steam::steam_root()?;
+                    let steam_mode = game.launch.requires_steam
+                        || game.steam.as_ref().is_some_and(|registration| {
+                            matches!(
+                                registration.launch_mode,
+                                steamtron_core::library::LaunchMode::SteamClient
+                            )
+                        });
+                    let logs = steamtron_core::paths::layout().diagnostics_for(&game.id);
+                    steamtron_core::paths::ensure_private_dir(&logs)?;
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|elapsed| elapsed.as_secs())
+                        .unwrap_or(0);
+                    let log = logs.join(format!("play-{stamp}.log"));
+                    if steam_mode {
+                        let app_id =
+                            steamtron_library::managed::steam_ready(game, &backend)?;
+                        let plan = steamtron_core::runtime::steam_launch_plan(app_id, &steam_root);
+                        let summary = serde_json::json!({
+                            "mode": "steam",
+                            "program": plan.program.display().to_string(),
+                            "arguments": plan.arguments,
+                        });
+                        if dry_run {
+                            println!("{}", serde_json::to_string_pretty(&summary)?);
+                            return Ok(());
+                        }
+                        let stdout = std::fs::File::create(&log)?;
+                        let stderr = stdout.try_clone()?;
+                        let mut child = std::process::Command::new("setsid")
+                            .arg(&plan.program)
+                            .args(&plan.arguments)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(stdout)
+                            .stderr(stderr)
+                            .spawn()
+                            .context("could not start Steam")?;
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "pid": child.id(),
+                                "log": log.display().to_string(),
+                                "mode": "steam",
+                            }))?
+                        );
+                        let _ = child.wait();
+                        return Ok(());
+                    }
                     let plan = steamtron_core::runtime::managed_launch_plan(game, target, &steam_root)?;
                     let summary = serde_json::json!({
+                        "mode": "proton",
                         "program": plan.program.display().to_string(),
                         "arguments": plan.arguments,
                         "environment": plan.environment,
@@ -315,13 +399,6 @@ fn main() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&summary)?);
                         return Ok(());
                     }
-                    let logs = steamtron_core::paths::layout().diagnostics_for(&game.id);
-                    steamtron_core::paths::ensure_private_dir(&logs)?;
-                    let stamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|elapsed| elapsed.as_secs())
-                        .unwrap_or(0);
-                    let log = logs.join(format!("play-{stamp}.log"));
                     let stdout = std::fs::File::create(&log)?;
                     let stderr = stdout.try_clone()?;
                     let mut child = plan
@@ -336,6 +413,7 @@ fn main() -> Result<()> {
                         serde_json::to_string_pretty(&serde_json::json!({
                             "pid": child.id(),
                             "log": log.display().to_string(),
+                            "mode": "proton",
                         }))?
                     );
                     let _ = child.wait();

@@ -323,24 +323,59 @@ function managedDetails(game) {
   </div>`;
 }
 
+async function loadManagedFixes(gameId) {
+  const host = detailEl.querySelector("#managed-fixes");
+  if (!host) return;
+  try {
+    const view = await invoke("managed_fixes", { gameId });
+    const value = view.files.length
+      ? `${view.files.length} file${view.files.length === 1 ? "" : "s"} · ${view.path}`
+      : `None installed · ${view.path}`;
+    host.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(value)}</div></div><div class="update-actions"><button id="managed-fixes-install">Install ZIP…</button>${view.files.length ? '<button id="managed-fixes-remove">Remove</button>' : ""}</div>`;
+    host.querySelector("#managed-fixes-install").onclick = async () => {
+      try {
+        const installed = await invoke("install_managed_fixes", { gameId });
+        if (!installed) return;
+        showToast(`Installed ${installed.files.length} fix file${installed.files.length === 1 ? "" : "s"}`);
+        await loadManagedFixes(gameId);
+      } catch (error) { showToast(String(error), true); }
+    };
+    const remove = host.querySelector("#managed-fixes-remove");
+    if (remove) remove.onclick = async () => {
+      if (!window.confirm("Remove the installed fixes for this game?")) return;
+      try {
+        const removed = await invoke("remove_managed_fixes", { gameId });
+        showToast(`Removed ${removed.files} fix file${removed.files === 1 ? "" : "s"}`);
+        await loadManagedFixes(gameId);
+      } catch (error) { showToast(String(error), true); }
+    };
+  } catch (error) {
+    host.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(String(error))}</div></div>`;
+  }
+}
+
 function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
   const hero = appId ? headerUrl(appId) : "";
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
   const canPlay = managedReady(game) && Boolean(target);
+  const steamMode = Boolean(game.launch?.requires_steam || game.steam?.launch_mode === "steam_client");
   const running = runningManaged.has(game.id);
   const action = running
     ? '<button id="managed-stop" class="primary">Stop</button>'
-    : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
-  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target ? "" : '<span class="muted">No launch target yet.</span>'}</div></div></div>${managedDetails(game)}`;
+    : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
+  detailEl.innerHTML = `<div class="detail-hero${hero ? "" : " no-artwork"}"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}><div class="detail-hero-shade"></div><div class="detail-hero-content"><h2>${escape(game.title)}</h2><p class="muted">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p><div class="detail-hero-actions">${action}${target || steamMode ? "" : '<span class="muted">No launch target yet.</span>'}${steamMode ? '<span class="muted">Steam client required</span>' : ""}</div></div></div>${managedDetails(game)}<div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>`;
+  void loadManagedFixes(game.id);
   const play = detailEl.querySelector("#managed-play");
   if (play && canPlay) {
     play.onclick = async () => {
       const stop = busy(play, "Starting…");
       try {
         const result = await invoke("play_managed", { gameId: game.id });
-        runningManaged.add(game.id);
-        showToast(`Started ${game.title} · ${result.log}`);
+        if (result.mode !== "steam") runningManaged.add(game.id);
+        showToast(result.mode === "steam"
+          ? `Starting ${game.title} through Steam`
+          : `Started ${game.title} · ${result.log}`);
         renderManagedMode();
       } catch (error) {
         showToast(String(error), true);

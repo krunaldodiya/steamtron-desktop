@@ -1714,22 +1714,20 @@ fn dir_has_entries(path: &std::path::Path) -> bool {
 fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     use std::fs::File;
     use std::process::Stdio;
-    use steamtron_core::library::Library;
-    use steamtron_core::runtime::{managed_launch_plan, primary_target};
+    use steamtron_core::library::{LaunchMode, Library};
+    use steamtron_core::runtime::{managed_launch_plan, primary_target, steam_launch_plan};
 
     require_auth()?;
     let library = Library::load().map_err(|error| error.to_string())?;
     let game = library
         .game(&game_id)
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
-    let target = primary_target(game)
-        .cloned()
-        .ok_or_else(|| "This game has no launch target yet.".to_string())?;
     let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
-    let plan = managed_launch_plan(game, &target, &steam_root)
-        .map_err(|error| error.to_string())?;
-    let fixes = managed_fixes_dir(game);
-    let use_overlay = game.fixes_enabled && fixes.as_ref().is_some_and(|path| dir_has_entries(path));
+    let steam_mode = game.launch.requires_steam
+        || game
+            .steam
+            .as_ref()
+            .is_some_and(|registration| matches!(registration.launch_mode, LaunchMode::SteamClient));
 
     let layout = steamtron_core::paths::layout();
     let logs = layout.diagnostics_for(&game.id);
@@ -1745,50 +1743,93 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .try_clone()
         .map_err(|error| format!("{}: {error}", log.display()))?;
 
-    let mut command = if use_overlay {
-        let fixes = fixes.as_ref().expect("checked above").clone();
-        let appid = game
-            .metadata_app_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| game.id.clone());
-        let exe = steamtron_executable()?;
-        let mut command = std::process::Command::new(&exe);
-        command
-            .arg("--steamtron-overlay")
-            .args([
-                "--appid",
-                &appid,
-                "--common",
-                &game.installation.root.display().to_string(),
-                "--fixes",
-                &fixes.display().to_string(),
-                "--proton-path",
-                &plan.program.display().to_string(),
-                "--compat",
-                &game.installation.prefix.display().to_string(),
-                "--cwd",
-                &game.installation.root.display().to_string(),
-                "--steam-root",
-                &steam_root.display().to_string(),
-                "--",
-                &plan.arguments[1],
-            ])
-            .args(&target.arguments);
-        command
+    let (mut command, mode, program, arguments, overlay, fixes) = if steam_mode {
+        let backend = platform_backend().map_err(|error| error.to_string())?;
+        let app_id = steamtron_library::managed::steam_ready(game, &backend)
+            .map_err(|error| error.to_string())?;
+        let plan = steam_launch_plan(app_id, &steam_root);
+        let command = if cfg!(unix) {
+            let mut command = std::process::Command::new("setsid");
+            command.arg(&plan.program).args(&plan.arguments);
+            command
+        } else {
+            let mut command = std::process::Command::new(&plan.program);
+            command.args(&plan.arguments);
+            command
+        };
+        (
+            command,
+            "steam",
+            plan.program.display().to_string(),
+            plan.arguments,
+            false,
+            None,
+        )
     } else {
-        plan.command()
+        let target = primary_target(game)
+            .cloned()
+            .ok_or_else(|| "This game has no launch target yet.".to_string())?;
+        let plan = managed_launch_plan(game, &target, &steam_root)
+            .map_err(|error| error.to_string())?;
+        let fixes = managed_fixes_dir(game);
+        let use_overlay =
+            game.fixes_enabled && fixes.as_ref().is_some_and(|path| dir_has_entries(path));
+        let command = if use_overlay {
+            let fixes_path = fixes.as_ref().expect("checked above").clone();
+            let appid = game
+                .metadata_app_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| game.id.clone());
+            let exe = steamtron_executable()?;
+            let mut command = std::process::Command::new(&exe);
+            command
+                .arg("--steamtron-overlay")
+                .args([
+                    "--appid",
+                    &appid,
+                    "--common",
+                    &game.installation.root.display().to_string(),
+                    "--fixes",
+                    &fixes_path.display().to_string(),
+                    "--proton-path",
+                    &plan.program.display().to_string(),
+                    "--compat",
+                    &game.installation.prefix.display().to_string(),
+                    "--cwd",
+                    &game.installation.root.display().to_string(),
+                    "--steam-root",
+                    &steam_root.display().to_string(),
+                    "--",
+                    &plan.arguments[1],
+                ])
+                .args(&target.arguments);
+            command
+        } else {
+            plan.command()
+        };
+        (
+            command,
+            "proton",
+            plan.program.display().to_string(),
+            plan.arguments,
+            use_overlay,
+            fixes,
+        )
     };
-    if managed_runs()
-        .lock()
-        .map_err(|_| "Game state lock failed.".to_string())?
-        .contains_key(&game.id)
-    {
-        return Err("This game is already running.".into());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
+
+    if !steam_mode {
+        if managed_runs()
+            .lock()
+            .map_err(|_| "Game state lock failed.".to_string())?
+            .contains_key(&game.id)
+        {
+            return Err("This game is already running.".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
     }
     let child = command
         .stdin(Stdio::null())
@@ -1797,30 +1838,34 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .spawn()
         .map_err(|error| format!("Could not start the game: {error}"))?;
     let pid = child.id();
-    managed_runs()
-        .lock()
-        .map_err(|_| "Game state lock failed.".to_string())?
-        .insert(game.id.clone(), pid);
+    if !steam_mode {
+        managed_runs()
+            .lock()
+            .map_err(|_| "Game state lock failed.".to_string())?
+            .insert(game.id.clone(), pid);
+    }
     let tracked = game.id.clone();
     std::thread::spawn(move || {
         let mut child = child;
         let _ = child.wait();
-        if let Ok(mut runs) = managed_runs().lock() {
-            if runs.get(&tracked) == Some(&pid) {
-                runs.remove(&tracked);
+        if !steam_mode {
+            if let Ok(mut runs) = managed_runs().lock() {
+                if runs.get(&tracked) == Some(&pid) {
+                    runs.remove(&tracked);
+                }
             }
         }
     });
     Ok(serde_json::json!({
         "pid": pid,
         "log": log.display().to_string(),
-        "overlay": use_overlay,
+        "mode": mode,
+        "overlay": overlay,
         "fixes": fixes.map(|path| path.display().to_string()),
-        "program": plan.program.display().to_string(),
-        "arguments": plan.arguments,
+        "program": program,
+        "arguments": arguments,
     }))
 }
-
 
 #[tauri::command]
 fn running_managed() -> Result<Vec<String>, String> {
@@ -1870,6 +1915,34 @@ fn stop_managed(game_id: String) -> Result<(), String> {
         }
         Ok(())
     }
+}
+
+#[tauri::command]
+fn managed_fixes(game_id: String) -> Result<steamtron_library::managed::FixesView, String> {
+    steamtron_library::managed::fixes_view(&game_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn install_managed_fixes(
+    game_id: String,
+) -> Result<Option<steamtron_library::managed::FixesView>, String> {
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose a fixes ZIP")
+        .add_filter("Fixes ZIP", &["zip"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    steamtron_library::managed::install_fixes(&game_id, &path)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_managed_fixes(game_id: String) -> Result<steamtron_library::managed::FixesRemoved, String> {
+    require_auth()?;
+    steamtron_library::managed::remove_fixes(&game_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2062,6 +2135,9 @@ fn main() {
             reconcile_registrations,
             running_managed,
             stop_managed,
+            managed_fixes,
+            install_managed_fixes,
+            remove_managed_fixes,
             registration_verify,
             library_import_preview,
             library_import_commit,

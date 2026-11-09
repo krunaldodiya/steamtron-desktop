@@ -148,6 +148,28 @@ pub fn terminate_process_group(_pid: u32, _force: bool) -> Result<(), RuntimeErr
     Err(RuntimeError::MissingRuntime("process supervision"))
 }
 
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SteamLaunchPlan {
+    pub program: PathBuf,
+    pub arguments: Vec<String>,
+}
+
+/// Plan a launch through the Steam client (`steam -applaunch <id>`).
+pub fn steam_launch_plan(app_id: u32, steam_root: &Path) -> SteamLaunchPlan {
+    let program = if steam_root.join("steam.sh").is_file() {
+        steam_root.join("steam.sh")
+    } else if steam_root.join("steam").is_file() {
+        steam_root.join("steam")
+    } else {
+        PathBuf::from("steam")
+    };
+    SteamLaunchPlan {
+        program,
+        arguments: vec!["-applaunch".to_owned(), app_id.to_string()],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +217,19 @@ mod tests {
         terminate_process_group(child.id(), false).unwrap();
         let status = child.wait().unwrap();
         assert!(!status.success(), "SIGTERM ends the sleep");
+    }
+
+
+    #[test]
+    fn steam_launch_uses_the_client_binary() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("steam.sh"), b"#!/bin/sh\n").unwrap();
+        let plan = steam_launch_plan(42, temp.path());
+        assert_eq!(plan.program, temp.path().join("steam.sh"));
+        assert_eq!(plan.arguments, vec!["-applaunch".to_owned(), "42".to_owned()]);
+
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(steam_launch_plan(7, empty.path()).program, PathBuf::from("steam"));
     }
 
     #[test]

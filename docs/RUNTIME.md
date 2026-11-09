@@ -89,3 +89,26 @@ steamtron-overlay managed play 3468650 --target t2
   and refuses a second Play for the same game.
 - Verified: process-group SIGTERM test in `steamtron-core`; Stop wiring builds
   and parses.
+
+## Managed fixes
+
+- The canonical folder is `<drive>/SteamTronLibrary/steamtronapps/fixes/<Game>`; it
+  is derived from the game root, never typed by the user.
+- `install_fixes` extracts a ZIP there with the existing safety rules (no
+  symlinks, size/file caps, staging beside the target so cross-drive renames
+  cannot fail) and replaces the previous content.
+- `fixes_view` lists installed files (recursive, capped); `remove_fixes` deletes
+  the game's fixes folder only.
+- Desktop: the managed preview shows the fixes path and file count with
+  `Install ZIP…` and `Remove`.
+- CLI:
+
+```bash
+steamtron-overlay managed fixes list 3468650
+steamtron-overlay managed fixes install 3468650 fixes.zip
+steamtron-overlay managed fixes remove 3468650
+```
+
+Verified end-to-end in the isolated tree: install wrote `fix.dll` and
+`readme.txt`, the view listed both, and remove deleted the folder.
+
