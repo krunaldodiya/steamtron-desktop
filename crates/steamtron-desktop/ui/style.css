@@ -558,3 +558,12 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .env-row input { width:100%; }
 .env-remove { border:1px solid #8b3b3b; border-radius:8px; background:#7d2531; color:#ffe3e3; padding:9px 14px; }
 .game-settings-pane .pane-add { width:100%; margin:8px 0 14px; padding:11px 16px; }
+
+/* Game Settings: fixes sections and paired full-width actions. */
+.fix-section { padding:18px 0; border-top:1px solid var(--border); }
+.fix-section h4 { margin:0 0 6px; font-size:15px; }
+.fix-section .pane-note { margin-bottom:10px; }
+.fix-action-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0 4px; }
+.fix-action-row button { width:100%; padding:11px 14px; }
+.fix-path { margin:4px 0; font-size:13px; color:var(--text); overflow-wrap:anywhere; }
+.fix-meta { margin:0 0 10px; font-size:12px; color:var(--muted); }

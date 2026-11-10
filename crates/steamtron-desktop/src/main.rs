@@ -5,6 +5,7 @@ use std::sync::{Mutex, OnceLock};
 
 mod artwork;
 mod download;
+mod fix_tools;
 mod proton_sources;
 
 use serde::Serialize;
@@ -1990,6 +1991,103 @@ fn set_managed_launch_target(
 }
 
 #[tauri::command]
+fn managed_fixes_status(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    let view = steamtron_library::managed::fixes_view(&game_id)
+        .map_err(|error| error.to_string())?;
+    let tools = fix_tools::status(game);
+    let bytes: u64 = view.files.iter().map(|file| file.size).sum();
+    Ok(serde_json::json!({
+        "path": view.path,
+        "files": view.files.len(),
+        "bytes": bytes,
+        "enabled": game.fixes_enabled,
+        "goldberg": tools["goldberg"],
+        "steamless": tools["steamless"],
+    }))
+}
+
+#[tauri::command]
+fn set_managed_fixes_enabled(game_id: String, enabled: bool) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let mut game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    game.fixes_enabled = enabled;
+    library.upsert_game(game).map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({ "enabled": enabled }))
+}
+
+#[tauri::command]
+fn export_managed_fixes(game_id: String) -> Result<Option<String>, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    let fixes = managed_fixes_dir(game)
+        .ok_or_else(|| "this game is not inside a managed library".to_string())?;
+    if !fixes.is_dir() {
+        return Err("No fixes are installed for this game.".into());
+    }
+    let appid = game
+        .metadata_app_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| game.id.clone());
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Export fixes ZIP")
+        .set_file_name(format!("{}.zip", steamtron_core::fixes::export_name(&game.title, &appid)))
+        .add_filter("Fixes ZIP", &["zip"])
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    steamtron_core::fixes::export_zip(&fixes, &path, &appid)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+async fn apply_managed_goldberg(game_id: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    tauri::async_runtime::spawn_blocking(move || fix_tools::apply_goldberg(&game_id))
+        .await
+        .map_err(|error| format!("GoldBerg task failed: {error}"))?
+}
+
+#[tauri::command]
+fn remove_managed_goldberg(game_id: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    fix_tools::remove_goldberg(&game_id)
+}
+
+#[tauri::command]
+async fn apply_managed_steamless(game_id: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    tauri::async_runtime::spawn_blocking(move || fix_tools::apply_steamless(&game_id))
+        .await
+        .map_err(|error| format!("Steamless task failed: {error}"))?
+}
+
+#[tauri::command]
+fn remove_managed_steamless(game_id: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    fix_tools::remove_steamless(&game_id)
+}
+
+#[tauri::command]
 fn managed_fixes(game_id: String) -> Result<steamtron_library::managed::FixesView, String> {
     steamtron_library::managed::fixes_view(&game_id).map_err(|error| error.to_string())
 }
@@ -3647,6 +3745,13 @@ fn main() {
             running_managed,
             stop_managed,
             managed_fixes,
+            managed_fixes_status,
+            set_managed_fixes_enabled,
+            export_managed_fixes,
+            apply_managed_goldberg,
+            remove_managed_goldberg,
+            apply_managed_steamless,
+            remove_managed_steamless,
             install_managed_fixes,
             remove_managed_fixes,
             pick_managed_executable,

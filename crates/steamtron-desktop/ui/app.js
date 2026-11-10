@@ -520,37 +520,6 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
   renderLaunchers();
 }
 
-async function loadManagedFixes(gameId, host = detailEl) {
-  const box = host.querySelector("#managed-fixes");
-  if (!box) return;
-  try {
-    const view = await invoke("managed_fixes", { gameId });
-    const value = view.files.length
-      ? `${view.files.length} file${view.files.length === 1 ? "" : "s"} · ${view.path}`
-      : `None installed · ${view.path}`;
-    box.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(value)}</div></div><div class="update-actions"><button id="managed-fixes-install">Install ZIP…</button>${view.files.length ? '<button id="managed-fixes-remove">Remove</button>' : ""}</div>`;
-    box.querySelector("#managed-fixes-install").onclick = async () => {
-      try {
-        const installed = await invoke("install_managed_fixes", { gameId });
-        if (!installed) return;
-        showToast(`Installed ${installed.files.length} fix file${installed.files.length === 1 ? "" : "s"}`);
-        await loadManagedFixes(gameId, host);
-      } catch (error) { showToast(String(error), true); }
-    };
-    const remove = box.querySelector("#managed-fixes-remove");
-    if (remove) remove.onclick = async () => {
-      if (!window.confirm("Remove the installed fixes for this game?")) return;
-      try {
-        const removed = await invoke("remove_managed_fixes", { gameId });
-        showToast(`Removed ${removed.files} fix file${removed.files === 1 ? "" : "s"}`);
-        await loadManagedFixes(gameId, host);
-      } catch (error) { showToast(String(error), true); }
-    };
-  } catch (error) {
-    box.innerHTML = `<div class="row"><div class="label">Fixes</div><div class="value">${escape(String(error))}</div></div>`;
-  }
-}
-
 const protonTierCache = new Map();
 
 async function protonTier(appid) {
@@ -1139,16 +1108,90 @@ function openManagedGameOptions(game) {
       renderUpdatesPanel(pane, latestGame);
       return;
     }
-    pane.innerHTML = `<h3>Fixes</h3><p class="pane-note">Install a fixes ZIP. Files are layered over the game only while SteamTron launches it.</p>
-      <div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>
-      <div class="update-actions"><button id="gs-fixes-open">Open fixes folder</button></div>`;
-    void loadManagedFixes(game.id, pane);
-    pane.querySelector("#gs-fixes-open").onclick = async () => {
+    const renderFixesTab = async () => {
+      pane.innerHTML = '<h3>Fixes</h3><p class="pane-note">Loading fixes…</p>';
+      let status;
       try {
-        const view = await invoke("managed_fixes", { gameId: game.id });
-        await invoke("open_path", { path: view.path });
-      } catch (error) { showToast(String(error), true); }
+        status = await invoke("managed_fixes_status", { gameId: game.id });
+      } catch (error) {
+        pane.innerHTML = `<h3>Fixes</h3><div class="status error">${escape(String(error))}</div>`;
+        return;
+      }
+      const present = status.files > 0;
+      const overlay = status.enabled ? "Enabled" : "Disabled";
+      pane.innerHTML = `<h3>Fixes</h3>
+        <p class="pane-note">Import, export, enable, or remove per-game fixes. Enabled fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
+        <div class="fix-action-row"><button class="primary" id="fix-import">Import fixes ZIP…</button><button id="fix-export"${present ? "" : " disabled"}>Export fixes ZIP…</button></div>
+        <section class="fix-section"><h4>Current fixes location</h4>
+          <p class="fix-path">${status.path ? escape(status.path) : "No fixes folder yet."}</p>
+          <p class="fix-meta">${present ? `${status.files} file${status.files === 1 ? "" : "s"} · ${formatBytes(status.bytes)}` : "No fixes installed."}</p>
+          <div class="fix-action-row"><button id="fix-open"${present ? "" : " disabled"}>Open fixes folder</button><button id="fix-remove" class="danger"${present ? "" : " disabled"}>Remove fixes</button></div>
+        </section>
+        <section class="fix-section"><h4>SteamTron launch overlay</h4>
+          <p class="pane-note">${present ? `${overlay}. SteamTron applies these fixes at Play; game-created files persist in a private layer.` : "No fixes are configured for this game."}</p>
+          <div class="fix-action-row"><button id="fix-toggle"${present ? "" : " disabled"}>${status.enabled ? "Disable fixes" : "Enable fixes"}</button><button id="fix-delete" class="danger"${present ? "" : " disabled"}>Remove fixes</button></div>
+        </section>
+        <section class="fix-section"><h4>GoldBerg emulator</h4>
+          <p class="pane-note">Replaces this game's Steam library with the GoldBerg emulator and generates its interface list from the original library. The emulator release is downloaded once and shared by every game; the installed game files are never changed.</p>
+          <p class="fix-meta">${status.goldberg ? "GoldBerg is applied to this fixes folder." : "GoldBerg is not applied. Assets are downloaded and verified on first use."}</p>
+          <div class="fix-action-row"><button id="fix-goldberg-apply">Apply GoldBerg</button><button id="fix-goldberg-remove" class="danger"${status.goldberg ? "" : " disabled"}>Remove GoldBerg</button></div>
+        </section>
+        <section class="fix-section"><h4>Steamless</h4>
+          <p class="pane-note">Copies each registered launcher into this fixes folder with its exact structure and removes Steam DRM (SteamStub) from that copy. The steamless-linux tool is downloaded once and shared by every game; the installed game files are never changed.</p>
+          <p class="fix-meta">${status.steamless ? "Steamless is applied to this fixes folder." : "Steamless is not applied. The tool is downloaded and verified on first use."}</p>
+          <div class="fix-action-row"><button id="fix-steamless-apply">Apply Steamless</button><button id="fix-steamless-remove" class="danger"${status.steamless ? "" : " disabled"}>Remove Steamless</button></div>
+        </section>`;
+
+      const refresh = async () => {
+        await refreshGame();
+        await renderFixesTab();
+      };
+      const run = async (button, work, message) => {
+        const stop = busy(button, "Working…");
+        try {
+          const result = await work();
+          stop();
+          showToast(typeof message === "function" ? message(result) : message);
+          await refresh();
+        } catch (error) {
+          stop();
+          showToast(String(error), true);
+        }
+      };
+      pane.querySelector("#fix-import").onclick = (event) => run(event.currentTarget, async () => {
+        const result = await invoke("install_managed_fixes", { gameId: game.id });
+        return result || { files: [] };
+      }, (result) => `Installed ${result.files?.length || 0} fix file${result.files?.length === 1 ? "" : "s"}`);
+      pane.querySelector("#fix-export").onclick = (event) => run(event.currentTarget, async () => {
+        const path = await invoke("export_managed_fixes", { gameId: game.id });
+        if (!path) throw new Error("Export cancelled.");
+        return path;
+      }, (path) => `Exported to ${path}`);
+      pane.querySelector("#fix-open").onclick = async () => {
+        if (!status.path) return;
+        try { await invoke("open_path", { path: status.path }); }
+        catch (error) { showToast(String(error), true); }
+      };
+      pane.querySelector("#fix-toggle").onclick = (event) => run(event.currentTarget, () =>
+        invoke("set_managed_fixes_enabled", { gameId: game.id, enabled: !status.enabled }),
+        !status.enabled ? "Fixes enabled" : "Fixes disabled");
+      for (const id of ["#fix-remove", "#fix-delete"]) {
+        pane.querySelector(id).onclick = (event) => {
+          if (!window.confirm("Remove all fixes for this game? Files are deleted from the fixes folder; installed game files are unchanged.")) return;
+          void run(event.currentTarget, () => invoke("remove_managed_fixes", { gameId: game.id }),
+            (result) => `Removed ${result.files} fix file${result.files === 1 ? "" : "s"}`);
+        };
+      }
+      pane.querySelector("#fix-goldberg-apply").onclick = (event) => run(event.currentTarget,
+        () => invoke("apply_managed_goldberg", { gameId: game.id }), "GoldBerg applied");
+      pane.querySelector("#fix-goldberg-remove").onclick = (event) => run(event.currentTarget,
+        () => invoke("remove_managed_goldberg", { gameId: game.id }), "GoldBerg removed");
+      pane.querySelector("#fix-steamless-apply").onclick = (event) => run(event.currentTarget,
+        () => invoke("apply_managed_steamless", { gameId: game.id }), "Steamless applied");
+      pane.querySelector("#fix-steamless-remove").onclick = (event) => run(event.currentTarget,
+        () => invoke("remove_managed_steamless", { gameId: game.id }), "Steamless removed");
     };
+    void renderFixesTab();
   };
 
   for (const button of backdrop.querySelectorAll("[data-game-tab]")) {
