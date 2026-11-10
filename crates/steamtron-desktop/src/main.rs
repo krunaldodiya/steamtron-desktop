@@ -2645,24 +2645,90 @@ async fn proton_tier(appid: u32) -> Result<Option<String>, String> {
     Ok(Some(tier))
 }
 
+fn igdb_cache_path() -> std::path::PathBuf {
+    steamtron_core::paths::layout()
+        .cache_dir()
+        .join("store/igdb-ids.json")
+}
+
+fn read_igdb_cache() -> serde_json::Map<String, serde_json::Value> {
+    let text = std::fs::read_to_string(igdb_cache_path()).unwrap_or_default();
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn write_igdb_cache(appid: u32, igdb_id: &str) {
+    let mut cache = read_igdb_cache();
+    cache.insert(appid.to_string(), serde_json::Value::String(igdb_id.to_owned()));
+    let path = igdb_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string(&cache) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
 #[tauri::command]
-fn igdb_id_for(appid: u32, title: Option<String>) -> Option<String> {
-    let path = steamtron_core::paths::layout()
+async fn igdb_id_for(appid: u32, title: Option<String>) -> Option<String> {
+    // 1. UmuTron's persisted ID cache (by App ID, then by title).
+    let umutron_path = steamtron_core::paths::layout()
         .data_home
         .join("umutron/game-id-cache.json");
-    let text = std::fs::read_to_string(path).ok()?;
-    let cache: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let mut lookup = |key: &str| -> Option<String> {
-        let value = cache.get(key)?;
+    if let Ok(text) = std::fs::read_to_string(&umutron_path) {
+        if let Ok(cache) = serde_json::from_str::<serde_json::Value>(&text) {
+            let mut lookup = |key: &str| -> Option<String> {
+                let value = cache.get(key)?;
+                if let Some(number) = value.as_u64() {
+                    return Some(number.to_string());
+                }
+                value.as_str().map(str::to_owned)
+            };
+            if let Some(id) = lookup(&appid.to_string()) {
+                return Some(id);
+            }
+            if let Some(title) = title.as_deref() {
+                if let Some(id) = lookup(&title.to_lowercase()) {
+                    return Some(id);
+                }
+            }
+        }
+    }
+    // 2. SteamTron's own cache.
+    if let Some(value) = read_igdb_cache().get(&appid.to_string()) {
         if let Some(number) = value.as_u64() {
             return Some(number.to_string());
         }
-        value.as_str().map(str::to_owned)
-    };
-    lookup(&appid.to_string()).or_else(|| {
-        let title = title?;
-        lookup(&title.to_lowercase())
-    })
+        if let Some(text) = value.as_str() {
+            return Some(text.to_owned());
+        }
+    }
+    // 3. Catalogue browse by title, exact-or-edition match only.
+    let title = title?;
+    let data = store_get(
+        "/v1/games",
+        &[
+            ("q", title.clone()),
+            ("genre", String::new()),
+            ("page", "1".to_owned()),
+        ],
+    )
+    .await
+    .ok()?;
+    let items = data.get("items").and_then(|items| items.as_array())?;
+    for item in items {
+        let name = item.get("name").and_then(|name| name.as_str()).unwrap_or("");
+        if !store_title_matches(&title, name) {
+            continue;
+        }
+        let Some(id) = item.get("id").and_then(|id| id.as_u64()) else { continue };
+        let id = id.to_string();
+        write_igdb_cache(appid, &id);
+        return Some(id);
+    }
+    None
 }
 
 
