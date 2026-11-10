@@ -1933,21 +1933,67 @@ fn stop_managed(game_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn pick_managed_executable(game_id: String) -> Result<Option<String>, String> {
+fn pick_managed_executable(
+    game_id: String,
+    start: Option<String>,
+) -> Result<Option<String>, String> {
     use steamtron_core::library::Library;
 
     let library = Library::load().map_err(|error| error.to_string())?;
     let game = library
         .game(&game_id)
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
+    let directory = start
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| game.installation.root.clone());
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Choose the game executable")
-        .set_directory(&game.installation.root)
+        .set_title("Choose game launcher")
+        .set_directory(directory)
         .pick_file()
     else {
         return Ok(None);
     };
     Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+fn pick_managed_folder(game_id: String) -> Result<Option<String>, String> {
+    use steamtron_core::library::Library;
+
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("Unknown game {game_id}"))?;
+    let directory = if game.installation.root.is_dir() {
+        game.installation.root.clone()
+    } else {
+        std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default()
+    };
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose installed game folder")
+        .set_directory(directory)
+        .pick_folder()
+    else {
+        return Ok(None);
+    };
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+fn link_managed_game(
+    request: steamtron_library::managed::LinkGameRequest,
+) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let report = steamtron_library::managed::link_game(request)
+        .map_err(|error| error.to_string())?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "report": report,
+        "library": library_json(&library),
+    }))
 }
 
 #[tauri::command]
@@ -3283,6 +3329,8 @@ fn main() {
             remove_managed_fixes,
             pick_managed_executable,
             set_managed_launch_target,
+            pick_managed_folder,
+            link_managed_game,
             registration_verify,
             library_remember_picker,
         ])

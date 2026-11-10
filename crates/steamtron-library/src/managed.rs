@@ -315,6 +315,159 @@ pub fn set_launch_target_at(
 pub fn set_launch_target(request: SetTargetRequest) -> Result<TargetReport, LibraryError> {
     set_launch_target_at(request, &Library::default_path())
 }
+#[derive(Clone, Debug, Deserialize)]
+pub struct LinkLauncher {
+    #[serde(default)]
+    pub name: String,
+    pub executable: String,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    #[serde(default)]
+    pub primary: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct LinkGameRequest {
+    pub game_id: String,
+    pub root: String,
+    pub launchers: Vec<LinkLauncher>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LinkReport {
+    pub game_id: String,
+    pub root: String,
+    pub launchers: usize,
+    pub primary: String,
+}
+
+/// Link an installed folder and its launchers, mirroring UmuTron Game Link.
+pub fn link_game(request: LinkGameRequest) -> Result<LinkReport, LibraryError> {
+    link_game_at(request, &Library::default_path())
+}
+
+pub fn link_game_at(
+    request: LinkGameRequest,
+    library_path: &Path,
+) -> Result<LinkReport, LibraryError> {
+    use steamtron_core::library::LaunchTarget;
+
+    let game_id = request.game_id.clone();
+    let mut library =
+        Library::open(library_path).map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let previous = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| LibraryError::Invalid(format!("unknown game {}", request.game_id)))?;
+    let raw_root = request.root.trim();
+    if raw_root.is_empty() {
+        return Err(LibraryError::Invalid("Choose the installed game folder.".into()));
+    }
+    let root_path = Path::new(raw_root);
+    if !root_path.is_absolute() || !root_path.is_dir() {
+        return Err(LibraryError::Invalid(
+            "The selected game folder does not exist.".into(),
+        ));
+    }
+    let root = root_path
+        .canonicalize()
+        .map_err(|error| LibraryError::Invalid(format!("{}: {error}", root_path.display())))?;
+    if request.launchers.is_empty() {
+        return Err(LibraryError::Invalid(
+            "Add at least one launcher executable.".into(),
+        ));
+    }
+    let mut targets = Vec::with_capacity(request.launchers.len());
+    for (index, launcher) in request.launchers.into_iter().enumerate() {
+        let candidate = if Path::new(&launcher.executable).is_absolute() {
+            PathBuf::from(&launcher.executable)
+        } else {
+            root.join(&launcher.executable)
+        };
+        let executable = candidate.canonicalize().map_err(|error| {
+            LibraryError::Invalid(format!("{}: {error}", candidate.display()))
+        })?;
+        if !executable.is_file() {
+            return Err(LibraryError::Invalid(format!(
+                "executable does not exist: {}",
+                executable.display()
+            )));
+        }
+        if !executable.starts_with(&root) {
+            return Err(LibraryError::Invalid(
+                "Choose a launcher inside the linked game folder.".into(),
+            ));
+        }
+        let name = if launcher.name.trim().is_empty() {
+            executable
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Launcher")
+                .to_owned()
+        } else {
+            launcher.name.trim().to_owned()
+        };
+        let id = previous
+            .launch_targets
+            .iter()
+            .find(|target| target.executable == executable)
+            .map(|target| target.id.clone())
+            .unwrap_or_else(|| format!("t{}", index + 1));
+        targets.push(LaunchTarget {
+            id,
+            name,
+            executable,
+            arguments: launcher.arguments,
+            primary: launcher.primary,
+        });
+    }
+    if !targets.iter().any(|target| target.primary) {
+        if let Some(first) = targets.first_mut() {
+            first.primary = true;
+        }
+    }
+    let mut primary = true;
+    for target in &mut targets {
+        if target.primary && primary {
+            primary = false;
+        } else if target.primary {
+            target.primary = false;
+        }
+    }
+    let primary_name = targets
+        .iter()
+        .find(|target| target.primary)
+        .map(|target| target.name.clone())
+        .unwrap_or_default();
+    let mut updated = previous;
+    let changed_root = updated.installation.root != root;
+    updated.installation.root = root.clone();
+    updated.installation.mode = if changed_root {
+        InstallMode::Linked
+    } else {
+        updated.installation.mode
+    };
+    updated.installation.confirmed = true;
+    updated.launch_targets = targets;
+    steamtron_core::library::mark_setup_completed(&mut updated);
+    library
+        .upsert_game(updated)
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    library
+        .save()
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let launcher_count = library
+        .game(&game_id)
+        .map(|game| game.launch_targets.len())
+        .unwrap_or_default();
+    Ok(LinkReport {
+        game_id,
+        root: root.display().to_string(),
+        launchers: launcher_count,
+        primary: primary_name,
+    })
+}
+
 
 /// Steam client route: the game needs an App ID and a verified registration.
 pub fn steam_ready(game: &Game, backend: &dyn RegistrationBackend) -> Result<u32, LibraryError> {
@@ -848,6 +1001,64 @@ mod tests {
         assert_eq!(steam_ready(&game, &backend).unwrap(), 42);
         game.metadata_app_id = None;
         assert!(steam_ready(&game, &backend).is_err());
+    }
+
+    #[test]
+    fn links_a_folder_with_multiple_launchers() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 42,
+                title: "Sample Game".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                proton: String::new(),
+                provider: ManifestProvider::SteamMl,
+            },
+            sample_bundle("42"),
+            &backend,
+            &library_path,
+        )
+        .unwrap();
+        let root = temp.path().join("installed");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("game.exe"), b"game").unwrap();
+        fs::write(root.join("launcher.exe"), b"launcher").unwrap();
+        let report = link_game_at(
+            LinkGameRequest {
+                game_id: "42".into(),
+                root: root.display().to_string(),
+                launchers: vec![
+                    LinkLauncher {
+                        name: String::new(),
+                        executable: root.join("game.exe").display().to_string(),
+                        arguments: Vec::new(),
+                        primary: false,
+                    },
+                    LinkLauncher {
+                        name: "Launcher".into(),
+                        executable: root.join("launcher.exe").display().to_string(),
+                        arguments: vec!["-nolauncher".into()],
+                        primary: false,
+                    },
+                ],
+            },
+            &library_path,
+        )
+        .unwrap();
+        assert_eq!(report.launchers, 2);
+        assert_eq!(report.primary, "game");
+        let library = Library::open(&library_path).unwrap();
+        let game = library.game("42").unwrap();
+        assert_eq!(game.installation.mode, InstallMode::Linked);
+        assert!(game.setup_completed_at.is_some());
+        assert_eq!(game.launch_targets.len(), 2);
+        assert!(game.launch_targets[0].primary);
+        assert!(!game.launch_targets[1].primary);
     }
 
     #[test]

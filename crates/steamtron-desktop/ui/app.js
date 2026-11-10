@@ -340,45 +340,163 @@ async function stopManagedGame(game, button) {
   }
 }
 
-function managedSetupMarkup(game) {
-  const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
-  const executable = target?.executable || "";
-  const argumentsText = (target?.arguments || []).join(" ");
-  return `<div class="status" id="managed-setup"><div class="row"><div class="label">Launch target</div><div class="value">${escape(executable || "Not configured")}</div></div><label for="managed-exe">Executable</label><div class="search-row"><input id="managed-exe" placeholder="Game.exe" value="${escape(executable)}"><button id="managed-exe-browse">Browse…</button></div><label for="managed-args">Arguments</label><input id="managed-args" placeholder="-windowed (space separated)" value="${escape(argumentsText)}"><label for="managed-proton">Proton runner (optional)</label><input id="managed-proton" value="${escape(game.launch?.proton || game.installation?.proton || "")}"><div class="update-actions"><button class="primary" id="managed-setup-save">Save setup</button></div></div>`;
+function linkFileName(path) {
+  const parts = String(path || "").split(/[\\/]/);
+  return parts[parts.length - 1] || path;
 }
 
-async function wireManagedSetup(game, host = detailEl, onSaved = () => renderManagedMode()) {
-  const box = host.querySelector("#managed-setup");
-  if (!box) return;
-  const exeInput = box.querySelector("#managed-exe");
-  const argsInput = box.querySelector("#managed-args");
-  const protonInput = box.querySelector("#managed-proton");
-  box.querySelector("#managed-exe-browse").onclick = async () => {
+function parseLauncherArguments(text) {
+  const matches = String(text || "").match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  return matches.map((value) => value.replace(/^["']|["']$/g, ""));
+}
+
+function renderManagedLink(pane, game, refreshGame, renderTab) {
+  const linked = Boolean(game.installed && game.installation?.root);
+  const draft = {
+    root: linked ? (game.installation?.root || "") : "",
+    launchers: (game.launch_targets || []).map((target) => ({
+      name: target.name || "",
+      executable: target.executable,
+      arguments: [...(target.arguments || [])],
+      primary: Boolean(target.primary),
+    })),
+  };
+  if (draft.launchers.length && !draft.launchers.some((launcher) => launcher.primary)) {
+    draft.launchers[0].primary = true;
+  }
+  pane.innerHTML = `<h3>Game Link</h3>
+    <p class="pane-note">${linked
+      ? "Correct the game folder or launcher if the wrong files were linked. This never moves, copies, or deletes game files. Choosing a different folder keeps the former managed folder untouched."
+      : "Link an installed game folder and every executable you want Play to offer. This never moves, copies, or deletes the selected game files."}</p>
+    <label for="gs-link-root">Linked game folder</label>
+    <input id="gs-link-root" value="${escape(draft.root)}" placeholder="/path/to/installed/game">
+    <div class="update-actions"><button id="gs-link-choose">Choose linked game folder…</button></div>
+    <h3>Launchers</h3>
+    <p class="pane-note">This list is the only source of truth for what Play starts. The default launcher starts when there is one entry; otherwise Play asks which launcher to start. Collections such as Uncharted 4 + The Lost Legacy share one folder with separate executables; add each one here. Each launcher can have its own arguments, added after the shared options in General.</p>
+    ${linked ? "" : '<p class="pane-note">Choose the Proton compatibility layer in the Compatibility tab. The current selection is used when this game is linked.</p>'}
+    <div id="gs-link-launchers"></div>
+    <div class="update-actions"><button id="gs-link-add">Add launcher…</button></div>
+    <div class="update-actions"><button class="primary" id="gs-link-save">${linked ? "Save linked folder" : "Link game"}</button></div>`;
+  const rootInput = pane.querySelector("#gs-link-root");
+  const list = pane.querySelector("#gs-link-launchers");
+
+  const renderLaunchers = () => {
+    list.innerHTML = draft.launchers.length
+      ? draft.launchers.map((launcher, index) => `<div class="game-link-row" data-launcher="${index}">
+          <div class="game-link-copy">
+            <strong>${escape(launcher.name || linkFileName(launcher.executable))}</strong>
+            <span class="muted" title="${escape(launcher.executable)}">${escape(launcher.executable)}</span>
+            <span class="muted">${launcher.arguments.length ? `Arguments: ${escape(launcher.arguments.join(" "))}` : "No launcher-specific arguments"}</span>
+          </div>
+          <div class="game-link-actions">
+            <button data-link-primary${launcher.primary ? " disabled" : ""}>Default</button>
+            <button data-link-edit>Edit</button>
+            <button class="danger" data-link-delete>Delete</button>
+          </div>
+        </div>`).join("")
+      : '<p class="muted">Add at least one launcher executable.</p>';
+    for (const row of list.querySelectorAll("[data-launcher]")) {
+      const index = Number(row.dataset.launcher);
+      row.querySelector("[data-link-primary]").onclick = () => {
+        draft.launchers.forEach((launcher, position) => { launcher.primary = position === index; });
+        renderLaunchers();
+      };
+      row.querySelector("[data-link-edit]").onclick = () => editLauncher(index);
+      row.querySelector("[data-link-delete]").onclick = () => {
+        const launcher = draft.launchers[index];
+        if (!window.confirm(`Remove "${launcher.name || linkFileName(launcher.executable)}" from this game? The game files are not deleted.`)) return;
+        draft.launchers.splice(index, 1);
+        if (draft.launchers.length && !draft.launchers.some((entry) => entry.primary)) {
+          draft.launchers[0].primary = true;
+        }
+        renderLaunchers();
+      };
+    }
+  };
+
+  const editLauncher = (index) => {
+    const existing = index >= 0 ? draft.launchers[index] : null;
+    const executable = existing?.executable || "";
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>${existing ? "Edit launcher" : "Add launcher"}</h2><button class="modal-close" aria-label="Close">×</button></div>
+      <p class="muted">${escape(linkFileName(executable))}</p>
+      <label for="gs-launcher-executable">Executable</label>
+      <input id="gs-launcher-executable" value="${escape(executable)}" readonly>
+      <label for="gs-launcher-name">Launcher name</label>
+      <input id="gs-launcher-name" value="${escape(existing?.name || "")}" placeholder="${escape(linkFileName(executable))}">
+      <p class="muted">Leave this empty to show the launcher's file name.</p>
+      <label for="gs-launcher-arguments">Launcher arguments</label>
+      <input id="gs-launcher-arguments" value="${escape((existing?.arguments || []).join(" "))}" placeholder="Optional, for example -nolauncher">
+      <p class="muted">Passed directly to this launcher. Shell commands are not evaluated.</p>
+      <div class="modal-actions"><button id="gs-launcher-cancel">Cancel</button><button class="primary" id="gs-launcher-save">Save</button></div></div>`;
+    document.body.appendChild(backdrop);
+    const close = () => backdrop.remove();
+    backdrop.querySelector(".modal-close").onclick = close;
+    backdrop.querySelector("#gs-launcher-cancel").onclick = close;
+    backdrop.querySelector("#gs-launcher-save").onclick = () => {
+      const value = {
+        name: backdrop.querySelector("#gs-launcher-name").value.trim(),
+        executable,
+        arguments: parseLauncherArguments(backdrop.querySelector("#gs-launcher-arguments").value),
+        primary: existing?.primary || draft.launchers.length === 0,
+      };
+      if (existing) draft.launchers[index] = value;
+      else draft.launchers.push(value);
+      close();
+      renderLaunchers();
+    };
+    backdrop.querySelector("#gs-launcher-name").focus();
+  };
+
+  pane.querySelector("#gs-link-choose").onclick = async () => {
     try {
-      const path = await invoke("pick_managed_executable", { gameId: game.id });
-      if (path) exeInput.value = path;
+      const path = await invoke("pick_managed_folder", { gameId: game.id });
+      if (path) rootInput.value = path;
     } catch (error) { showToast(String(error), true); }
   };
-  box.querySelector("#managed-setup-save").onclick = async () => {
-    const executable = exeInput.value.trim();
-    if (!executable) { showToast("Choose the game executable first.", true); return; }
-    const button = box.querySelector("#managed-setup-save");
+  pane.querySelector("#gs-link-add").onclick = async () => {
+    const root = rootInput.value.trim();
+    if (!root) { showToast("Choose the linked game folder first.", true); return; }
+    try {
+      const executable = await invoke("pick_managed_executable", { gameId: game.id, start: root });
+      if (!executable) return;
+      const normalizedRoot = root.replace(/\/+$/, "");
+      if (!executable.startsWith(normalizedRoot + "/") && !executable.startsWith(normalizedRoot + "\\")) {
+        showToast("Choose a launcher inside the linked game folder.", true);
+        return;
+      }
+      draft.launchers.push({ name: "", executable, arguments: [], primary: draft.launchers.length === 0 });
+      renderLaunchers();
+    } catch (error) { showToast(String(error), true); }
+  };
+  pane.querySelector("#gs-link-save").onclick = async () => {
+    const root = rootInput.value.trim();
+    if (!root) { showToast("Choose the installed game folder.", true); return; }
+    if (!draft.launchers.length) { showToast("Add at least one launcher executable.", true); return; }
+    const button = pane.querySelector("#gs-link-save");
     const stop = busy(button, "Saving…");
     try {
-      const result = await invoke("set_managed_launch_target", { request: {
+      const result = await invoke("link_managed_game", { request: {
         game_id: game.id,
-        executable,
-        arguments: argsInput.value.trim().split(/\s+/).filter(Boolean),
-        proton: protonInput.value.trim(),
-        name: "",
+        root,
+        launchers: draft.launchers.map((launcher) => ({
+          name: launcher.name,
+          executable: launcher.executable,
+          arguments: launcher.arguments,
+          primary: launcher.primary,
+        })),
       } });
-      showToast(`Launch target saved: ${result.name}`);
-      onSaved();
+      managedLibrary = result.library;
+      await refreshGame();
+      showToast(`Linked ${result.report.launchers} launcher${result.report.launchers === 1 ? "" : "s"}`);
+      renderTab("link");
     } catch (error) {
       showToast(String(error), true);
       stop();
     }
   };
+  renderLaunchers();
 }
 
 async function loadManagedFixes(gameId, host = detailEl) {
@@ -692,6 +810,7 @@ function openManagedGameOptions(game) {
     ["link", "Game Link"],
     ["fixes", "Fixes"],
   ];
+  if (game.metadata_app_id) tabs.splice(tabs.length - 1, 0, ["updates", "Updates"]);
   backdrop.innerHTML = `<div class="modal game-settings-modal">
     <div class="game-settings-head"><h2>Game Settings · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <div class="game-settings-body">
@@ -813,13 +932,11 @@ function openManagedGameOptions(game) {
       return;
     }
     if (key === "link") {
-      pane.innerHTML = `<h3>Game Link</h3><p class="pane-note">Choose the executable and arguments Play should start. The default launcher starts when there is one entry.</p>
-        ${managedSetupMarkup(latestGame)}`;
-      void wireManagedSetup(latestGame, pane, async () => {
-        await refreshGame();
-        showToast("Launch target saved");
-        renderTab("general");
-      });
+      renderManagedLink(pane, latestGame, refreshGame, renderTab);
+      return;
+    }
+    if (key === "updates") {
+      renderUpdatesPanel(pane, latestGame);
       return;
     }
     pane.innerHTML = `<h3>Fixes</h3><p class="pane-note">Install a fixes ZIP. Files are layered over the game only while SteamTron launches it.</p>
@@ -2309,6 +2426,8 @@ function renderUpdatesPanel(host, game) {
   const pin = host.querySelector("#updates-pin");
   let data = null;
   let selectedVersion = "";
+  const appid = game.appid || game.metadata_app_id;
+  const gameName = game.name || game.title;
   const load = async () => {
     const button = host.querySelector("#updates-refresh");
     const stop = busy(button, "Checking…");
@@ -2316,7 +2435,7 @@ function renderUpdatesPanel(host, game) {
     summary.textContent = "Loading archived builds…";
     list.replaceChildren();
     try {
-      data = await invoke("update_versions", { appid: game.appid });
+      data = await invoke("update_versions", { appid });
       selectedVersion = data.pinned || data.installed || data.latest || "";
       render();
     } catch (error) { summary.textContent = String(error); summary.classList.add("error"); }
@@ -2354,13 +2473,13 @@ function renderUpdatesPanel(host, game) {
   host.querySelector("#updates-refresh").onclick = load;
   auto.onclick = async () => {
     const stop = busy(auto, "Clearing pin…");
-    try { data = await invoke("clear_update_pin", { appid: game.appid }); selectedVersion = data.installed || data.latest || ""; markRestartRequired(`${game.name} update pin cleared. Restart Steam to apply.`); stop(); render(); }
+    try { data = await invoke("clear_update_pin", { appid }); selectedVersion = data.installed || data.latest || ""; markRestartRequired(`${gameName} update pin cleared. Restart Steam to apply.`); stop(); render(); }
     catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
   };
   pin.onclick = async () => {
     if (!selectedVersion) return;
     const stop = busy(pin, "Pinning…");
-    try { data = await invoke("update_pin", { appid: game.appid, date: selectedVersion }); markRestartRequired(`${game.name} update pin changed. Restart Steam to apply.`); stop(); render(); }
+    try { data = await invoke("update_pin", { appid, date: selectedVersion }); markRestartRequired(`${gameName} update pin changed. Restart Steam to apply.`); stop(); render(); }
     catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
   };
   load();
