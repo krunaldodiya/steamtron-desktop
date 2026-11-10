@@ -124,7 +124,7 @@ fn detect_launch_target(root: &Path) -> Option<(PathBuf, String)> {
     })
 }
 
-fn finalize(app: &AppHandle, game_id: &str, root: &Path, success: bool) {
+fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<PathBuf>, success: bool) {
     use steamtron_core::library::Library;
 
     let mut state = {
@@ -138,6 +138,28 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, success: bool) {
         state.clone()
     };
     if success {
+        if let Some(download_dir) = download_dir {
+            if download_dir.is_dir() && download_dir != root {
+                // smd writes "<AppID> - <Name>" inside the output folder; adopt
+                // its contents into the managed game root.
+                std::fs::create_dir_all(root).ok();
+                let empty = std::fs::read_dir(root)
+                    .map(|mut entries| entries.next().is_none())
+                    .unwrap_or(true);
+                if empty {
+                    let _ = std::fs::remove_dir(root);
+                    let _ = std::fs::rename(&download_dir, root);
+                } else if let Ok(entries) = std::fs::read_dir(&download_dir) {
+                    for entry in entries.flatten() {
+                        let target = root.join(entry.file_name());
+                        if !target.exists() {
+                            let _ = std::fs::rename(entry.path(), target);
+                        }
+                    }
+                    let _ = std::fs::remove_dir(&download_dir);
+                }
+            }
+        }
         if let Ok(mut library) = Library::load() {
             if let Some(mut game) = library.game(game_id).cloned() {
                 game.installation.confirmed = true;
@@ -271,6 +293,9 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             .open(&log_path)
             .ok();
         let mut depot_bytes: HashMap<String, u64> = HashMap::new();
+        let mut depot_totals: HashMap<String, u64> = HashMap::new();
+        let mut download_dir: Option<PathBuf> = None;
+        let mut plan_total: u64 = 0;
         let mut total: u64 = 0;
         let mut last_emit = Instant::now();
         let mut last_bytes = 0u64;
@@ -286,10 +311,15 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             match value.get("type").and_then(|kind| kind.as_str()) {
                 Some("plan") => {
                     if let Some(depots) = value.get("depots").and_then(|d| d.as_array()) {
-                        total = depots
+                        plan_total = depots
                             .iter()
                             .map(|depot| depot.get("sizeBytes").and_then(|size| size.as_u64()).unwrap_or(0))
                             .sum();
+                    }
+                }
+                Some("started") => {
+                    if let Some(dir) = value.get("downloadDir").and_then(|dir| dir.as_str()) {
+                        download_dir = Some(PathBuf::from(dir));
                     }
                 }
                 Some("error") => {
@@ -312,10 +342,15 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                     depot_bytes.insert(depot.to_owned(), bytes);
                 }
                 if let Some(depot_total) = value.get("totalBytes").and_then(|bytes| bytes.as_u64()) {
-                    if depot_total > 0 && total == 0 {
-                        total = total.saturating_add(depot_total);
+                    if depot_total > 0 {
+                        depot_totals.insert(depot.to_owned(), depot_total);
                     }
                 }
+                total = if plan_total > 0 {
+                    plan_total
+                } else {
+                    depot_totals.values().sum()
+                };
             }
             let completed: u64 = depot_bytes.values().sum();
             let percent = if total > 0 {
@@ -346,7 +381,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             }
         }
         let success = child.wait().map(|status| status.success()).unwrap_or(false);
-        finalize(&app, &game_id, &root, success);
+        finalize(&app, &game_id, &root, download_dir, success);
     });
 
     Ok(DownloadState {
