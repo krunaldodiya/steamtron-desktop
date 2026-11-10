@@ -83,7 +83,18 @@ pub fn managed_launch_plan(
         return Err(RuntimeError::MissingExecutable(executable));
     }
     let proton = proton_runner(game).ok_or(RuntimeError::MissingRuntime("Proton runner"))?;
-    if !proton.exists() {
+    // UmuTron/Steam runners are directories containing the real `proton`
+    // launcher; accept either form.
+    let proton = if proton.is_dir() {
+        let nested = proton.join("proton");
+        if !nested.is_file() {
+            return Err(RuntimeError::MissingRuntime("Proton runner"));
+        }
+        nested
+    } else {
+        proton.to_path_buf()
+    };
+    if !proton.is_file() {
         return Err(RuntimeError::MissingRuntime("Proton runner"));
     }
     let prefix = &game.installation.prefix;
@@ -230,6 +241,27 @@ mod tests {
 
         let empty = tempfile::tempdir().unwrap();
         assert_eq!(steam_launch_plan(7, empty.path()).program, PathBuf::from("steam"));
+    }
+
+
+    #[test]
+    fn resolves_a_proton_runner_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let runner = temp.path().join("runner");
+        fs::create_dir_all(&runner).unwrap();
+        let proton = runner.join("proton");
+        fs::write(&proton, b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&proton, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let root = temp.path().join("common/Sample");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Sample.exe"), b"MZ").unwrap();
+        let game = game(&root, &runner, &temp.path().join("prefix"));
+        let plan = managed_launch_plan(&game, primary_target(&game).unwrap(), temp.path()).unwrap();
+        assert_eq!(plan.program, proton);
     }
 
     #[test]
