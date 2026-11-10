@@ -402,6 +402,10 @@ button.primary:hover { filter:brightness(1.06); }
 .proton-source-tab { padding:9px 16px; border:1px solid var(--border); border-radius:999px; background:transparent; color:var(--muted); font-size:13px; }
 .proton-source-tab:hover { color:var(--text); border-color:var(--border-strong); }
 .proton-source-tab.active { color:var(--text); background:var(--surface-raised); border-color:var(--accent); }
+.proton-progress { display:flex; flex-direction:column; gap:5px; min-width:170px; }
+.proton-progress-track { height:6px; overflow:hidden; border-radius:999px; background:var(--surface); border:1px solid var(--border); }
+.proton-progress-track span { display:block; height:100%; background:var(--accent); transition:width .3s ease; }
+.proton-progress small { color:var(--muted); font-size:11px; }
 .top-actions { gap:10px; position:relative; }
 .store-body { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:32px; align-items:stretch; margin-top:22px; }
 .store-sidebar { position:sticky; top:90px; display:flex; flex-direction:column; gap:6px; }

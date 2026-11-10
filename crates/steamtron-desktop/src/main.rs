@@ -2255,15 +2255,41 @@ async fn proton_source_releases(
 }
 
 #[tauri::command]
-async fn install_proton_release(
+fn install_proton_release(
     family: String,
     tag: String,
     name: String,
 ) -> Result<serde_json::Value, String> {
     require_auth()?;
-    tauri::async_runtime::spawn_blocking(move || proton_sources::install(&family, &tag, &name))
-        .await
-        .map_err(|error| format!("Proton install task failed: {error}"))?
+    if proton_sources::read_states().iter().any(|state| {
+        state.family == family
+            && state.tag == tag
+            && matches!(state.status.as_str(), "starting" | "downloading" | "extracting" | "registering")
+    }) {
+        return Ok(serde_json::json!({ "started": false }));
+    }
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("Could not locate SteamTron: {error}"))?;
+    let mut command = std::process::Command::new(executable);
+    command
+        .args(["--proton-install", &family, &tag, &name])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+        .spawn()
+        .map_err(|error| format!("Could not start the Proton installer: {error}"))?;
+    Ok(serde_json::json!({ "started": true }))
+}
+
+#[tauri::command]
+fn proton_install_states() -> Vec<proton_sources::InstallState> {
+    proton_sources::read_states()
 }
 
 #[tauri::command]
@@ -3194,7 +3220,21 @@ fn library_remember_picker(key: String, folder: String) -> Result<(), String> {
 }
 
 
+fn proton_install_child() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) != Some("--proton-install") {
+        return None;
+    }
+    let family = args.get(2)?;
+    let tag = args.get(3)?;
+    let name = args.get(4)?;
+    Some(proton_sources::run_install(family, tag, name))
+}
+
 fn main() {
+    if let Some(code) = proton_install_child() {
+        std::process::exit(code);
+    }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if let Some(code) = try_overlay_wrapper() {
         std::process::exit(code);
@@ -3296,6 +3336,7 @@ fn main() {
             proton_runners,
             proton_source_releases,
             install_proton_release,
+            proton_install_states,
             set_default_proton_runner,
             open_path,
             running_managed,
