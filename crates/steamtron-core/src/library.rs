@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -198,6 +199,41 @@ pub struct Game {
     pub fixes_enabled: bool,
     #[serde(default, skip_serializing_if = "Artwork::is_empty")]
     pub artwork: Artwork,
+    /// Set once the game first becomes playable; adding metadata never sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_completed_at: Option<i64>,
+}
+
+/// A library folder with at least one entry is downloaded content.
+pub fn installed_content(root: &Path) -> bool {
+    root.is_dir()
+        && std::fs::read_dir(root)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false)
+}
+
+/// Playable means downloaded content plus a configured primary executable.
+pub fn game_ready(game: &Game) -> bool {
+    if !installed_content(&game.installation.root) {
+        return false;
+    }
+    game.launch_targets
+        .iter()
+        .find(|target| target.primary)
+        .or_else(|| game.launch_targets.first())
+        .is_some_and(|target| target.executable.is_file())
+}
+
+/// Stamp the first ready transition; later edits keep the original time.
+pub fn mark_setup_completed(game: &mut Game) {
+    if game.setup_completed_at.is_none() && game_ready(game) {
+        game.setup_completed_at = Some(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs() as i64)
+                .unwrap_or(0),
+        );
+    }
 }
 
 fn path_is_empty(path: &Path) -> bool {
@@ -792,7 +828,32 @@ mod tests {
             launch_targets: Vec::new(),
             fixes_enabled: true,
             artwork: Artwork::default(),
+            setup_completed_at: None,
         }
+    }
+
+    #[test]
+    fn setup_completion_requires_downloaded_content_and_a_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("game");
+        let mut game = sample_game("42", "Game", root.clone());
+        mark_setup_completed(&mut game);
+        assert!(game.setup_completed_at.is_none());
+
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("game.exe"), b"exe").unwrap();
+        game.launch_targets = vec![LaunchTarget {
+            id: "t1".into(),
+            name: "Game".into(),
+            executable: root.join("game.exe"),
+            arguments: Vec::new(),
+            primary: true,
+        }];
+        mark_setup_completed(&mut game);
+        let first = game.setup_completed_at.expect("ready transition is stamped");
+        assert!(first > 0);
+        mark_setup_completed(&mut game);
+        assert_eq!(game.setup_completed_at, Some(first));
     }
 
     #[test]

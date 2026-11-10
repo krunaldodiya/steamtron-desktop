@@ -170,6 +170,7 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
                         }];
                     }
                 }
+                steamtron_core::library::mark_setup_completed(&mut game);
                 let _ = library.upsert_game(game);
                 let _ = library.save();
             }

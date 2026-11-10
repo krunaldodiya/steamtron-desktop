@@ -238,6 +238,7 @@ pub fn plan_legacy_config(path: impl AsRef<Path>) -> Result<ImportPlan, ImportEr
             launch_targets: targets,
             fixes_enabled: entry.enabled,
             artwork: Artwork::default(),
+            setup_completed_at: None,
         };
         plan.actions.push(ImportAction::AddGame {
             planned: PlannedGame {
@@ -492,6 +493,7 @@ pub fn plan_umutron_library(path: impl AsRef<Path>) -> Result<ImportPlan, Import
                     hero: art.hero,
                 })
                 .unwrap_or_default(),
+            setup_completed_at: None,
         };
         // SteamTron owns its own layout: imported entries point at
         // SteamTronLibrary/steamtronapps and are downloaded there, never at

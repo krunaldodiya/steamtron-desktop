@@ -211,6 +211,7 @@ mod tests {
             }],
             fixes_enabled: true,
             artwork: Artwork::default(),
+            setup_completed_at: None,
         }
     }
 

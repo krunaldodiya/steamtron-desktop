@@ -1847,6 +1847,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .map_err(|_| "Game state lock failed.".to_string())?
             .insert(game.id.clone(), pid);
     }
+    let _ = steamtron_core::play_history::record(&game.id, stamp as i64);
     let tracked = game.id.clone();
     std::thread::spawn(move || {
         let mut child = child;
@@ -1996,6 +1997,7 @@ fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value
         "settings": library.settings(),
         "drives": library.drives(),
         "games": games,
+        "recently_played": steamtron_core::play_history::recent_ids(),
     })
 }
 

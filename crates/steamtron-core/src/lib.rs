@@ -6,6 +6,7 @@ pub mod runtime;
 pub mod library;
 pub mod fixes;
 pub mod steam;
+pub mod play_history;
 
 use std::path::PathBuf;
 

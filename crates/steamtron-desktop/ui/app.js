@@ -193,6 +193,13 @@ function managedReady(game) {
   return Boolean(game.installation?.root);
 }
 
+function managedPlayable(game) {
+  if (!managedReady(game)) return false;
+  const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
+  const steam = Boolean(game.launch?.requires_steam || game.steam?.launch_mode === "steam_client");
+  return steam || Boolean(target);
+}
+
 const artworkCache = new Map();
 
 async function artworkFor(gameId) {
@@ -253,14 +260,14 @@ async function hydrateHero(game) {
   }
 }
 
-function coverCard(game, section) {
+function coverCard(game, section, caption = "") {
   const appId = game.metadata_app_id;
   const selected = game.id === managedSelectedId
     && (!section || section === homeFocusSection);
   const active = selected ? " active" : "";
   return `<button class="cover-card${active}" data-managed="${escape(game.id)}" title="${escape(game.title)}">
     <span class="cover">${appId ? `<img loading="lazy" data-cover-game="${escape(game.id)}" alt="">` : ""}<span class="play-glyph" aria-hidden="true">▶</span></span>
-    <span class="cover-title">${escape(game.title)}</span>
+    <span class="cover-title">${escape(game.title)}</span>${caption ? `<span class="cover-state">${escape(caption)}</span>` : ""}
   </button>`;
 }
 
@@ -312,6 +319,7 @@ async function startManagedGame(game, button) {
     showToast(result.mode === "steam"
       ? `Starting ${game.title} through Steam`
       : `Started ${game.title} · ${result.log}`);
+    managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
     renderManagedMode();
   } catch (error) {
     showToast(String(error), true);
@@ -588,7 +596,7 @@ if (window.__TAURI__?.event?.listen) {
     }
     if (payload.success) {
       managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
-      if (appView === "game") renderManagedMode();
+      if (["home", "library", "game"].includes(appView)) renderManagedMode();
       showToast("Download complete");
     }
   });
@@ -839,32 +847,44 @@ function pad2(value) {
 
 function renderManagedHome() {
   const games = managedLibrary.games;
-  const installed = games.filter((game) => managedReady(game));
-  const featured = games.find((game) => game.id === managedSelectedId) || installed[0] || games[0];
+  const recentIds = managedLibrary.recently_played || [];
+  const recent = recentIds
+    .map((id) => games.find((game) => game.id === id))
+    .filter(Boolean);
+  const dated = games
+    .filter((game) => game.setup_completed_at)
+    .sort((left, right) => right.setup_completed_at - left.setup_completed_at);
+  const undated = games
+    .filter((game) => !game.setup_completed_at && managedPlayable(game))
+    .sort((left, right) => left.title.localeCompare(right.title));
+  const ready = [...dated, ...undated];
+  const choices = [...recent, ...ready.filter((game) => !recent.some((entry) => entry.id === game.id))];
+  const featured = choices.find((game) => game.id === managedSelectedId) || choices[0] || null;
+  const featuredSection = recent.some((game) => game.id === featured?.id) ? "recent" : "setup";
   const appId = featured?.metadata_app_id;
   const hero = appId ? heroUrl(appId) : "";
   const running = featured ? runningManaged.has(featured.id) : false;
-  const recentIndex = Math.max(1, games.findIndex((game) => game.id === featured?.id) + 1);
-  const railCounter = `${pad2(games.length ? recentIndex : 0)} / ${pad2(games.length)}`;
+  const recentIndex = Math.max(1, recent.findIndex((game) => game.id === featured?.id) + 1);
+  const railCounter = recent.length ? `${pad2(recentIndex)} / ${pad2(recent.length)}` : "";
   detailEl.innerHTML = `<div class="page home-page">
     <section class="home-hero${hero ? "" : " no-artwork"}" id="home-hero"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}>
       <div class="home-hero-shade"></div>
       <div class="home-hero-content">
-        <p class="eyebrow" id="home-eyebrow">Recently played</p>
-        <h1 id="home-title">${escape(featured?.title || "No games yet")}</h1>
-        <p class="home-meta" id="home-related">${featured ? escape(appId ? `Steam App ${appId}` : "Managed entry") + (managedReady(featured) ? " · Ready to play" : "") : "Add a game from the Store to get started."}</p>
+        <p class="eyebrow" id="home-eyebrow">${featuredSection === "recent" ? "Recently played" : "Recently ready to play"}</p>
+        <h1 id="home-title">${escape(featured?.title || (games.length ? "Nothing ready yet" : "No games yet"))}</h1>
+        <p class="home-meta" id="home-related">${featured ? escape(appId ? `Steam App ${appId}` : "Managed entry") + (managedReady(featured) ? " · Ready to play" : "") : games.length ? "Finish a download and setup to see it here." : "Add a game from the Store to get started."}</p>
         <p class="home-description hidden" id="home-description"></p>
         <div class="home-actions"><button class="primary" id="home-play"${featured ? "" : " disabled"}>${running ? "Stop" : "Play"}</button><button id="home-view"${featured ? "" : " disabled"}>View game</button></div>
       </div>
     </section>
     <section class="managed-rail" data-rail="recent">
       <div class="rail-head"><h2>Recently played</h2><span class="muted" id="home-counter">${railCounter}</span></div>
-      <div class="rail-scroll">${games.length ? games.map((game) => coverCard(game, "recent")).join("") : '<div class="status">No games yet. Add one from the Store.</div>'}</div>
+      ${recent.length ? `<div class="rail-scroll">${recent.map((game) => coverCard(game, "recent")).join("")}</div>` : '<p class="muted">Your recent plays will appear here after you start a game.</p>'}
     </section>
     <section class="managed-rail" data-rail="setup">
       <div class="rail-head"><h2>Recently ready to play</h2></div>
       <p class="muted">Your ready games, newest completed setups first.</p>
-      ${installed.length ? `<div class="rail-scroll">${installed.map((game) => coverCard(game, "setup")).join("")}</div>` : '<div class="status">No installed games yet.</div>'}
+      ${ready.length ? `<div class="rail-scroll">${ready.map((game) => coverCard(game, "setup", "Ready to play")).join("")}</div>` : '<p class="muted">Completed setups will appear here. Saving metadata does not count as setup.</p>'}
     </section>
   </div>`;
   const play = detailEl.querySelector("#home-play");

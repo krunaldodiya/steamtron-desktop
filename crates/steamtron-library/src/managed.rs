@@ -296,6 +296,7 @@ pub fn set_launch_target_at(
         updated.launch.proton = request.proton.trim().to_owned();
         updated.installation.proton = request.proton.trim().to_owned();
     }
+    steamtron_core::library::mark_setup_completed(&mut updated);
     library
         .upsert_game(updated)
         .map_err(|error| LibraryError::Invalid(error.to_string()))?;
@@ -522,6 +523,7 @@ pub fn add_managed_game_at(
         launch_targets: Vec::new(),
         fixes_enabled: true,
         artwork: Artwork::default(),
+        setup_completed_at: None,
     };
     let layout = game_layout(&drive_root, &game)
         .map_err(|error| LibraryError::Invalid(error.to_string()))?;
@@ -831,6 +833,7 @@ mod tests {
             launch_targets: Vec::new(),
             fixes_enabled: true,
             artwork: Artwork::default(),
+            setup_completed_at: None,
         };
         assert!(steam_ready(&game, &backend).is_err());
         let manifests = BTreeMap::new();

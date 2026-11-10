@@ -306,6 +306,7 @@ body.managed .topbar { position:sticky; top:0; z-index:20; background:rgba(13,18
 .cover-card:hover { background:#1a2431; }
 .cover-card.active, .cover-card.nav-focus { background:var(--surface-raised); border-color:var(--accent); box-shadow:none; }
 .cover-card .cover-title { padding:9px 3px 0; font-size:14px; font-weight:600; line-height:1.3; color:var(--text); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.cover-card .cover-state { padding:4px 3px 0; font-size:11px; color:var(--muted); }
 .pager { display:flex; gap:8px; justify-content:center; margin-top:auto; padding-top:36px; align-items:center; }
 .pager button { border-radius:8px; padding:9px 16px; background:var(--surface-raised); border:1px solid var(--border); color:var(--text); }
 .pager button:disabled { opacity:.4; }
