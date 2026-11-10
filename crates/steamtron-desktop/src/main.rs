@@ -2674,6 +2674,43 @@ fn normalise_title(value: &str) -> String {
         .collect()
 }
 
+/// Strip common edition suffixes so "Batman: Arkham Asylum" matches its
+/// "Game of the Year Edition" Steam listing, without matching sequels.
+fn base_title(value: &str) -> String {
+    let mut title = normalise_title(value);
+    const EDITIONS: &[&str] = &[
+        "gameoftheyearedition",
+        "gameoftheyear",
+        "definitiveedition",
+        "completeedition",
+        "ultimateedition",
+        "deluxeedition",
+        "premiumedition",
+        "enhancededition",
+        "specialedition",
+        "goldedition",
+        "legacyedition",
+        "digitaldeluxe",
+        "collectorsedition",
+        "anniversaryedition",
+        "directorscut",
+        "remastered",
+        "goty",
+        "standardedition",
+    ];
+    for edition in EDITIONS {
+        while title.contains(edition) {
+            title = title.replace(edition, "");
+        }
+    }
+    title
+}
+
+fn store_title_matches(wanted: &str, candidate: &str) -> bool {
+    let wanted = base_title(wanted);
+    !wanted.is_empty() && wanted == base_title(candidate)
+}
+
 #[tauri::command]
 async fn store_resolve_steam(title: String) -> Result<Option<u32>, String> {
     let term = title.trim();
@@ -2692,11 +2729,10 @@ async fn store_resolve_steam(title: String) -> Result<Option<u32>, String> {
         return Ok(None);
     }
     let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
-    let wanted = normalise_title(term);
     for item in payload.get("items").and_then(|items| items.as_array()).into_iter().flatten() {
         let name = item.get("name").and_then(|name| name.as_str()).unwrap_or("");
-        // Strict title match: never map a game to a different edition.
-        if normalise_title(name) == wanted {
+        // Match the base title only: edition suffixes are fine, sequels are not.
+        if store_title_matches(term, name) {
             if let Some(appid) = item.get("id").and_then(|id| id.as_u64()) {
                 if appid > 0 && appid <= u32::MAX as u64 {
                     return Ok(Some(appid as u32));
@@ -2949,4 +2985,25 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running SteamTron");
+}
+
+#[cfg(test)]
+mod artwork_title_tests {
+    use super::*;
+
+    #[test]
+    fn edition_suffixes_match_the_base_game() {
+        assert!(store_title_matches(
+            "Batman: Arkham Asylum",
+            "Batman: Arkham Asylum Game of the Year Edition"
+        ));
+        assert!(store_title_matches("Red Dead Redemption", "Red Dead Redemption"));
+    }
+
+    #[test]
+    fn sequels_and_different_titles_do_not_match() {
+        assert!(!store_title_matches("Red Dead Redemption", "Red Dead Redemption 2"));
+        assert!(!store_title_matches("Uncharted 4: A Thief's End", "Uncharted: Legacy of Thieves Collection"));
+        assert!(!store_title_matches("Batman: Arkham Asylum", "Batman: Arkham City"));
+    }
 }
