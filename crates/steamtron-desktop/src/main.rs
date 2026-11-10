@@ -3096,6 +3096,58 @@ fn directory_size(root: &std::path::Path) -> u64 {
 }
 
 #[tauri::command]
+async fn verify_managed_files(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    let app_id = game
+        .metadata_app_id
+        .ok_or_else(|| "This game has no Steam App ID for integrity verification.".to_string())?;
+    let root = game.installation.root.clone();
+    if !root.is_dir() {
+        return Err("The installation folder does not exist.".into());
+    }
+    let lua = steam::steam_root()
+        .map_err(|error| error.to_string())?
+        .join("config/stplug-in")
+        .join(format!("{app_id}.lua"));
+    if !lua.is_file() {
+        return Err("The Lua manifest is missing. Re-add the game first.".into());
+    }
+    let cache = steamtron_core::paths::layout().cache_dir().join("smd");
+    let smd_lua = download::smd_lua(app_id, &lua, &cache)?;
+    let smd = download::resolve_smd()?;
+    let logs = steamtron_core::paths::layout().diagnostics_for(&game_id);
+    std::fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
+    let log = logs.join(format!("verify-{}.log", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0)));
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let output = std::process::Command::new(&smd)
+            .arg("--data-dir")
+            .arg(cache.join("data"))
+            .arg("download")
+            .arg(&smd_lua)
+            .args(["--update", &root.display().to_string(), "--repair", "--like-steam", "--platform", "windows", "--language", "english"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|error| format!("could not start smd: {error}"))?;
+        let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        std::fs::write(&log, &text).map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let tail = text.lines().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ");
+            return Err(format!("Integrity verification failed: {tail}"));
+        }
+        Ok::<_, String>(log)
+    })
+    .await
+    .map_err(|error| format!("verification task failed: {error}"))??;
+    Ok(serde_json::json!({ "verified": true, "log": result.display().to_string() }))
+}
+
+#[tauri::command]
 async fn managed_game_size(game_id: String) -> Result<u64, String> {
     use steamtron_core::library::Library;
 
@@ -3895,6 +3947,7 @@ fn main() {
             reconcile_registrations,
             quit_app,
             managed_game_size,
+            verify_managed_files,
             steam_download_size,
             remove_managed_game,
             detach_umutron_paths,

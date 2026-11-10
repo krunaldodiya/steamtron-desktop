@@ -40,7 +40,7 @@ fn publish(app: &AppHandle, state: &DownloadState) {
     let _ = app.emit("download-progress", state.clone());
 }
 
-fn resolve_smd() -> Result<PathBuf, String> {
+pub(crate) fn resolve_smd() -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Some(value) = std::env::var_os("STEAMTRON_SMD") {
         candidates.push(PathBuf::from(value));
@@ -57,7 +57,7 @@ fn resolve_smd() -> Result<PathBuf, String> {
         .ok_or_else(|| "smd was not found. Install UmuTron or set STEAMTRON_SMD.".to_string())
 }
 
-fn smd_lua(app_id: u32, lua_path: &Path, cache: &Path) -> Result<PathBuf, String> {
+pub(crate) fn smd_lua(app_id: u32, lua_path: &Path, cache: &Path) -> Result<PathBuf, String> {
     let content = std::fs::read_to_string(lua_path)
         .map_err(|error| format!("{}: {error}", lua_path.display()))?;
     let mut output = String::with_capacity(content.len());

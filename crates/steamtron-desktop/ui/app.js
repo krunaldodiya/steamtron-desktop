@@ -950,6 +950,7 @@ function openManagedGameOptions(game) {
     ["environment", "Environment"],
     ["debug", "Debug"],
     ["link", "Game Link"],
+    ["files", "Installed Files"],
     ["fixes", "Fixes"],
   ];
   if (game.metadata_app_id && game.installation?.mode !== "linked") {
@@ -1112,6 +1113,45 @@ function openManagedGameOptions(game) {
     }
     if (key === "updates") {
       renderUpdatesPanel(pane, latestGame);
+      return;
+    }
+    if (key === "files") {
+      const renderFilesTab = async () => {
+        pane.innerHTML = '<h3>Installed Files</h3><p class="pane-note">Calculating installation size…</p>';
+        let size = 0;
+        try { size = await invoke("managed_game_size", { gameId: game.id }); } catch (_error) { size = 0; }
+        const name = game.installation?.root?.split(/[\\/]/).filter(Boolean).pop() || game.title;
+        pane.innerHTML = `<h3>Installed Files</h3>
+          <div class="files-card files-size-card"><strong>Size of installation: ${formatBytes(size)} (${escape(name)})</strong><button id="files-browse">Browse…</button></div>
+          <div class="files-card">
+            <p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p>
+            <button class="primary files-verify" id="files-verify">Verify files integrity</button>
+            <p class="files-status" id="files-status"></p>
+          </div>`;
+        pane.querySelector("#files-browse").onclick = async () => {
+          try { await invoke("open_path", { path: game.installation.root }); }
+          catch (error) { showToast(String(error), true); }
+        };
+        pane.querySelector("#files-verify").onclick = async (event) => {
+          const status = pane.querySelector("#files-status");
+          const stop = busy(event.target, "Verifying…");
+          status.textContent = "Verifying files against depot manifests…";
+          status.classList.remove("error");
+          try {
+            await invoke("verify_managed_files", { gameId: game.id });
+            stop();
+            status.textContent = "Verification complete. Missing or damaged files were repaired.";
+            showToast("File integrity verified");
+            const next = await invoke("managed_game_size", { gameId: game.id }).catch(() => size);
+            pane.querySelector(".files-size-card strong").textContent = `Size of installation: ${formatBytes(next)} (${name})`;
+          } catch (error) {
+            stop();
+            status.textContent = String(error);
+            status.classList.add("error");
+          }
+        };
+      };
+      void renderFilesTab();
       return;
     }
     const renderFixesTab = async () => {

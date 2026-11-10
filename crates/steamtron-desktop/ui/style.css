@@ -577,3 +577,12 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 }
 .game-actions #managed-stop.danger:hover,
 .home-actions #home-play.danger:hover { background:#a33343; }
+
+/* Game Settings: Installed Files tab. */
+.files-card { display:flex; flex-direction:column; gap:10px; padding:16px 18px; margin-bottom:12px; border:1px solid var(--border); border-radius:12px; background:var(--surface-raised); }
+.files-size-card { flex-direction:row; align-items:center; justify-content:space-between; gap:16px; }
+.files-size-card strong { font-size:14px; }
+.files-card .pane-note { margin:0; }
+.files-card .files-verify { width:100%; padding:11px 16px; font-weight:600; }
+.files-status { margin:0; color:var(--muted); font-size:12px; }
+.files-status.error { color:var(--error, #ff9b9b); }
