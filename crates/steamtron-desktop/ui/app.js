@@ -17,6 +17,7 @@ let libraryPage = 1;
 let homeFocusSection = "recent";
 const LIBRARY_PAGE_SIZE = 60;
 let appView = "library";
+let gameDetailOrigin = "library";
 let pendingRestart = loadPendingRestart();
 
 
@@ -551,7 +552,7 @@ function renderManagedPreview(game) {
     ? '<button id="managed-stop" class="primary">Stop</button>'
     : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
   detailEl.innerHTML = `<div class="page game-page game-detail">
-    <div class="game-page-top"><button id="managed-back" class="secondary">← Library</button></div>
+    <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : "Library"}</button></div>
     <section class="game-hero${appId ? "" : " no-artwork"}" id="game-hero">
       <div class="game-hero-shade"></div>
       <div class="game-hero-card">
@@ -568,7 +569,7 @@ function renderManagedPreview(game) {
       </div>
     </section>
   </div>`;
-  detailEl.querySelector("#managed-back").onclick = () => setView("library");
+  detailEl.querySelector("#managed-back").onclick = () => setView(gameDetailOrigin);
   detailEl.querySelector("#managed-options").onclick = () => openManagedGameOptions(game);
   void hydrateGameDetail(game);
   const play = detailEl.querySelector("#managed-play");
@@ -726,8 +727,9 @@ function renderManagedMode() {
   renderManagedLibrary();
 }
 
-function openManagedGame(id) {
+function openManagedGame(id, origin = "library") {
   managedSelectedId = id;
+  gameDetailOrigin = origin;
   appView = "game";
   renderManagedMode();
 }
@@ -1150,7 +1152,7 @@ function dispatchNavigation(action, fromGamepad = false) {
     if (modal) { modal.remove(); return; }
     if (document.body.classList.contains("fullscreen-mode")) { openFullscreenOptions(); return; }
     if (appView === "store-game") { setView("store"); return; }
-    if (appView === "game") { setView("library"); return; }
+    if (appView === "game") { setView(gameDetailOrigin); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");
     navState.focused = null;
     document.activeElement?.blur?.();
@@ -2632,6 +2634,11 @@ function hydrateStoreCovers(host) {
   }
 }
 
+function managedGameForStoreItem(item) {
+  if (!item?.steam_app_id || !managedLibrary) return null;
+  return managedLibrary.games.find((game) => game.metadata_app_id === item.steam_app_id) || null;
+}
+
 async function openStoreItem(id) {
   const base = [...storeItems, ...storeRecent].find((entry) => String(entry.id) === String(id));
   if (!base) return;
@@ -2642,6 +2649,14 @@ async function openStoreItem(id) {
     if (search) storeDraft = search.value;
   }
   rememberStoreItem(base);
+  if (!managedLibrary) {
+    try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { /* keep going */ }
+  }
+  const known = managedGameForStoreItem(base);
+  if (known) {
+    openManagedGame(known.id, "store");
+    return;
+  }
   let item = base;
   try {
     const full = await invoke("store_game", { id: Number(id) });
@@ -2717,7 +2732,7 @@ async function addStoreItemToLibrary(item, button) {
     progress.close();
     clearRestartRequired();
     showToast(`Added ${result.title} to your library`);
-    renderStoreDetail();
+    openManagedGame(result.game_id, "store");
   } catch (error) {
     progress.fail(String(error));
     stop();
@@ -2733,16 +2748,15 @@ function renderStoreDetail() {
   const genres = (item.genres || []).map((genre) => genre.name).filter(Boolean).join(", ");
   const meta = [item.release_date, genres].filter(Boolean).join(" · ");
   const credits = [item.developers, item.publishers].filter(Boolean).join(" · ");
-  const inLibrary = Boolean(item.steam_app_id
-    && managedLibrary?.games.some((game) => game.metadata_app_id === item.steam_app_id));
+  const managedEntry = managedGameForStoreItem(item);
   const chips = [{ text: "Proton: …" }, { text: `IGDB_ID: ${item.id}`, copy: String(item.id), label: "IGDB_ID" }];
   if (item.steam_app_id) chips.push({ text: `STEAM_ID: ${item.steam_app_id}`, copy: String(item.steam_app_id), label: "STEAM_ID" });
-  const action = inLibrary
-    ? '<button class="primary" disabled>In library</button>'
+  const action = managedEntry
+    ? '<button class="primary" id="store-open-library">View in library</button>'
     : item.steam_app_id
       ? '<button class="primary" id="store-add">Add to library</button>'
       : '<button class="primary" disabled title="This title has no Steam release, so it cannot be added to the Steam library.">Not available on Steam</button>';
-  const availabilityNote = !item.steam_app_id && !inLibrary
+  const availabilityNote = !item.steam_app_id && !managedEntry
     ? '<p class="game-note">This title has no Steam release, so SteamTron cannot add it to the Steam library or rate it on ProtonDB.</p>'
     : "";
   detailEl.innerHTML = `<div class="page game-page game-detail">
@@ -2769,6 +2783,8 @@ function renderStoreDetail() {
     void invoke("store_resolve_steam", { title: item.name }).then((appid) => {
       if (!appid || appView !== "store-game" || storeDetail?.id !== item.id) return;
       storeDetail = { ...storeDetail, steam_app_id: appid };
+      const managed = managedGameForStoreItem(storeDetail);
+      if (managed) { openManagedGame(managed.id, "store"); return; }
       renderStoreDetail();
     }).catch(() => {});
   }
@@ -2787,6 +2803,10 @@ function renderStoreDetail() {
   const add = detailEl.querySelector("#store-add");
   if (add) {
     add.onclick = () => addStoreItemToLibrary(item, add);
+  }
+  const openLibrary = detailEl.querySelector("#store-open-library");
+  if (openLibrary && managedEntry) {
+    openLibrary.onclick = () => openManagedGame(managedEntry.id, "store");
   }
   const coverNode = detailEl.querySelector(".game-cover");
   if (coverNode) coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; });
