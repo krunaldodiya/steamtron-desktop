@@ -2155,22 +2155,6 @@ fn detect_proton_runners() -> Vec<serde_json::Value> {
             }
         }
     }
-    let umutron = steamtron_core::paths::layout()
-        .data_home
-        .join("umutron/proton-manager/runners");
-    if let Ok(entries) = std::fs::read_dir(&umutron) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let runner = path.join("proton");
-                if runner.is_file() {
-                    push(runner, "umutron");
-                }
-            } else if path.is_file() {
-                push(path, "umutron");
-            }
-        }
-    }
     runners
 }
 
@@ -2688,30 +2672,7 @@ fn write_igdb_cache(appid: u32, igdb_id: &str) {
 
 #[tauri::command]
 async fn igdb_id_for(appid: u32, title: Option<String>) -> Option<String> {
-    // 1. UmuTron's persisted ID cache (by App ID, then by title).
-    let umutron_path = steamtron_core::paths::layout()
-        .data_home
-        .join("umutron/game-id-cache.json");
-    if let Ok(text) = std::fs::read_to_string(&umutron_path) {
-        if let Ok(cache) = serde_json::from_str::<serde_json::Value>(&text) {
-            let mut lookup = |key: &str| -> Option<String> {
-                let value = cache.get(key)?;
-                if let Some(number) = value.as_u64() {
-                    return Some(number.to_string());
-                }
-                value.as_str().map(str::to_owned)
-            };
-            if let Some(id) = lookup(&appid.to_string()) {
-                return Some(id);
-            }
-            if let Some(title) = title.as_deref() {
-                if let Some(id) = lookup(&title.to_lowercase()) {
-                    return Some(id);
-                }
-            }
-        }
-    }
-    // 2. SteamTron's own cache.
+    // 1. SteamTron's own cache.
     if let Some(value) = read_igdb_cache().get(&appid.to_string()) {
         if let Some(number) = value.as_u64() {
             return Some(number.to_string());
@@ -2720,7 +2681,7 @@ async fn igdb_id_for(appid: u32, title: Option<String>) -> Option<String> {
             return Some(text.to_owned());
         }
     }
-    // 3. Catalogue browse by title, exact-or-edition match only.
+    // 2. Catalogue browse by title, exact-or-edition match only.
     let title = title?;
     let data = store_get(
         "/v1/games",

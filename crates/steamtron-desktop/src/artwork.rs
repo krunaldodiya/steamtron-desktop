@@ -7,7 +7,6 @@
 
 use std::path::{Path, PathBuf};
 
-use steamtron_core::library::Game;
 
 const MAX_IMAGE: u64 = 12 * 1024 * 1024;
 const LEGACY_BASE: &str = "https://cdn.akamai.steamstatic.com/steam/apps";
@@ -60,53 +59,6 @@ fn write_cached(directory: &Path, appid: u32, kind: &str, bytes: &[u8]) -> Optio
     Some(target)
 }
 
-fn copy_local(source: &Path, directory: &Path, appid: u32, kind: &str) -> Option<PathBuf> {
-    let bytes = std::fs::read(source).ok()?;
-    write_cached(directory, appid, kind, &bytes)
-}
-
-fn umutron_art_dir() -> PathBuf {
-    steamtron_core::paths::layout().data_home.join("umutron/artwork")
-}
-
-fn umutron_library() -> Option<serde_json::Value> {
-    let path = steamtron_core::paths::layout().data_home.join("umutron/library.json");
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
-}
-
-fn local_names(game: &Game, appid: u32) -> (Option<String>, Option<String>) {
-    let mut cover = Some(game.artwork.cover.clone()).filter(|name| !name.is_empty());
-    let mut hero = Some(game.artwork.hero.clone()).filter(|name| !name.is_empty());
-    if cover.is_some() && hero.is_some() {
-        return (cover, hero);
-    }
-    if let Some(library) = umutron_library() {
-        if let Some(games) = library.get("games").and_then(|value| value.as_array()) {
-            let entry = games.iter().find(|entry| {
-                entry.get("metadata_app_id").and_then(|value| value.as_u64()) == Some(appid as u64)
-                    || entry.get("id").and_then(|value| value.as_str()) == Some(&appid.to_string())
-            });
-            if let Some(entry) = entry {
-                let artwork = entry.get("artwork");
-                let name = |key: &str| {
-                    artwork
-                        .and_then(|value| value.get(key))
-                        .and_then(|value| value.as_str())
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned)
-                };
-                if cover.is_none() {
-                    cover = name("portrait").or_else(|| name("landscape")).or_else(|| name("cover"));
-                }
-                if hero.is_none() {
-                    hero = name("hero");
-                }
-            }
-        }
-    }
-    (cover, hero)
-}
 
 async fn download(
     client: &reqwest::Client,
@@ -206,18 +158,6 @@ pub async fn ensure(game_id: &str) -> Result<ArtworkPaths, String> {
 
     let mut cover = find_cached(&directory, appid, "cover");
     let mut hero = find_cached(&directory, appid, "hero");
-    let (local_cover, local_hero) = local_names(game, appid);
-    let source_dir = umutron_art_dir();
-    if cover.is_none() {
-        if let Some(name) = local_cover {
-            cover = copy_local(&source_dir.join(name), &directory, appid, "cover");
-        }
-    }
-    if hero.is_none() {
-        if let Some(name) = local_hero {
-            hero = copy_local(&source_dir.join(name), &directory, appid, "hero");
-        }
-    }
     if cover.is_none() || hero.is_none() {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(25))
