@@ -567,3 +567,13 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .fix-action-row button { width:100%; padding:11px 14px; }
 .fix-path { margin:4px 0; font-size:13px; color:var(--text); overflow-wrap:anywhere; }
 .fix-meta { margin:0 0 10px; font-size:12px; color:var(--muted); }
+
+/* Destructive Stop actions stay visibly red. */
+.game-actions #managed-stop.danger,
+.home-actions #home-play.danger {
+  background:#8f2b39;
+  border-color:#b64a4a;
+  color:#fff;
+}
+.game-actions #managed-stop.danger:hover,
+.home-actions #home-play.danger:hover { background:#a33343; }

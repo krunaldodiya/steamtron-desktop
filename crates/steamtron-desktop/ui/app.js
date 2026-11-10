@@ -328,6 +328,7 @@ async function startManagedGame(game, button) {
 }
 
 async function stopManagedGame(game, button) {
+  if (!window.confirm(`Stop ${game.title}? Unsaved game progress may be lost.`)) return;
   const stop = button ? busy(button, "Stopping…") : () => {};
   try {
     await invoke("stop_managed", { gameId: game.id });
@@ -582,7 +583,7 @@ function renderManagedPreview(game) {
   const provisionalCredits = seed ? [seed.developers, seed.publishers].filter(Boolean).join(" · ") : "";
   const installed = managedReady(game);
   const action = running
-    ? '<button id="managed-stop" class="primary">Stop</button>'
+    ? '<button id="managed-stop" class="danger">Stop</button>'
     : !installed
       ? '<button id="managed-download" class="primary">Download</button>'
       : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
@@ -1246,7 +1247,7 @@ function renderManagedHome() {
         <h1 id="home-title">${escape(featured?.title || (games.length ? "Nothing ready yet" : "No games yet"))}</h1>
         <p class="home-meta" id="home-related">${featured ? escape(appId ? `Steam App ${appId}` : "Managed entry") + (managedReady(featured) ? " · Ready to play" : "") : games.length ? "Finish a download and setup to see it here." : "Add a game from the Store to get started."}</p>
         <p class="home-description hidden" id="home-description"></p>
-        <div class="home-actions"><button class="primary" id="home-play"${featured ? "" : " disabled"}>${running ? "Stop" : "Play"}</button><button id="home-view"${featured ? "" : " disabled"}>View game</button></div>
+        <div class="home-actions"><button class="${running ? "danger" : "primary"}" id="home-play"${featured ? "" : " disabled"}>${running ? "Stop" : "Play"}</button><button id="home-view"${featured ? "" : " disabled"}>View game</button></div>
       </div>
     </section>
     <section class="managed-rail" data-rail="recent">
