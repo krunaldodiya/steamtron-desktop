@@ -3148,31 +3148,6 @@ fn library_snapshot() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn library_import_preview(path: String) -> Result<serde_json::Value, String> {
-    use std::path::PathBuf;
-
-    let plan = steamtron_core::import::plan_path(PathBuf::from(&path))
-        .map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({ "path": path, "plan": plan }))
-}
-
-#[tauri::command]
-fn library_import_commit(path: String) -> Result<serde_json::Value, String> {
-    use std::path::PathBuf;
-    use steamtron_core::library::Library;
-
-    let plan = steamtron_core::import::plan_path(PathBuf::from(&path))
-        .map_err(|error| error.to_string())?;
-    let target = Library::default_path();
-    let report = steamtron_core::import::apply_plan(&plan, &target)
-        .map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({
-        "library": target.display().to_string(),
-        "report": report,
-    }))
-}
-
-#[tauri::command]
 fn library_remember_picker(key: String, folder: String) -> Result<(), String> {
     use steamtron_core::library::Library;
 
@@ -3183,41 +3158,6 @@ fn library_remember_picker(key: String, folder: String) -> Result<(), String> {
     library.save().map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn library_migration_status() -> Result<serde_json::Value, String> {
-    use std::path::PathBuf;
-    use steamtron_core::library::Library;
-
-    let library_path = Library::default_path();
-    let library = Library::open(&library_path).map_err(|error| error.to_string())?;
-    let mut sources = Vec::new();
-    let layout = steamtron_core::paths::layout();
-    let legacy = layout.legacy_config();
-    for (kind, path) in [("steamtron", legacy)] {
-        if !path.is_file() {
-            continue;
-        }
-        match steamtron_core::import::plan_path(&path) {
-            Ok(plan) => sources.push(serde_json::json!({
-                "kind": kind,
-                "path": path.display().to_string(),
-                "plan": plan,
-            })),
-            Err(error) => sources.push(serde_json::json!({
-                "kind": kind,
-                "path": path.display().to_string(),
-                "error": error.to_string(),
-            })),
-        }
-    }
-    Ok(serde_json::json!({
-        "library": {
-            "path": library_path.display().to_string(),
-            "games": library.games().len(),
-        },
-        "sources": sources,
-    }))
-}
 
 fn main() {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -3331,10 +3271,7 @@ fn main() {
             pick_managed_executable,
             set_managed_launch_target,
             registration_verify,
-            library_import_preview,
-            library_import_commit,
             library_remember_picker,
-            library_migration_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running SteamTron");
