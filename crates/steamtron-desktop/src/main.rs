@@ -3114,6 +3114,20 @@ fn managed_download_status(game_id: String) -> Option<download::DownloadState> {
     download::status(&game_id)
 }
 
+
+#[tauri::command]
+fn detach_umutron_paths() -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let detached = library.detach_umutron_paths();
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "detached": detached,
+        "library": library_json(&library),
+    }))
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -3317,6 +3331,7 @@ fn main() {
             managed_game_size,
             steam_download_size,
             remove_managed_game,
+            detach_umutron_paths,
             update_managed_launch_settings,
             managed_game_log,
             start_managed_download,

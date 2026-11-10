@@ -416,7 +416,48 @@ impl Library {
         Ok(())
     }
 
-    pub fn set_default_drive(&mut self, id: &str) -> Result<(), LibraryError> {
+    /// Rewrite entries that still point inside UmuTron's library to SteamTron's
+    /// own layout. Content is not moved: the entries become uninstalled and can
+    /// be downloaded into `SteamTronLibrary/steamtronapps`.
+    pub fn detach_umutron_paths(&mut self) -> usize {
+        let mut changed = 0usize;
+        for mut game in self.games().to_vec() {
+        let root = game.installation.root.to_string_lossy().to_string();
+        let needs = root.contains("/UmuLibrary/")
+            || root.contains("/umutron/")
+            || game.installation.proton.contains("/umutron/")
+            || game.launch.proton.contains("/umutron/")
+            || game
+                .launch_targets
+                .iter()
+                .any(|target| target.executable.to_string_lossy().contains("/UmuLibrary/"));
+        if !needs {
+            continue;
+        }
+        let Some(drive) = drive_root_for(&game.installation.root) else { continue };
+        let base = steamtronapps_root(&drive);
+        let folder = safe_folder(&game.title).unwrap_or_else(|_| game.id.clone());
+        game.installation.mode = InstallMode::Managed;
+        game.installation.root = base.join("common").join(&folder);
+        game.installation.prefix = base.join("compatdata").join(&folder);
+        game.installation.manifest = base.join(format!(
+            "appmanifest_{}.json",
+            game.metadata_app_id
+                .map(|app_id| app_id.to_string())
+                .unwrap_or_else(|| game.id.clone())
+        ));
+        game.installation.proton.clear();
+        game.installation.confirmed = false;
+        game.launch.proton.clear();
+        game.launch_targets.clear();
+            if self.upsert_game(game).is_ok() {
+                changed += 1;
+            }
+        }
+        changed
+    }
+
+pub fn set_default_drive(&mut self, id: &str) -> Result<(), LibraryError> {
         if !self.drives.iter().any(|drive| drive.id == id) {
             return Err(LibraryError::Invalid(format!("unknown drive: {id}")));
         }

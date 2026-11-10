@@ -400,6 +400,7 @@ pub fn plan_umutron_library(path: impl AsRef<Path>) -> Result<ImportPlan, Import
             });
             continue;
         };
+        let source_root = root.clone();
         if let Some((drive_root, _folder)) = derive_umu_layout(&root) {
             if drives.insert(drive_root.clone()) {
                 plan.actions.push(ImportAction::AddDrive {
@@ -492,12 +493,34 @@ pub fn plan_umutron_library(path: impl AsRef<Path>) -> Result<ImportPlan, Import
                 })
                 .unwrap_or_default(),
         };
+        // SteamTron owns its own layout: imported entries point at
+        // SteamTronLibrary/steamtronapps and are downloaded there, never at
+        // UmuTron's content folders.
+        let mut game = game;
+        if let Some((drive_root, _folder)) = derive_umu_layout(&source_root) {
+            let base = crate::library::steamtronapps_root(&drive_root);
+            let folder = crate::library::safe_folder(&game.title)
+                .unwrap_or_else(|_| game.id.clone());
+            game.installation.mode = InstallMode::Managed;
+            game.installation.root = base.join("common").join(&folder);
+            game.installation.prefix = base.join("compatdata").join(&folder);
+            game.installation.manifest = base.join(format!(
+                "appmanifest_{}.json",
+                game.metadata_app_id
+                    .map(|app_id| app_id.to_string())
+                    .unwrap_or_else(|| game.id.clone())
+            ));
+            game.installation.proton.clear();
+            game.installation.confirmed = false;
+            game.launch.proton.clear();
+            game.launch_targets.clear();
+        }
         let planned_layout = crate::library::game_layout(
             &game
                 .installation
                 .root
                 .ancestors()
-                .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("UmuLibrary"))
+                .find(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("SteamTronLibrary"))
                 .and_then(Path::parent)
                 .unwrap_or_else(|| Path::new("/")),
             &game,

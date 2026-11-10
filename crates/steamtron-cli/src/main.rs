@@ -120,6 +120,8 @@ enum ManagedCommand {
     },
     /// Verify stored Steam registrations and clear pending states.
     Reconcile,
+    /// Rewrite imported entries out of UmuTron paths into SteamTron's layout.
+    DetachUmutron,
     /// List, install or remove managed fixes.
     Fixes {
         #[command(subcommand)]
@@ -341,6 +343,16 @@ fn main() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&removed)?);
                     }
                 },
+                ManagedCommand::DetachUmutron => {
+                    let mut library = steamtron_core::library::Library::load()?;
+                    let detached =
+                        library.detach_umutron_paths();
+                    library.save()?;
+                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                        "detached": detached,
+                        "games": library.games().len(),
+                    }))?);
+                }
                 ManagedCommand::Reconcile => {
                     let report =
                         steamtron_library::managed::reconcile_registrations(&backend)?;
