@@ -1868,7 +1868,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn process_evidence() -> Vec<(String, String, Vec<String>)> {
+fn process_evidence() -> Vec<(u32, String, String, Vec<String>)> {
     use std::path::Path as StdPath;
 
     let self_pid = std::process::id();
@@ -1917,9 +1917,51 @@ fn process_evidence() -> Vec<(String, String, Vec<String>)> {
                 }
             }
         }
-        result.push((argv0, comm, prefixes));
+        result.push((pid, argv0, comm, prefixes));
     }
     result
+}
+
+#[cfg(target_os = "linux")]
+fn game_process_pids(game: &steamtron_core::library::Game) -> Vec<u32> {
+    let Some(target) = game
+        .launch_targets
+        .iter()
+        .find(|target| target.primary)
+        .or_else(|| game.launch_targets.first())
+    else {
+        return Vec::new();
+    };
+    let filename = target
+        .executable
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let stem = target
+        .executable
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let mut result = Vec::new();
+    for (pid, argv0, comm, _prefixes) in process_evidence() {
+        let by_name = !filename.is_empty() && argv0 == filename;
+        let by_wine = matches!(argv0.as_str(), "wine" | "wine64" | "wine-preloader" | "wine64-preloader")
+            && !stem.is_empty()
+            && (comm == stem || (comm.len() >= 8 && stem.starts_with(&comm)));
+        if by_name || by_wine {
+            result.push(pid);
+        }
+    }
+    result
+}
+
+#[cfg(not(target_os = "linux"))]
+fn game_process_pids(_game: &steamtron_core::library::Game) -> Vec<u32> {
+    Vec::new()
 }
 
 #[tauri::command]
@@ -1934,72 +1976,114 @@ fn running_managed() -> Result<Vec<String>, String> {
         .collect();
     #[cfg(target_os = "linux")]
     if let Ok(library) = Library::load() {
-        let processes = process_evidence();
         for game in library.games() {
-            let target = game
-                .launch_targets
-                .iter()
-                .find(|target| target.primary)
-                .or_else(|| game.launch_targets.first());
-            let Some(target) = target else { continue };
-            let filename = target
-                .executable
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("")
-                .trim_end_matches('.')
-                .to_ascii_lowercase();
-            let stem = target
-                .executable
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("")
-                .trim_end_matches('.')
-                .to_ascii_lowercase();
-            for (argv0, comm, _prefixes) in &processes {
-                let by_name = !filename.is_empty() && argv0 == &filename;
-                let by_wine = matches!(argv0.as_str(), "wine" | "wine64" | "wine-preloader" | "wine64-preloader")
-                    && !stem.is_empty()
-                    && (comm == &stem || (comm.len() >= 8 && stem.starts_with(comm)));
-                if by_name || by_wine {
-                    games.insert(game.id.clone());
-                    break;
-                }
+            if !game_process_pids(game).is_empty() {
+                games.insert(game.id.clone());
             }
         }
     }
     Ok(games.into_iter().collect())
 }
 
+#[cfg(target_os = "linux")]
+fn process_descendants(root: u32) -> Vec<u32> {
+    let mut table = std::collections::HashMap::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else { continue };
+            let Some(close) = stat.rfind(')') else { continue };
+            let fields: Vec<&str> = stat[close + 2..].split_whitespace().collect();
+            if let Some(parent) = fields.get(1).and_then(|value| value.parse::<u32>().ok()) {
+                table.insert(pid, parent);
+            }
+        }
+    }
+    let mut owned = vec![root];
+    let mut index = 0;
+    while index < owned.len() && owned.len() < 4096 {
+        let parent = owned[index];
+        index += 1;
+        for (pid, ppid) in &table {
+            if *ppid == parent && !owned.contains(pid) {
+                owned.push(*pid);
+            }
+        }
+    }
+    owned
+}
+
+#[cfg(target_os = "linux")]
+fn signal_pid(pid: u32, signal: i32) {
+    unsafe {
+        libc::kill(pid as i32, signal);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn pid_exists(pid: u32) -> bool {
+    std::path::Path::new("/proc").join(pid.to_string()).exists()
+}
+
 #[tauri::command]
 fn stop_managed(game_id: String) -> Result<(), String> {
-    let pid = managed_runs()
+    use steamtron_core::library::Library;
+
+    let tracked = managed_runs()
         .lock()
         .map_err(|_| "Game state lock failed.".to_string())?
         .get(&game_id)
-        .copied()
-        .ok_or_else(|| "This game is not running.".to_string())?;
-    #[cfg(unix)]
+        .copied();
+    let game = Library::load()
+        .ok()
+        .and_then(|library| library.game(&game_id).cloned());
+    #[cfg(target_os = "linux")]
+    let mut pids: Vec<u32> = tracked.into_iter().collect();
+    #[cfg(target_os = "linux")]
+    if let Some(game) = game.as_ref() {
+        pids.extend(game_process_pids(game));
+    }
+    #[cfg(target_os = "linux")]
+    pids.sort_unstable();
+    #[cfg(target_os = "linux")]
+    pids.dedup();
+    #[cfg(target_os = "linux")]
+    if pids.is_empty() {
+        return Err("This game is not running.".into());
+    }
+    #[cfg(target_os = "linux")]
     {
-        steamtron_core::runtime::terminate_process_group(pid, false)
-            .map_err(|error| error.to_string())?;
+        for pid in &pids {
+            for process in process_descendants(*pid) {
+                signal_pid(process, libc::SIGTERM);
+            }
+        }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
         while std::time::Instant::now() < deadline {
-            let running = managed_runs()
-                .lock()
-                .map_err(|_| "Game state lock failed.".to_string())?
-                .contains_key(&game_id);
-            if !running {
-                return Ok(());
+            let alive = pids.iter().any(|pid| pid_exists(*pid))
+                || game.as_ref().is_some_and(|game| !game_process_pids(game).is_empty());
+            if !alive {
+                break;
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        steamtron_core::runtime::terminate_process_group(pid, true)
-            .map_err(|error| error.to_string())?;
-        Ok(())
+        for pid in &pids {
+            for process in process_descendants(*pid) {
+                signal_pid(process, libc::SIGKILL);
+            }
+        }
+        managed_runs()
+            .lock()
+            .map_err(|_| "Game state lock failed.".to_string())?
+            .remove(&game_id);
+        if game.as_ref().is_some_and(|game| !game_process_pids(game).is_empty()) {
+            return Err("The game processes did not stop.".into());
+        }
+        return Ok(());
     }
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     {
+        let pid = tracked.ok_or_else(|| "This game is not running.".to_string())?;
         let status = std::process::Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .status()
@@ -2007,6 +2091,10 @@ fn stop_managed(game_id: String) -> Result<(), String> {
         if !status.success() {
             return Err(format!("taskkill exited with {status}"));
         }
+        managed_runs()
+            .lock()
+            .map_err(|_| "Game state lock failed.".to_string())?
+            .remove(&game_id);
         Ok(())
     }
 }

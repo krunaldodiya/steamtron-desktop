@@ -13,6 +13,7 @@ let artworkLoading = false;
 let managedLibrary = null;
 let managedSelectedId = null;
 let runningManaged = new Set();
+const runningGrace = new Map();
 let libraryPage = 1;
 let homeFocusSection = "recent";
 const LIBRARY_PAGE_SIZE = 60;
@@ -315,10 +316,9 @@ async function startManagedGame(game, button) {
   const stop = button ? busy(button, "Starting…") : () => {};
   try {
     const result = await invoke("play_managed", { gameId: game.id });
-    if (result.mode !== "steam") runningManaged.add(game.id);
-    showToast(result.mode === "steam"
-      ? `Starting ${game.title} through Steam`
-      : `Started ${game.title} · ${result.log}`);
+    runningManaged.add(game.id);
+    runningGrace.set(game.id, Date.now() + 20000);
+    showToast(`Started ${game.title} · ${result.log}`);
     managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
     renderManagedMode();
   } catch (error) {
@@ -331,6 +331,7 @@ async function stopManagedGame(game, button) {
   const stop = button ? busy(button, "Stopping…") : () => {};
   try {
     await invoke("stop_managed", { gameId: game.id });
+    runningGrace.delete(game.id);
     runningManaged.delete(game.id);
     showToast(`Stopped ${game.title}`);
     renderManagedMode();
@@ -4135,6 +4136,11 @@ setInterval(async () => {
   runningPollBusy = true;
   try {
     const next = new Set(await invoke("running_managed"));
+    const now = Date.now();
+    for (const [id, until] of runningGrace) {
+      if (next.has(id) || until <= now) runningGrace.delete(id);
+      else next.add(id);
+    }
     const changed = next.size !== runningManaged.size
       || [...next].some((id) => !runningManaged.has(id));
     if (changed) {
