@@ -547,3 +547,14 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-status { margin:0; color:var(--text); font-size:14px; }
 .download-status.error { color:var(--error); }
 .download-meta { margin:8px 0 0; color:var(--muted); font-size:12px; min-height:16px; }
+
+/* Game Settings: inline folder picker and single-line environment rows. */
+.game-link-folder-row { display:flex; align-items:center; gap:8px; }
+.game-link-folder-row input { flex:1; min-width:0; width:auto; }
+.game-link-folder-row button { flex:0 0 auto; }
+.game-settings-pane .game-link-section-title { margin-top:24px; }
+.game-settings-pane .pane-note { line-height:1.55; margin-bottom:16px; }
+.env-row { display:grid; grid-template-columns:minmax(0, 1.25fr) minmax(0, 1fr) auto; gap:8px; margin-bottom:8px; align-items:center; }
+.env-row input { width:100%; }
+.env-remove { border:1px solid #8b3b3b; border-radius:8px; background:#7d2531; color:#ffe3e3; padding:9px 14px; }
+.game-settings-pane .pane-add { width:100%; margin:8px 0 14px; padding:11px 16px; }
