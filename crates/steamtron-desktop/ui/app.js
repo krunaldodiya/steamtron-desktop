@@ -2950,9 +2950,16 @@ async function renderProtonSettings(host) {
       if (state && protonInstallActive(state)) {
         control = protonProgressMarkup(state);
       } else if (release.installed) {
-        control = release.installed_path === defaultPath
-          ? '<span class="settings-badge ok">default</span>'
-          : `<button data-proton-default="${escape(release.installed_path)}">Set as default</button>`;
+        const actions = [];
+        if (release.installed_path === defaultPath) {
+          actions.push('<span class="settings-badge ok">default</span>');
+        } else {
+          actions.push(`<button data-proton-default="${escape(release.installed_path)}">Set as default</button>`);
+        }
+        if (release.removable) {
+          actions.push(`<button class="danger" data-proton-remove="${escape(release.installed_path)}">Uninstall</button>`);
+        }
+        control = actions.join("");
       } else if (release.installable) {
         control = `<button data-proton-install="${index}">Install</button>`;
       }
@@ -2967,6 +2974,23 @@ async function renderProtonSettings(host) {
           await renderSettingsPage();
           showToast("Default Proton runner updated");
         } catch (error) { showToast(String(error), true); }
+      };
+    }
+    for (const button of list.querySelectorAll("[data-proton-remove]")) {
+      button.onclick = async () => {
+        const release = releases.find((entry) => entry.installed_path === button.dataset.protonRemove);
+        if (!release) return;
+        if (!window.confirm(`Uninstall ${release.tag}? The downloaded Proton files will be deleted.`)) return;
+        const stop = busy(button, "Uninstalling…");
+        try {
+          await invoke("uninstall_proton_release", { path: button.dataset.protonRemove });
+          protonSourceCache.clear();
+          await renderSettingsPage();
+          showToast(`Uninstalled ${release.tag}`);
+        } catch (error) {
+          stop();
+          showToast(String(error), true);
+        }
       };
     }
     for (const button of list.querySelectorAll("[data-proton-install]")) {
@@ -3009,7 +3033,7 @@ async function renderProtonSettings(host) {
     }
     list.innerHTML = '<div class="settings-row"><div class="row-text"><span>Loading releases…</span></div></div>';
     try {
-      const releases = await invoke("proton_source_releases", { family });
+      const releases = await invoke("proton_source_releases", { family, force });
       protonSourceCache.set(family, releases);
       renderReleases(releases, installStates);
     } catch (error) {
@@ -3044,7 +3068,8 @@ async function renderProtonSettings(host) {
       return;
     } else {
       stopProtonInstallPolling();
-      await loadSource(protonSource, { force: true });
+      protonSourceCache.delete(protonSource);
+      await loadSource(protonSource);
     }
   };
   const ensurePolling = () => {

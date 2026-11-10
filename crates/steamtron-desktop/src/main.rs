@@ -2248,10 +2248,13 @@ fn proton_runners() -> serde_json::Value {
 #[tauri::command]
 async fn proton_source_releases(
     family: String,
+    force: Option<bool>,
 ) -> Result<Vec<proton_sources::SourceRelease>, String> {
-    tauri::async_runtime::spawn_blocking(move || proton_sources::list(&family))
-        .await
-        .map_err(|error| format!("Proton source task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        proton_sources::list_cached(&family, force.unwrap_or(false))
+    })
+    .await
+    .map_err(|error| format!("Proton source task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -2290,6 +2293,13 @@ fn install_proton_release(
 #[tauri::command]
 fn proton_install_states() -> Vec<proton_sources::InstallState> {
     proton_sources::read_states()
+}
+
+#[tauri::command]
+fn uninstall_proton_release(path: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    proton_sources::uninstall(&path)?;
+    Ok(serde_json::json!({ "uninstalled": true }))
 }
 
 #[tauri::command]
@@ -3337,6 +3347,7 @@ fn main() {
             proton_source_releases,
             install_proton_release,
             proton_install_states,
+            uninstall_proton_release,
             set_default_proton_runner,
             open_path,
             running_managed,

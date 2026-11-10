@@ -23,7 +23,7 @@ const REPOS: &[(&str, &str)] = &[
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 const FAMILIES: &[&str] = &["GE-Proton", "UMU-Proton", "Proton-CachyOS", "Valve-Proton"];
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceRelease {
     pub family: String,
     pub tag: String,
@@ -33,6 +33,7 @@ pub struct SourceRelease {
     pub installed: bool,
     pub installed_path: String,
     pub installable: bool,
+    pub removable: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -375,6 +376,42 @@ fn checksum(url: &str) -> Result<String, String> {
     Ok(first)
 }
 
+pub fn uninstall(installed_path: &str) -> Result<(), String> {
+    use steamtron_core::library::Library;
+
+    let runner = Path::new(installed_path);
+    if !runner.is_absolute() {
+        return Err("invalid Proton runner path".into());
+    }
+    let root = runner_root()
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", runner_root().display()))?;
+    let runner = runner
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", runner.display()))?;
+    if !runner.starts_with(&root) || runner == root {
+        return Err("Steam-managed Proton runners cannot be uninstalled here.".into());
+    }
+    let directory = runner
+        .parent()
+        .filter(|parent| *parent != root.as_path())
+        .ok_or_else(|| "invalid Proton runner folder".to_string())?
+        .to_path_buf();
+    if directory.exists() {
+        fs::remove_dir_all(&directory).map_err(|error| format!("{}: {error}", directory.display()))?;
+    }
+    let prefix = directory.display().to_string();
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    {
+        let settings = library.settings_mut();
+        settings.proton_runners.retain(|entry| !entry.starts_with(&prefix));
+        if settings.default_proton == installed_path || settings.default_proton.starts_with(&prefix) {
+            settings.default_proton.clear();
+        }
+    }
+    library.save().map_err(|error| error.to_string())
+}
+
 fn register(runner: &Path) -> Result<(), String> {
     use steamtron_core::library::Library;
 
@@ -390,6 +427,48 @@ fn register(runner: &Path) -> Result<(), String> {
         }
     }
     library.save().map_err(|error| error.to_string())
+}
+
+fn source_cache_path(family: &str) -> PathBuf {
+    steamtron_core::paths::layout()
+        .cache_dir()
+        .join("proton-sources")
+        .join(format!("{}.json", sanitize(family)))
+}
+
+fn cached_release(mut release: SourceRelease) -> SourceRelease {
+    let runner = release_dir(&release.family, &release.tag).join("proton");
+    release.installed = runner.is_file();
+    release.installed_path = runner.display().to_string();
+    release.removable = true;
+    release
+}
+
+/// Read the persistent source cache, fetching only when missing or forced.
+pub fn list_cached(family: &str, force: bool) -> Result<Vec<SourceRelease>, String> {
+    if family == "Valve-Proton" {
+        return valve_releases();
+    }
+    let path = source_cache_path(family);
+    if !force {
+        if let Ok(bytes) = fs::read(&path) {
+            if let Ok(releases) = serde_json::from_slice::<Vec<SourceRelease>>(&bytes) {
+                return Ok(releases.into_iter().map(cached_release).collect());
+            }
+        }
+    }
+    let releases = list(family)?;
+    if let Some(parent) = path.parent() {
+        if fs::create_dir_all(parent).is_ok() {
+            if let Ok(payload) = serde_json::to_vec(&releases) {
+                let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+                if fs::write(&temporary, payload).is_ok() && fs::rename(&temporary, &path).is_err() {
+                    let _ = fs::remove_file(&temporary);
+                }
+            }
+        }
+    }
+    Ok(releases)
 }
 
 pub fn list(family: &str) -> Result<Vec<SourceRelease>, String> {
@@ -457,6 +536,7 @@ pub fn list(family: &str) -> Result<Vec<SourceRelease>, String> {
                 installed: runner.is_file(),
                 installed_path: runner.display().to_string(),
                 installable: true,
+                removable: true,
             });
         }
     }
@@ -488,6 +568,7 @@ fn valve_releases() -> Result<Vec<SourceRelease>, String> {
                 installed: true,
                 installed_path: runner.display().to_string(),
                 installable: false,
+                removable: false,
             });
         }
     }
