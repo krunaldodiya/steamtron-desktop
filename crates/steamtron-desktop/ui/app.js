@@ -2926,6 +2926,7 @@ async function renderProtonSettings(host) {
 
 for (const tab of document.querySelectorAll("[data-settings-tab]")) {
   tab.onclick = () => {
+    focusControl(tab);
     settingsTab = tab.dataset.settingsTab;
     void renderSettingsPage();
   };
