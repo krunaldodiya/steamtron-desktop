@@ -2743,20 +2743,23 @@ async function addStoreItemToLibrary(item, button) {
 function renderStoreDetail() {
   const item = storeDetail;
   if (!item) { setView("store"); return; }
+  // Managed titles always open the library detail directly.
+  const managedEntry = managedGameForStoreItem(item);
+  if (managedEntry) {
+    openManagedGame(managedEntry.id, "store");
+    return;
+  }
   const hero = item.images?.hero || item.images?.portrait || "";
   const cover = item.images?.portrait || "";
   const genres = (item.genres || []).map((genre) => genre.name).filter(Boolean).join(", ");
   const meta = [item.release_date, genres].filter(Boolean).join(" · ");
   const credits = [item.developers, item.publishers].filter(Boolean).join(" · ");
-  const managedEntry = managedGameForStoreItem(item);
   const chips = [{ text: "Proton: …" }, { text: `IGDB_ID: ${item.id}`, copy: String(item.id), label: "IGDB_ID" }];
   if (item.steam_app_id) chips.push({ text: `STEAM_ID: ${item.steam_app_id}`, copy: String(item.steam_app_id), label: "STEAM_ID" });
-  const action = managedEntry
-    ? '<button class="primary" id="store-open-library">View in library</button>'
-    : item.steam_app_id
-      ? '<button class="primary" id="store-add">Add to library</button>'
-      : '<button class="primary" disabled title="This title has no Steam release, so it cannot be added to the Steam library.">Not available on Steam</button>';
-  const availabilityNote = !item.steam_app_id && !managedEntry
+  const action = item.steam_app_id
+    ? '<button class="primary" id="store-add">Add to library</button>'
+    : '<button class="primary" disabled title="This title has no Steam release, so it cannot be added to the Steam library.">Not available on Steam</button>';
+  const availabilityNote = !item.steam_app_id
     ? '<p class="game-note">This title has no Steam release, so SteamTron cannot add it to the Steam library or rate it on ProtonDB.</p>'
     : "";
   detailEl.innerHTML = `<div class="page game-page game-detail">
@@ -2803,10 +2806,6 @@ function renderStoreDetail() {
   const add = detailEl.querySelector("#store-add");
   if (add) {
     add.onclick = () => addStoreItemToLibrary(item, add);
-  }
-  const openLibrary = detailEl.querySelector("#store-open-library");
-  if (openLibrary && managedEntry) {
-    openLibrary.onclick = () => openManagedGame(managedEntry.id, "store");
   }
   const coverNode = detailEl.querySelector(".game-cover");
   if (coverNode) coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; });
