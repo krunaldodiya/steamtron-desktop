@@ -2715,7 +2715,7 @@ async function addStoreItemToLibrary(item, button) {
     } });
     managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
     progress.close();
-    markRestartRequired(`Added ${result.title}. Restart Steam to see it.`);
+    clearRestartRequired();
     showToast(`Added ${result.title} to your library`);
     renderStoreDetail();
   } catch (error) {
