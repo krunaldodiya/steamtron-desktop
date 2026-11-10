@@ -752,7 +752,7 @@ fn valve_releases() -> Result<Vec<SourceRelease>, String> {
     let channels: [(&str, u32, &[&str]); 3] = [
         ("Proton Experimental", 1493710, &["experimental"]),
         ("Proton Hotfix", 2180100, &["hotfix"]),
-        ("Proton 11.0", 4628710, &["proton 11", "proton - 11", "proton_11"]),
+        ("Proton 11.0 (stable)", 4628710, &["proton 11", "proton - 11", "proton_11"]),
     ];
     for (label, app_id, needles) in channels {
         let found = installed.iter().enumerate().find(|(index, (name, _))| {
