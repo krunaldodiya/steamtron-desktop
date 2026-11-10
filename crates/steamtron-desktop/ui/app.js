@@ -1487,6 +1487,14 @@ function showLibraryLoading() {
   detailEl.innerHTML = `<div class="empty">Loading Steam library…</div>`;
 }
 
+function showManagedLoading() {
+  document.body.classList.add("managed");
+  detailEl.innerHTML = `<div class="page loading-page">
+    <header class="page-head"><h1>Your library</h1><p>Loading your games…</p></header>
+    <div class="cover-grid">${Array.from({ length: 12 }, () => '<div class="cover-card skeleton"><span class="cover"></span><span class="cover-title">&nbsp;</span></div>').join("")}</div>
+  </div>`;
+}
+
 async function loadArtwork() {
   if (artworkLoading) return;
   const appids = games.filter((game) => !game.artworkLoaded).map((game) => game.appid);
@@ -2194,7 +2202,12 @@ async function loadFixes() {
 }
 
 async function load() {
-  if (!games.length) showLibraryLoading();
+  // Decide the shell before painting: a managed library must never flash the
+  // legacy Steam skeleton.
+  try { managedLibrary = await invoke("library_snapshot"); }
+  catch (_error) { managedLibrary = null; }
+  if (hasManagedLibrary()) showManagedLoading();
+  else if (!games.length) showLibraryLoading();
   await loadBackend();
   try {
     games = await invoke("list_games");

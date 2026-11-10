@@ -479,3 +479,7 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .add-progress-status { margin:14px 0 0; min-height:20px; color:var(--muted); overflow-wrap:anywhere; }
 .add-progress-status.error { color:var(--error); }
 .add-progress-actions { display:flex; justify-content:center; margin-top:16px; }
+
+.cover-card.skeleton { background:#141c26; }
+.cover-card.skeleton .cover { background:#1d3140; animation:pulse 1.2s ease-in-out infinite; }
+.cover-card.skeleton .cover-title { color:transparent; }
