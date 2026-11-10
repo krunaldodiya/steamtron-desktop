@@ -810,7 +810,9 @@ function openManagedGameOptions(game) {
     ["link", "Game Link"],
     ["fixes", "Fixes"],
   ];
-  if (game.metadata_app_id) tabs.splice(tabs.length - 1, 0, ["updates", "Updates"]);
+  if (game.metadata_app_id && game.installation?.mode !== "linked") {
+    tabs.splice(tabs.length - 1, 0, ["updates", "Updates"]);
+  }
   backdrop.innerHTML = `<div class="modal game-settings-modal">
     <div class="game-settings-head"><h2>Game Settings · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <div class="game-settings-body">
@@ -2426,7 +2428,7 @@ function renderUpdatesPanel(host, game) {
   const pin = host.querySelector("#updates-pin");
   let data = null;
   let selectedVersion = "";
-  const appid = game.appid || game.metadata_app_id;
+  const appid = String(game.appid || game.metadata_app_id || "");
   const gameName = game.name || game.title;
   const load = async () => {
     const button = host.querySelector("#updates-refresh");
