@@ -2266,6 +2266,17 @@ fn add_library_drive(path: String) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+fn remove_library_drive(id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    library.remove_drive(&id).map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(library_json(&library))
+}
+
+#[tauri::command]
 fn set_default_library_drive(id: String) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
@@ -3513,6 +3524,7 @@ fn main() {
             add_library_drive,
             available_library_drives,
             set_default_library_drive,
+            remove_library_drive,
             diagnostics_summary,
             clear_diagnostics,
             proton_runners,

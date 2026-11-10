@@ -2917,7 +2917,7 @@ async function renderStorageSettings(host) {
       : "";
     return `<div class="settings-row drive-row">
       <div class="row-text"><strong>${escape(drive.label || drive.id)}${drive.default ? " · Default" : ""}</strong><span>${escape(drive.root)} · ${gamesOn(drive)} game${gamesOn(drive) === 1 ? "" : "s"}</span>${usage}</div>
-      <div class="row-control">${drive.default ? "" : `<button data-default-drive="${escape(drive.id)}">Make default</button>`}<button data-open-drive="${escape(drive.root)}">Open</button></div>
+      <div class="row-control">${drive.default ? "" : `<button data-default-drive="${escape(drive.id)}">Make default</button>`}<button data-open-drive="${escape(drive.root)}">Open</button><button class="danger" data-remove-drive="${escape(drive.id)}">Remove</button></div>
     </div>`;
   }).join("");
   host.innerHTML = `
@@ -2944,6 +2944,17 @@ async function renderStorageSettings(host) {
         await load();
         await renderSettingsPage();
         showToast("Default drive updated");
+      } catch (error) { showToast(String(error), true); }
+    };
+  }
+  for (const button of host.querySelectorAll("[data-remove-drive]")) {
+    button.onclick = async () => {
+      if (!window.confirm("Remove this drive registration? Only the registration is removed. Games, saves and folders stay on the drive.")) return;
+      try {
+        await invoke("remove_library_drive", { id: button.dataset.removeDrive });
+        await load();
+        await renderSettingsPage();
+        showToast("Drive registration removed");
       } catch (error) { showToast(String(error), true); }
     };
   }

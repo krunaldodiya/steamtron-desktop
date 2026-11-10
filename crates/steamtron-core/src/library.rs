@@ -493,6 +493,20 @@ impl Library {
         changed
     }
 
+pub fn remove_drive(&mut self, id: &str) -> Result<Option<Drive>, LibraryError> {
+        let Some(index) = self.drives.iter().position(|drive| drive.id == id) else {
+            return Err(LibraryError::Invalid(format!("unknown drive: {id}")));
+        };
+        let was_default = self.drives[index].default;
+        let removed = self.drives.remove(index);
+        if was_default {
+            if let Some(next) = self.drives.first_mut() {
+                next.default = true;
+            }
+        }
+        Ok(Some(removed))
+    }
+
 pub fn set_default_drive(&mut self, id: &str) -> Result<(), LibraryError> {
         if !self.drives.iter().any(|drive| drive.id == id) {
             return Err(LibraryError::Invalid(format!("unknown drive: {id}")));
