@@ -2665,6 +2665,48 @@ fn igdb_id_for(appid: u32, title: Option<String>) -> Option<String> {
     })
 }
 
+
+fn normalise_title(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(|character| character.to_lowercase())
+        .collect()
+}
+
+#[tauri::command]
+async fn store_resolve_steam(title: String) -> Result<Option<u32>, String> {
+    let term = title.trim();
+    if term.is_empty() {
+        return Ok(None);
+    }
+    let response = store_client()
+        .get("https://store.steampowered.com/api/storesearch/")
+        .query(&[("term", term), ("l", "english"), ("cc", "US")])
+        .header("Accept", "application/json")
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let wanted = normalise_title(term);
+    for item in payload.get("items").and_then(|items| items.as_array()).into_iter().flatten() {
+        let name = item.get("name").and_then(|name| name.as_str()).unwrap_or("");
+        // Strict title match: never map a game to a different edition.
+        if normalise_title(name) == wanted {
+            if let Some(appid) = item.get("id").and_then(|id| id.as_u64()) {
+                if appid > 0 && appid <= u32::MAX as u64 {
+                    return Ok(Some(appid as u32));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -2868,6 +2910,7 @@ fn main() {
             managed_game_size,
             proton_tier,
             igdb_id_for,
+            store_resolve_steam,
             fullscreen_state,
             toggle_fullscreen,
             set_ui_scale,

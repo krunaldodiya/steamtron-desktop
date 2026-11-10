@@ -2765,6 +2765,13 @@ function renderStoreDetail() {
   </div>`;
   detailEl.querySelector("#store-back").onclick = () => setView("store");
   renderGameChips(detailEl.querySelector("#store-chips"), chips);
+  if (!item.steam_app_id) {
+    void invoke("store_resolve_steam", { title: item.name }).then((appid) => {
+      if (!appid || appView !== "store-game" || storeDetail?.id !== item.id) return;
+      storeDetail = { ...storeDetail, steam_app_id: appid };
+      renderStoreDetail();
+    }).catch(() => {});
+  }
   if (item.steam_app_id) {
     void protonTier(item.steam_app_id).then((tier) => {
       chips[0].text = `Proton: ${tier || "Unknown"}`;
