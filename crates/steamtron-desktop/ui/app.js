@@ -283,6 +283,8 @@ function managedDrive(game) {
 }
 
 function managedReady(game) {
+  if (!game) return false;
+  if (typeof game.installed === "boolean") return game.installed;
   return Boolean(game.installation?.root);
 }
 
@@ -556,9 +558,12 @@ function renderManagedPreview(game) {
     ? [seed.release_date, (seed.genres || []).map((genre) => genre.name).join(", ")].filter(Boolean).join(" · ")
     : (appId ? `Steam App ${appId}` : "Managed entry");
   const provisionalCredits = seed ? [seed.developers, seed.publishers].filter(Boolean).join(" · ") : "";
+  const installed = managedReady(game);
   const action = running
     ? '<button id="managed-stop" class="primary">Stop</button>'
-    : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
+    : !installed
+      ? '<button id="managed-download" class="primary">Download</button>'
+      : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
   detailEl.innerHTML = `<div class="page game-page game-detail">
     <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : "Library"}</button></div>
     <section class="game-hero${provisionalHero ? "" : " no-artwork"}" id="game-hero"${provisionalHero ? ` style="background-image:url('${escape(provisionalHero)}')"` : ""}>
@@ -571,13 +576,15 @@ function renderManagedPreview(game) {
           <p class="game-description${seed?.description ? "" : " hidden"}" id="game-description">${seed?.description ? escape(seed.description) : ""}</p>
           <p class="game-credits" id="game-credits">${escape(provisionalCredits)}</p>
           <div class="game-actions">${action}<button id="managed-remove" class="danger">Remove from library</button><button id="managed-options" class="game-icon-button" title="${document.body.classList.contains("fullscreen-mode") ? "Game settings are available in desktop mode" : "Game options"}" aria-label="Game options"${document.body.classList.contains("fullscreen-mode") ? " disabled" : ""}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span></div>
-          ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : "")}
+          ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : (!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : ""))}
           <div class="game-chips" id="game-chips"></div>
         </div>
       </div>
     </section>
   </div>`;
   detailEl.querySelector("#managed-back").onclick = () => setView(gameDetailOrigin);
+  const download = detailEl.querySelector("#managed-download");
+  if (download) download.onclick = () => startManagedDownload(game);
   detailEl.querySelector("#managed-options").onclick = () => openManagedGameOptions(game);
   const remove = detailEl.querySelector("#managed-remove");
   if (remove) {
@@ -601,6 +608,85 @@ function renderManagedPreview(game) {
   if (play && canPlay) play.onclick = () => startManagedGame(game, play);
   const stopButton = detailEl.querySelector("#managed-stop");
   if (stopButton) stopButton.onclick = () => stopManagedGame(game, stopButton);
+}
+
+let downloadController = null;
+
+function openDownloadModal(game) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal download-modal">
+    <div class="modal-head"><h2>Downloading · ${escape(game.title)}</h2></div>
+    <div class="download-bar"><span id="download-bar-fill"></span></div>
+    <p class="download-status" id="download-status">Preparing depots…</p>
+    <p class="download-meta" id="download-meta"></p>
+    <div class="modal-actions"><button class="danger" id="download-cancel">Cancel</button><button id="download-close" class="hidden">Close</button></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const fill = backdrop.querySelector("#download-bar-fill");
+  const status = backdrop.querySelector("#download-status");
+  const meta = backdrop.querySelector("#download-meta");
+  const closeButton = backdrop.querySelector("#download-close");
+  const cancelButton = backdrop.querySelector("#download-cancel");
+  const close = () => { backdrop.remove(); downloadController = null; };
+  closeButton.onclick = close;
+  cancelButton.onclick = async () => {
+    try { await invoke("cancel_managed_download", { gameId: game.id }); }
+    catch (error) { showToast(String(error), true); }
+  };
+  return {
+    gameId: game.id,
+    update(state) {
+      const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
+      fill.style.width = `${percent}%`;
+      status.textContent = `${percent.toFixed(1)}% · ${formatBytes(state.completed || 0)} of ${formatBytes(state.total || 0)}`;
+      meta.textContent = state.speed > 0 ? `${formatBytes(state.speed)}/s · ${state.message || ""}` : (state.message || "");
+    },
+    complete(success, message) {
+      cancelButton.classList.add("hidden");
+      closeButton.classList.remove("hidden");
+      closeButton.classList.add("primary");
+      fill.style.width = success ? "100%" : fill.style.width;
+      status.textContent = success ? "Download complete" : `Download failed: ${message || "see diagnostics"}`;
+      status.classList.toggle("error", !success);
+      meta.textContent = "";
+    },
+    fail(message) {
+      cancelButton.classList.add("hidden");
+      closeButton.classList.remove("hidden");
+      closeButton.classList.add("primary");
+      status.textContent = `Download failed: ${message}`;
+      status.classList.add("error");
+    },
+  };
+}
+
+async function startManagedDownload(game) {
+  if (downloadController) return;
+  downloadController = openDownloadModal(game);
+  try {
+    await invoke("start_managed_download", { gameId: game.id });
+  } catch (error) {
+    downloadController.fail(String(error));
+  }
+}
+
+if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("download-progress", (event) => {
+    const state = event.payload || {};
+    if (downloadController && state.gameId === downloadController.gameId) downloadController.update(state);
+  });
+  window.__TAURI__.event.listen("download-complete", async (event) => {
+    const payload = event.payload || {};
+    if (downloadController && payload.gameId === downloadController.gameId) {
+      downloadController.complete(Boolean(payload.success), payload.message || "");
+    }
+    if (payload.success) {
+      managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
+      if (appView === "game") renderManagedMode();
+      showToast("Download complete");
+    }
+  });
 }
 
 async function hydrateGameDetail(game) {

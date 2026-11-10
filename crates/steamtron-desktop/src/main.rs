@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 mod artwork;
+mod download;
 
 use serde::Serialize;
 #[cfg(target_os = "linux")]
@@ -1976,11 +1977,25 @@ fn remove_managed_fixes(game_id: String) -> Result<steamtron_library::managed::F
 
 
 fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value {
+    let games: Vec<serde_json::Value> = library
+        .games()
+        .iter()
+        .map(|game| {
+            let mut value = serde_json::to_value(game).unwrap_or(serde_json::Value::Null);
+            let root = &game.installation.root;
+            let installed = root.is_dir()
+                && std::fs::read_dir(root)
+                    .map(|mut entries| entries.next().is_some())
+                    .unwrap_or(false);
+            value["installed"] = serde_json::json!(installed);
+            value
+        })
+        .collect();
     serde_json::json!({
         "path": library.path().display().to_string(),
         "settings": library.settings(),
         "drives": library.drives(),
-        "games": library.games(),
+        "games": games,
     })
 }
 
@@ -3083,6 +3098,22 @@ fn clear_managed_game_logs(game_id: String) -> Result<usize, String> {
     Ok(removed)
 }
 
+
+#[tauri::command]
+fn start_managed_download(app: tauri::AppHandle, game_id: String) -> Result<download::DownloadState, String> {
+    download::start(app, game_id)
+}
+
+#[tauri::command]
+fn cancel_managed_download(game_id: String) -> Result<(), String> {
+    download::cancel(&game_id)
+}
+
+#[tauri::command]
+fn managed_download_status(game_id: String) -> Option<download::DownloadState> {
+    download::status(&game_id)
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -3288,6 +3319,9 @@ fn main() {
             remove_managed_game,
             update_managed_launch_settings,
             managed_game_log,
+            start_managed_download,
+            cancel_managed_download,
+            managed_download_status,
             clear_managed_game_logs,
             proton_tier,
             igdb_id_for,
