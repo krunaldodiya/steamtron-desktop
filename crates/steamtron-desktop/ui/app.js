@@ -2658,6 +2658,7 @@ let storeGenres = [];
 let storeLoading = false;
 let storeError = "";
 let storeTried = false;
+let storeGeneration = 0;
 let storeDetail = null;
 let storeDraft = "";
 let storeScrollTop = 0;
@@ -2878,6 +2879,7 @@ function isPcCatalogItem(item) {
 }
 
 function resetStorePaging() {
+  storeGeneration += 1;
   storeBuffer = [];
   storeServerPage = 0;
   storeExhausted = false;
@@ -2886,6 +2888,7 @@ function resetStorePaging() {
 }
 
 async function ensureStorePage(page, render = true) {
+  const generation = storeGeneration;
   storePage = Math.max(1, page);
   storeLoading = true;
   storeError = "";
@@ -2907,9 +2910,10 @@ async function ensureStorePage(page, render = true) {
         page: nextServerPage,
       });
     } catch (error) {
-      storeError = String(error);
+      if (generation === storeGeneration) storeError = String(error);
       break;
     }
+    if (generation !== storeGeneration) return; // a newer filter owns the buffer
     storeServerPage = nextServerPage;
     const items = data.items || [];
     for (const item of items) {
@@ -2921,7 +2925,9 @@ async function ensureStorePage(page, render = true) {
   }
   storeLoading = false;
   storeTried = true;
-  if (render) renderStorePage();
+  // Warm-up fetches often finish after the user opened the Store; always
+  // repaint then so the screen never stays on "Loading…".
+  if (render || appView === "store") renderStorePage();
 }
 
 async function openStore() {
