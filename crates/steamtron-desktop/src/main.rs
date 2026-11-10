@@ -2996,6 +2996,93 @@ async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, Strin
     }))
 }
 
+
+#[tauri::command]
+fn update_managed_launch_settings(
+    game_id: String,
+    proton: Option<String>,
+    arguments: Option<Vec<String>>,
+    environment: Option<std::collections::BTreeMap<String, String>>,
+) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let mut game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    if let Some(proton) = proton {
+        let proton = proton.trim().to_owned();
+        if !proton.is_empty() && !std::path::Path::new(&proton).exists() {
+            return Err(format!("Proton runner does not exist: {proton}"));
+        }
+        game.launch.proton = proton.clone();
+        game.installation.proton = proton;
+    }
+    if let Some(arguments) = arguments {
+        game.launch.arguments = arguments;
+    }
+    if let Some(environment) = environment {
+        game.launch.environment = environment;
+    }
+    library
+        .upsert_game(game.clone())
+        .map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!(game))
+}
+
+fn managed_log_dir(game_id: &str) -> std::path::PathBuf {
+    steamtron_core::paths::layout().diagnostics_for(game_id)
+}
+
+#[tauri::command]
+fn managed_game_log(game_id: String) -> Result<serde_json::Value, String> {
+    let directory = managed_log_dir(&game_id);
+    let entries = std::fs::read_dir(&directory).map_err(|error| error.to_string())?;
+    let mut newest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("play-") || !name.ends_with(".log") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        if newest.as_ref().map(|(time, _)| modified > *time).unwrap_or(true) {
+            newest = Some((modified, path));
+        }
+    }
+    let Some((_, path)) = newest else {
+        return Ok(serde_json::json!({ "path": "", "content": "" }));
+    };
+    let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+    let start = bytes.len().saturating_sub(64 * 1024);
+    let content = String::from_utf8_lossy(&bytes[start..]).to_string();
+    Ok(serde_json::json!({
+        "path": path.display().to_string(),
+        "content": content,
+    }))
+}
+
+#[tauri::command]
+fn clear_managed_game_logs(game_id: String) -> Result<usize, String> {
+    let directory = managed_log_dir(&game_id);
+    let Ok(entries) = std::fs::read_dir(&directory) else { return Ok(0) };
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("play-") && name.ends_with(".log") {
+            if std::fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    Ok(removed)
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -3199,6 +3286,9 @@ fn main() {
             managed_game_size,
             steam_download_size,
             remove_managed_game,
+            update_managed_launch_settings,
+            managed_game_log,
+            clear_managed_game_logs,
             proton_tier,
             igdb_id_for,
             store_resolve_steam,

@@ -487,3 +487,21 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .pager-number { min-width:44px; padding:9px 12px; border-radius:8px; background:var(--surface-raised); border:1px solid var(--border); color:var(--text); }
 .pager-number:hover { border-color:var(--border-strong); }
 .pager-number.active { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600; }
+
+.game-settings-modal { width:min(1080px, 94vw); height:min(720px, 88vh); padding:0; display:flex; flex-direction:column; overflow:hidden; }
+.game-settings-head { position:relative; display:flex; align-items:center; justify-content:center; padding:14px 20px; border-bottom:1px solid var(--border); flex:0 0 auto; }
+.game-settings-head h2 { font-size:15px; }
+.game-settings-head .modal-close { position:absolute; right:12px; top:50%; transform:translateY(-50%); }
+.game-settings-body { display:flex; flex:1; min-height:0; }
+.game-settings-nav { width:200px; flex:0 0 auto; padding:16px 12px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:4px; overflow:auto; }
+.game-settings-tab { text-align:left; padding:10px 14px; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:14px; }
+.game-settings-tab:hover { background:#212b37; color:var(--text); }
+.game-settings-tab.active { background:var(--surface-raised); color:var(--text); }
+.game-settings-pane { flex:1; min-width:0; overflow:auto; padding:22px 26px 28px; }
+.game-settings-pane h3 { font-size:18px; margin:0 0 6px; }
+.game-settings-pane .pane-note { color:var(--muted); font-size:13px; margin:0 0 14px; }
+.game-settings-pane label { display:block; color:var(--muted); font-size:12px; margin:14px 0 6px; }
+.game-settings-pane input, .game-settings-pane textarea { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface-raised); color:var(--text); font-family:inherit; font-size:13px; outline:none; }
+.game-settings-pane textarea { resize:vertical; font-family:ui-monospace, monospace; }
+.game-settings-pane input:focus, .game-settings-pane textarea:focus { border-color:var(--accent); }
+.game-log { margin:0 0 8px; padding:14px; min-height:260px; max-height:420px; overflow:auto; border:1px solid var(--border); border-radius:10px; background:#0c1117; color:#c8d4e0; font-size:12px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }

@@ -679,28 +679,163 @@ async function hydrateGameDetail(game) {
 }
 
 function openManagedGameOptions(game) {
-  const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal" style="max-width:700px">
-    <div class="modal-head"><h2>Game options</h2><button class="modal-close" aria-label="Close">×</button></div>
-    <p class="muted">${escape(game.title)}</p>
-    <div class="game-options-paths">
-      <div class="row"><div class="label">Installation</div><div class="value">${escape(game.installation?.root || "")}</div></div>
-      <div class="row"><div class="label">Prefix</div><div class="value">${escape(game.installation?.prefix || "")}</div></div>
-      <div class="row"><div class="label">Launch target</div><div class="value">${escape(target?.executable || "Not configured")}</div></div>
+  const tabs = [
+    ["general", "General"],
+    ["compatibility", "Compatibility"],
+    ["environment", "Environment"],
+    ["debug", "Debug"],
+    ["link", "Game Link"],
+    ["fixes", "Fixes"],
+  ];
+  backdrop.innerHTML = `<div class="modal game-settings-modal">
+    <div class="game-settings-head"><h2>Game Settings · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <div class="game-settings-body">
+      <nav class="game-settings-nav">${tabs.map(([key, label], index) => `<button class="game-settings-tab${index === 0 ? " active" : ""}" data-game-tab="${key}">${label}</button>`).join("")}</nav>
+      <section class="game-settings-pane" id="game-settings-pane"></section>
     </div>
-    ${managedSetupMarkup(game)}
-    <div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>
   </div>`;
   document.body.appendChild(backdrop);
-  const close = () => backdrop.remove();
+  const pane = backdrop.querySelector("#game-settings-pane");
+  let latestGame = game;
+  const close = () => { backdrop.remove(); renderManagedMode(); };
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
-  void wireManagedSetup(game, backdrop, () => { close(); renderManagedMode(); });
-  void loadManagedFixes(game.id, backdrop);
-  const first = backdrop.querySelector("#managed-setup-save") || backdrop.querySelector("#managed-exe");
-  if (first) focusControl(first);
+
+  const refreshGame = async () => {
+    try {
+      managedLibrary = await invoke("library_snapshot");
+      latestGame = managedLibrary?.games.find((entry) => entry.id === game.id) || latestGame;
+    } catch (_error) { /* keep the last copy */ }
+    return latestGame;
+  };
+
+  const row = (label, value) => `<div class="row"><div class="label">${escape(label)}</div><div class="value">${escape(value || "—")}</div></div>`;
+
+  const renderTab = (key) => {
+    for (const button of backdrop.querySelectorAll("[data-game-tab]")) {
+      button.classList.toggle("active", button.dataset.gameTab === key);
+    }
+    pane.scrollTop = 0;
+    if (key === "general") {
+      const registration = latestGame.steam;
+      const target = latestGame.launch_targets?.find((item) => item.primary) || latestGame.launch_targets?.[0];
+      pane.innerHTML = `<h3>General</h3><p class="pane-note">Library entry, paths and Steam registration for this game.</p>
+        <div class="game-options-paths">
+          ${row("Library entry", latestGame.id)}
+          ${row("Steam App ID", latestGame.metadata_app_id ? String(latestGame.metadata_app_id) : "None")}
+          ${row("Installation", latestGame.installation?.root)}
+          ${row("Prefix", latestGame.installation?.prefix)}
+          ${row("Manifest", latestGame.installation?.manifest)}
+          ${row("Launch target", target?.executable || "Not configured")}
+          ${row("Steam registration", registration ? `${registration.state} · ${registration.backend}` : "Not registered")}
+        </div>`;
+      return;
+    }
+    if (key === "compatibility") {
+      const proton = latestGame.launch?.proton || latestGame.installation?.proton || "";
+      pane.innerHTML = `<h3>Compatibility</h3><p class="pane-note">Proton runner and prefix used when Play starts this game.</p>
+        <label for="gs-proton">Proton runner</label>
+        <input id="gs-proton" value="${escape(proton)}" placeholder="/path/to/proton">
+        <div class="update-actions"><button class="primary" id="gs-proton-save">Save runner</button></div>
+        <div class="game-options-paths">
+          ${row("Prefix", latestGame.installation?.prefix)}
+          ${row("Prefix source", latestGame.launch?.prefix_mode === "steam" ? "Steam compatdata" : "SteamTron prefix")}
+        </div>`;
+      pane.querySelector("#gs-proton-save").onclick = async (event) => {
+        const stop = busy(event.target, "Saving…");
+        try {
+          await invoke("update_managed_launch_settings", { gameId: game.id, proton: pane.querySelector("#gs-proton").value.trim() });
+          await refreshGame();
+          stop();
+          showToast("Proton runner saved");
+          renderTab("compatibility");
+        } catch (error) { stop(); showToast(String(error), true); }
+      };
+      return;
+    }
+    if (key === "environment") {
+      const argumentsText = (latestGame.launch?.arguments || []).join(" ");
+      const environment = Object.entries(latestGame.launch?.environment || {}).map(([name, value]) => `${name}=${value}`).join("\n");
+      pane.innerHTML = `<h3>Environment</h3><p class="pane-note">Extra arguments and environment variables passed to the game process.</p>
+        <label for="gs-arguments">Arguments</label>
+        <input id="gs-arguments" value="${escape(argumentsText)}" placeholder="-windowed (space separated)">
+        <label for="gs-environment">Environment (one KEY=VALUE per line)</label>
+        <textarea id="gs-environment" rows="8" placeholder="WINEDLLOVERRIDES=x=n,b">${escape(environment)}</textarea>
+        <div class="update-actions"><button class="primary" id="gs-env-save">Save</button></div>`;
+      pane.querySelector("#gs-env-save").onclick = async (event) => {
+        const map = {};
+        for (const line of pane.querySelector("#gs-environment").value.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.includes("=")) continue;
+          const index = trimmed.indexOf("=");
+          map[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim();
+        }
+        const stop = busy(event.target, "Saving…");
+        try {
+          await invoke("update_managed_launch_settings", {
+            gameId: game.id,
+            arguments: pane.querySelector("#gs-arguments").value.trim().split(/\s+/).filter(Boolean),
+            environment: map,
+          });
+          await refreshGame();
+          stop();
+          showToast("Launch environment saved");
+          renderTab("environment");
+        } catch (error) { stop(); showToast(String(error), true); }
+      };
+      return;
+    }
+    if (key === "debug") {
+      pane.innerHTML = `<h3>Debug</h3><p class="pane-note">Latest Proton diagnostic log for this game. The viewer shows the newest 64 KiB.</p>
+        <pre class="game-log" id="gs-log">Loading…</pre>
+        <p class="pane-note" id="gs-log-path"></p>
+        <div class="update-actions"><button id="gs-log-copy">Copy</button><button class="danger" id="gs-log-clear">Clear</button></div>`;
+      const logNode = pane.querySelector("#gs-log");
+      const pathNode = pane.querySelector("#gs-log-path");
+      void invoke("managed_game_log", { gameId: game.id }).then((log) => {
+        logNode.textContent = log.content || "No log yet. Launch the game to create one.";
+        pathNode.textContent = log.path || "";
+      }).catch((error) => { logNode.textContent = String(error); });
+      pane.querySelector("#gs-log-copy").onclick = () => { void copyToClipboard(logNode.textContent || "", "Log"); };
+      pane.querySelector("#gs-log-clear").onclick = async () => {
+        if (!window.confirm("Clear this game's previous diagnostic logs?")) return;
+        try {
+          const removed = await invoke("clear_managed_game_logs", { gameId: game.id });
+          showToast(`Cleared ${removed} log${removed === 1 ? "" : "s"}`);
+          renderTab("debug");
+        } catch (error) { showToast(String(error), true); }
+      };
+      return;
+    }
+    if (key === "link") {
+      pane.innerHTML = `<h3>Game Link</h3><p class="pane-note">Choose the executable and arguments Play should start. The default launcher starts when there is one entry.</p>
+        ${managedSetupMarkup(latestGame)}`;
+      void wireManagedSetup(latestGame, pane, async () => {
+        await refreshGame();
+        showToast("Launch target saved");
+        renderTab("general");
+      });
+      return;
+    }
+    pane.innerHTML = `<h3>Fixes</h3><p class="pane-note">Install a fixes ZIP. Files are layered over the game only while SteamTron launches it.</p>
+      <div class="status" id="managed-fixes"><div class="row"><div class="label">Fixes</div><div class="value">Loading…</div></div></div>
+      <div class="update-actions"><button id="gs-fixes-open">Open fixes folder</button></div>`;
+    void loadManagedFixes(game.id, pane);
+    pane.querySelector("#gs-fixes-open").onclick = async () => {
+      try {
+        const view = await invoke("managed_fixes", { gameId: game.id });
+        await invoke("open_path", { path: view.path });
+      } catch (error) { showToast(String(error), true); }
+    };
+  };
+
+  for (const button of backdrop.querySelectorAll("[data-game-tab]")) {
+    button.onclick = () => renderTab(button.dataset.gameTab);
+  }
+  renderTab("general");
+  focusControl(backdrop.querySelector(".game-settings-tab.active"));
 }
 
 function pad2(value) {
