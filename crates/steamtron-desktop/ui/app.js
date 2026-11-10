@@ -588,6 +588,7 @@ function renderManagedPreview(game) {
 
 async function hydrateGameDetail(game) {
   const appId = game.metadata_app_id;
+  const seed = gameDetailSeed;
   const heroNode = detailEl.querySelector("#game-hero");
   const coverNode = detailEl.querySelector("#game-cover");
   const metaNode = detailEl.querySelector("#game-meta");
