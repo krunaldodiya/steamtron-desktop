@@ -2946,28 +2946,79 @@ async function renderGeneralSettings(host) {
       <div class="modal-head"><h2>Steam checks</h2><button class="modal-close" id="doctor-close" aria-label="Close">×</button></div>
       <p class="pane-note" id="doctor-status">Running checks…</p>
       <div class="doctor-results" id="doctor-results"><div class="settings-row"><div class="row-text"><span>Checking Steam, Lua, fixes and the registration backend…</span></div></div></div>
-      <div class="modal-actions"><button id="doctor-dismiss">Close</button></div>
+      <div class="modal-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button><button id="doctor-dismiss">Close</button></div>
     </div>`;
     document.body.appendChild(backdrop);
     const close = () => backdrop.remove();
     backdrop.querySelector("#doctor-close").onclick = close;
     backdrop.querySelector("#doctor-dismiss").onclick = close;
     backdrop.addEventListener("click", (click) => { if (click.target === backdrop) close(); });
-    try {
-      const report = await invoke("doctor_report");
-      const rows = (report.checks || []).map((check) =>
-        `<div class="settings-row"><div class="row-text"><strong>${escape(check.title)}</strong><span>${escape(check.detail)}</span></div><div class="row-control">${settingsStatusBadge(check.status)}</div></div>`
-      ).join("");
-      backdrop.querySelector("#doctor-results").innerHTML = rows || '<div class="settings-row"><div class="row-text"><span>No checks reported.</span></div></div>';
-      backdrop.querySelector("#doctor-status").textContent = report.healthy
-        ? "All checks passed."
-        : "Some checks need attention.";
-    } catch (reportError) {
-      backdrop.querySelector("#doctor-status").textContent = "Checks could not run.";
-      backdrop.querySelector("#doctor-results").innerHTML = `<div class="settings-row"><div class="row-text"><span class="status error">${escape(String(reportError))}</span></div></div>`;
-    } finally {
-      stop();
-    }
+
+    const checkRepair = (check) => {
+      if (check.id === "managed-appmanifest") return { label: "Repair appmanifests", command: "repair_library_entries" };
+      if (check.id === "steam-process" || check.id === "steam-injection") return { label: "Start Steam", command: "restart_steam" };
+      if (check.id === "unlock-backend" || check.id === "managed-ownership" || check.repair === "install-unlock-backend") {
+        return { label: "Install backend", command: "repair_steam_library", confirm: true };
+      }
+      if (check.id === "stplug-in") return { label: "Repair Steam library", command: "repair_steam_library", confirm: true };
+      return null;
+    };
+
+    const runRepair = async (button, command) => {
+      const stop = busy(button, "Repairing…");
+      try {
+        const result = await invoke(command);
+        if (command === "repair_library_entries") {
+          const games = Array.isArray(result) ? result.length : 0;
+          showToast(`Repaired ${games} appmanifest${games === 1 ? "" : "s"}`);
+        } else if (command === "restart_steam") {
+          showToast(String(result));
+        } else {
+          showToast(String(result));
+        }
+        await runChecks();
+      } catch (error) {
+        stop();
+        showToast(String(error), true);
+      }
+    };
+
+    const runChecks = async () => {
+      const status = backdrop.querySelector("#doctor-status");
+      const results = backdrop.querySelector("#doctor-results");
+      status.textContent = "Running checks…";
+      results.innerHTML = '<div class="settings-row"><div class="row-text"><span>Checking Steam, Lua, fixes and the registration backend…</span></div></div>';
+      try {
+        const report = await invoke("doctor_report");
+        const checks = report.checks || [];
+        const failed = checks.some((check) => check.status !== "ok");
+        status.textContent = failed ? "Some checks need attention." : "All checks passed.";
+        results.innerHTML = checks.map((check) => {
+          const repair = checkRepair(check);
+          const action = repair
+            ? `<button data-doctor-repair="${repair.command}" data-doctor-confirm="${repair.confirm ? "1" : ""}">${repair.label}</button>`
+            : "";
+          return `<div class="settings-row"><div class="row-text"><strong>${escape(check.title)}</strong><span>${escape(check.detail)}</span></div><div class="row-control">${action}${settingsStatusBadge(check.status)}</div></div>`;
+        }).join("") || '<div class="settings-row"><div class="row-text"><span>No checks reported.</span></div></div>';
+        for (const button of results.querySelectorAll("[data-doctor-repair]")) {
+          button.onclick = () => {
+            if (button.dataset.doctorConfirm && !window.confirm("This repair can install or change Steam components. Continue?")) return;
+            void runRepair(button, button.dataset.doctorRepair);
+          };
+        }
+      } catch (reportError) {
+        status.textContent = "Checks could not run.";
+        results.innerHTML = `<div class="settings-row"><div class="row-text"><span class="status error">${escape(String(reportError))}</span></div></div>`;
+      }
+    };
+
+    backdrop.querySelector("#doctor-refresh").onclick = () => { void runChecks(); };
+    backdrop.querySelector("#doctor-repair").onclick = () => {
+      if (!window.confirm("Repair SteamTron's Steam integration? This can install SLSsteam. Start Steam manually afterward.")) return;
+      void runRepair(backdrop.querySelector("#doctor-repair"), "repair_steam_library");
+    };
+    await runChecks();
+    stop();
   };
 }
 

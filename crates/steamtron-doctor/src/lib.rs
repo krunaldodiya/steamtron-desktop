@@ -215,7 +215,7 @@ pub fn run() -> DoctorReport {
         ));
     }
 
-    let healthy = checks.iter().all(|item| item.status != CheckStatus::Error);
+    let healthy = checks.iter().all(|item| item.status == CheckStatus::Ok);
     DoctorReport { healthy, checks }
 }
 
