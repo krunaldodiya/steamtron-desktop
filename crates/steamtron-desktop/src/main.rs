@@ -304,7 +304,7 @@ async fn repair_steam_library() -> Result<String, String> {
         let repair_result = (|| -> Result<String, String> {
             if !installed() {
                 launch_unlock_installer()?;
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
                 loop {
                     if installed() {
                         break;
@@ -318,7 +318,7 @@ async fn repair_steam_library() -> Result<String, String> {
                         }
                     }
                     if std::time::Instant::now() >= deadline {
-                        return Err("SLSsteam was not installed within 180 seconds. Check ~/.local/share/steamtron/installer.log for the installer error.".into());
+                        return Err("SLSsteam Moon was not installed within 60 seconds. Check ~/.local/share/steamtron/installer.log for the installer error.".into());
                     }
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }

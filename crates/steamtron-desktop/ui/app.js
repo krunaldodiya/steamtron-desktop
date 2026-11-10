@@ -2966,6 +2966,8 @@ async function renderGeneralSettings(host) {
 
     const runRepair = async (button, command) => {
       const stop = busy(button, "Repairing…");
+      const status = backdrop.querySelector("#doctor-status");
+      if (status) status.textContent = "Repairing… this can take up to a minute.";
       try {
         const result = await invoke(command);
         if (command === "repair_library_entries") {
@@ -2979,6 +2981,7 @@ async function renderGeneralSettings(host) {
         await runChecks();
       } catch (error) {
         stop();
+        if (status) status.textContent = "Repair failed.";
         showToast(String(error), true);
       }
     };
@@ -2994,7 +2997,7 @@ async function renderGeneralSettings(host) {
         const failed = checks.some((check) => check.status !== "ok");
         status.textContent = failed ? "Some checks need attention." : "All checks passed.";
         results.innerHTML = checks.map((check) => {
-          const repair = checkRepair(check);
+          const repair = check.status === "ok" ? null : checkRepair(check);
           const action = repair
             ? `<button data-doctor-repair="${repair.command}" data-doctor-confirm="${repair.confirm ? "1" : ""}">${repair.label}</button>`
             : "";
