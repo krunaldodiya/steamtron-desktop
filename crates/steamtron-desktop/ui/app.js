@@ -2887,6 +2887,7 @@ async function renderStorageSettings(host) {
 
 let protonSource = "GE-Proton";
 let protonInstallTimer = null;
+const protonSourceCache = new Map();
 
 function stopProtonInstallPolling() {
   if (protonInstallTimer) {
@@ -2917,7 +2918,10 @@ async function renderProtonSettings(host) {
       <div class="settings-row"><div class="row-text"><strong>Default runner</strong><span>${escape(defaultPath || "Not selected")}</span></div><div class="row-control"><select id="setting-default-runner">${options || '<option value="">No runners installed</option>'}</select></div></div>
     </div></section>
     <section class="settings-section"><h2>Download Proton</h2><p>Official releases from each source. Downloads are verified before they are added as runners.</p>
-      <div class="proton-source-tabs">${sources.map((family) => `<button class="proton-source-tab${family === protonSource ? " active" : ""}" data-proton-source="${family}">${family}</button>`).join("")}</div>
+      <div class="proton-source-head">
+        <div class="proton-source-tabs">${sources.map((family) => `<button class="proton-source-tab${family === protonSource ? " active" : ""}" data-proton-source="${family}">${family}</button>`).join("")}</div>
+        <button id="proton-source-refresh" class="secondary">Refresh</button>
+      </div>
       <div class="settings-card" id="proton-source-list"><div class="settings-row"><div class="row-text"><span>Loading releases…</span></div></div></div>
     </section>`;
 
@@ -2932,22 +2936,7 @@ async function renderProtonSettings(host) {
   };
 
   const list = host.querySelector("#proton-source-list");
-  const loadSource = async (family) => {
-    protonSource = family;
-    for (const tab of host.querySelectorAll("[data-proton-source]")) {
-      tab.classList.toggle("active", tab.dataset.protonSource === family);
-    }
-    list.innerHTML = '<div class="settings-row"><div class="row-text"><span>Loading releases…</span></div></div>';
-    let installStates = [];
-    try { installStates = await invoke("proton_install_states"); } catch (_error) { installStates = []; }
-    let releases = [];
-    try {
-      releases = await invoke("proton_source_releases", { family });
-    } catch (error) {
-      list.innerHTML = `<div class="settings-row"><div class="row-text"><span class="status error">${escape(String(error))}</span></div><div class="row-control"><button id="proton-source-retry">Retry</button></div></div>`;
-      list.querySelector("#proton-source-retry").onclick = () => { void loadSource(family); };
-      return;
-    }
+  const renderReleases = (releases, installStates) => {
     if (!releases.length) {
       list.innerHTML = '<div class="settings-row"><div class="row-text"><span>No downloadable releases were found.</span></div></div>';
       return;
@@ -2993,6 +2982,28 @@ async function renderProtonSettings(host) {
       };
     }
   };
+  const loadSource = async (family, { force = false } = {}) => {
+    protonSource = family;
+    for (const tab of host.querySelectorAll("[data-proton-source]")) {
+      tab.classList.toggle("active", tab.dataset.protonSource === family);
+    }
+    let installStates = [];
+    try { installStates = await invoke("proton_install_states"); } catch (_error) { installStates = []; }
+    const cached = protonSourceCache.get(family);
+    if (cached && !force) {
+      renderReleases(cached, installStates);
+      return;
+    }
+    list.innerHTML = '<div class="settings-row"><div class="row-text"><span>Loading releases…</span></div></div>';
+    try {
+      const releases = await invoke("proton_source_releases", { family });
+      protonSourceCache.set(family, releases);
+      renderReleases(releases, installStates);
+    } catch (error) {
+      list.innerHTML = `<div class="settings-row"><div class="row-text"><span class="status error">${escape(String(error))}</span></div><div class="row-control"><button id="proton-source-retry">Retry</button></div></div>`;
+      list.querySelector("#proton-source-retry").onclick = () => { void loadSource(family, { force: true }); };
+    }
+  };
   const pollInstalls = async () => {
     let states = [];
     try { states = await invoke("proton_install_states"); } catch (_error) { states = []; }
@@ -3009,12 +3020,17 @@ async function renderProtonSettings(host) {
     }
     if (!active) {
       stopProtonInstallPolling();
-      await loadSource(protonSource);
+      await loadSource(protonSource, { force: true });
     }
   };
   const ensurePolling = () => {
     if (protonInstallTimer) return;
     protonInstallTimer = setInterval(() => { void pollInstalls(); }, 1000);
+  };
+  const refresh = host.querySelector("#proton-source-refresh");
+  if (refresh) refresh.onclick = () => {
+    const stop = busy(refresh, "Refreshing…");
+    void loadSource(protonSource, { force: true }).finally(stop);
   };
   for (const tab of host.querySelectorAll("[data-proton-source]")) {
     tab.onclick = () => {

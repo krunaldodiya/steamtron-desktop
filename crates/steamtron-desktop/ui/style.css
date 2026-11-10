@@ -398,6 +398,8 @@ button.primary:hover { filter:brightness(1.06); }
 #settings { background:#2b3441; border-color:var(--border-strong); }
 .profile-button { width:40px; height:40px; padding:0; border-radius:50%; display:grid; place-items:center; background:#2b3441; border:1px solid var(--border-strong); color:var(--text); }
 .profile-button:hover { border-color:var(--accent); color:var(--accent); }
+.proton-source-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:12px 0; }
+.proton-source-head .proton-source-tabs { margin:0; }
 .proton-source-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
 .proton-source-tab { padding:9px 16px; border:1px solid var(--border); border-radius:999px; background:transparent; color:var(--muted); font-size:13px; }
 .proton-source-tab:hover { color:var(--text); border-color:var(--border-strong); }
