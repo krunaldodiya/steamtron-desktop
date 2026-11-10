@@ -586,3 +586,11 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .files-card .files-verify { width:100%; padding:11px 16px; font-weight:600; }
 .files-status { margin:0; color:var(--muted); font-size:12px; }
 .files-status.error { color:var(--error, #ff9b9b); }
+
+/* Game Settings: DLC inventory table. */
+.dlc-table { width:100%; border-collapse:collapse; font-size:13px; }
+.dlc-table th, .dlc-table td { padding:9px 10px; border-bottom:1px solid var(--border); text-align:left; }
+.dlc-table th { color:var(--muted); font-weight:500; background:var(--surface); }
+.dlc-table td:first-child, .dlc-table th:first-child { width:54px; text-align:center; }
+.dlc-table td:last-child, .dlc-table th:last-child { width:80px; text-align:right; }
+.dlc-note { color:var(--muted); font-size:11px; }

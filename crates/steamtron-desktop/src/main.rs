@@ -3006,6 +3006,77 @@ fn store_cached_catalog(
 }
 
 #[tauri::command]
+async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> {
+    use steamtron_core::library::Library;
+
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    let Some(app_id) = game.metadata_app_id else {
+        return Ok(Vec::new());
+    };
+    let lua = steam::steam_root()
+        .ok()
+        .map(|root| root.join("config/stplug-in").join(format!("{app_id}.lua")))
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default();
+    let response = store_client()
+        .get("https://store.steampowered.com/api/appdetails")
+        .query(&[("appids", app_id.to_string()), ("l", "english".into()), ("cc", "US".into())])
+        .header("Accept", "application/json")
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let data = payload
+        .get(app_id.to_string())
+        .and_then(|entry| entry.get("data"));
+    let ids: Vec<u32> = data
+        .and_then(|data| data.get("dlc"))
+        .and_then(|dlc| dlc.as_array())
+        .map(|items| items.iter().filter_map(|id| id.as_u64().map(|id| id as u32)).collect())
+        .unwrap_or_default();
+    let mut result = Vec::new();
+    for id in ids {
+        let detail = match store_client()
+            .get("https://store.steampowered.com/api/appdetails")
+            .query(&[("appids", id.to_string()), ("l", "english".into()), ("cc", "US".into())])
+            .header("Accept", "application/json")
+            .header("User-Agent", "steamtron-desktop")
+            .send()
+            .await
+        {
+            Ok(response) => response.json::<serde_json::Value>().await.ok(),
+            Err(_) => None,
+        };
+        let entry = detail.as_ref().and_then(|value| value.get(id.to_string())).and_then(|entry| entry.get("data"));
+        let name = entry
+            .and_then(|data| data.get("name"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let released = entry
+            .and_then(|data| data.get("release_date"))
+            .and_then(|value| value.get("date"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let marked = lua.contains(&format!("AppID: {id}"))
+            || lua.lines().any(|line| line.trim_start().starts_with(&format!("addappid({id}")));
+        result.push(serde_json::json!({
+            "app_id": id,
+            "name": if name.is_empty() { format!("DLC {id}") } else { name },
+            "released": released,
+            "available": marked,
+            "installed": false,
+        }));
+    }
+    Ok(result)
+}
+
+#[tauri::command]
 async fn store_game(id: u64) -> Result<serde_json::Value, String> {
     store_get(&format!("/v1/games/{id}"), &[]).await
 }
@@ -3974,6 +4045,7 @@ fn main() {
             store_cached_catalog,
             store_catalog,
             store_game,
+            managed_dlc,
             app_details,
             app_version,
             update_library_settings,

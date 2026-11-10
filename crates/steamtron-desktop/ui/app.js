@@ -950,12 +950,11 @@ function openManagedGameOptions(game) {
     ["environment", "Environment"],
     ["debug", "Debug"],
     ["link", "Game Link"],
-    ["files", "Installed Files"],
-    ["fixes", "Fixes"],
   ];
-  if (game.metadata_app_id && game.installation?.mode !== "linked") {
-    tabs.splice(tabs.length - 1, 0, ["updates", "Updates"]);
+  if (game.metadata_app_id) {
+    tabs.push(["dlc", "DLC"], ["updates", "Updates"]);
   }
+  tabs.push(["files", "Installed Files"], ["fixes", "Fixes"]);
   backdrop.innerHTML = `<div class="modal game-settings-modal">
     <div class="game-settings-head"><h2>Game Settings · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <div class="game-settings-body">
@@ -1113,6 +1112,25 @@ function openManagedGameOptions(game) {
     }
     if (key === "updates") {
       renderUpdatesPanel(pane, latestGame);
+      return;
+    }
+    if (key === "dlc") {
+      const renderDlcTab = async () => {
+        pane.innerHTML = '<h3>Downloadable Content</h3><p class="pane-note">Loading DLC from Steam…</p>';
+        let entries = [];
+        try { entries = await invoke("managed_dlc", { gameId: game.id }); } catch (_error) { entries = []; }
+        const rows = entries.map((entry) => `<tr>
+          <td><input type="checkbox" disabled aria-label="Install ${escape(entry.name)}" title="DLC installation is not available for this manifest."></td>
+          <td>${escape(entry.name)}${entry.available ? "" : ' <span class="dlc-note">not in manifest</span>'}</td>
+          <td>${escape(entry.released || "—")}</td>
+          <td>—</td>
+        </tr>`).join("");
+        pane.innerHTML = `<h3>Downloadable Content</h3>
+          <p class="pane-note">Add-ons reported by Steam and this game's manifest. DLC installation support depends on the manifest containing the DLC depot keys.</p>
+          <table class="dlc-table"><thead><tr><th>Install</th><th>Name</th><th>Released</th><th>Size</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="4">No DLC entries were reported for this game.</td></tr>'}</tbody></table>`;
+      };
+      void renderDlcTab();
       return;
     }
     if (key === "files") {
