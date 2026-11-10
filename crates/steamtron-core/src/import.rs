@@ -483,6 +483,8 @@ pub fn plan_umutron_library(path: impl AsRef<Path>) -> Result<ImportPlan, Import
                 environment: launch.environment,
                 arguments: launch.arguments,
                 proton: launch.proton.unwrap_or_default(),
+                prelaunch: String::new(),
+                prelaunch_sha256: String::new(),
             },
             launch_targets: targets,
             fixes_enabled: source.fixes_enabled.unwrap_or(true),

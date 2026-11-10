@@ -150,6 +150,10 @@ pub struct LaunchSettings {
     pub arguments: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub proton: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prelaunch: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prelaunch_sha256: String,
 }
 
 fn default_prefix_mode() -> String {
@@ -164,6 +168,8 @@ impl Default for LaunchSettings {
             environment: BTreeMap::new(),
             arguments: Vec::new(),
             proton: String::new(),
+            prelaunch: String::new(),
+            prelaunch_sha256: String::new(),
         }
     }
 }
@@ -742,6 +748,18 @@ fn validate_installation(installation: &Installation) -> Result<(), LibraryError
 fn validate_launch(launch: &LaunchSettings) -> Result<(), LibraryError> {
     if launch.prefix_mode != "umu" && launch.prefix_mode != "steam" {
         return Err(LibraryError::Invalid("prefix mode must be umu or steam".into()));
+    }
+    if launch.prelaunch.is_empty() != launch.prelaunch_sha256.is_empty() {
+        return Err(LibraryError::Invalid(
+            "pre-launch script and its approved SHA-256 must be set together".into(),
+        ));
+    }
+    if !launch.prelaunch.is_empty()
+        && (!std::path::Path::new(&launch.prelaunch).is_absolute()
+            || launch.prelaunch.len() > 4096
+            || launch.prelaunch.contains('\0'))
+    {
+        return Err(LibraryError::Invalid("invalid pre-launch script path".into()));
     }
     if launch.environment.len() > 32 {
         return Err(LibraryError::Invalid("too many environment variables".into()));

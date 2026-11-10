@@ -1825,6 +1825,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    steamtron_core::prelaunch::run(&game, std::path::Path::new(&program), &stdout)?;
     let child = command
         .stdin(Stdio::null())
         .stdout(stdout)
@@ -3223,6 +3224,54 @@ async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, Strin
 
 
 #[tauri::command]
+fn choose_prelaunch_script() -> Result<Option<serde_json::Value>, String> {
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose pre-launch script")
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let sha256 = steamtron_core::prelaunch::approve(&path)?;
+    Ok(Some(serde_json::json!({
+        "path": path.display().to_string(),
+        "sha256": sha256,
+    })))
+}
+
+#[tauri::command]
+fn set_managed_prelaunch(
+    game_id: String,
+    path: Option<String>,
+    sha256: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let mut game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    let path = path.unwrap_or_default();
+    if path.trim().is_empty() {
+        game.launch.prelaunch.clear();
+        game.launch.prelaunch_sha256.clear();
+    } else {
+        let script = std::path::PathBuf::from(path.trim());
+        let approved = sha256.unwrap_or_default();
+        steamtron_core::prelaunch::verify(&script.display().to_string(), &approved)?;
+        game.launch.prelaunch = script.display().to_string();
+        game.launch.prelaunch_sha256 = approved.to_ascii_lowercase();
+    }
+    library
+        .upsert_game(game.clone())
+        .map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!(game))
+}
+
+#[tauri::command]
 fn update_managed_launch_settings(
     game_id: String,
     proton: Option<String>,
@@ -3554,6 +3603,8 @@ fn main() {
             remove_managed_game,
             detach_umutron_paths,
             update_managed_launch_settings,
+            choose_prelaunch_script,
+            set_managed_prelaunch,
             managed_game_log,
             start_managed_download,
             cancel_managed_download,

@@ -1012,6 +1012,10 @@ function openManagedGameOptions(game) {
     if (key === "general") {
       const registration = latestGame.steam;
       const target = latestGame.launch_targets?.find((item) => item.primary) || latestGame.launch_targets?.[0];
+      const draft = {
+        path: latestGame.launch?.prelaunch || "",
+        sha256: latestGame.launch?.prelaunch_sha256 || "",
+      };
       pane.innerHTML = `<h3>General</h3><p class="pane-note">Library entry, paths and Steam registration for this game.</p>
         <div class="game-options-paths">
           ${row("Library entry", latestGame.id)}
@@ -1021,7 +1025,45 @@ function openManagedGameOptions(game) {
           ${row("Manifest", latestGame.installation?.manifest)}
           ${row("Launch target", target?.executable || "Not configured")}
           ${row("Steam registration", registration ? `${registration.state} · ${registration.backend}` : "Not registered")}
-        </div>`;
+        </div>
+        <h3 class="game-link-section-title">Pre-launch fix script</h3>
+        <p class="pane-note">Runs before every Play, on the host, as your user. The script must check whether its fix is already applied and exit without changes when it is. A non-zero exit blocks the launch. Editing the file blocks the next launch until you approve it again.</p>
+        <label for="gs-prelaunch-path">Script</label>
+        <div class="game-link-folder-row">
+          <input id="gs-prelaunch-path" value="${escape(draft.path)}" placeholder="No pre-launch script" readonly>
+          <button id="gs-prelaunch-choose">Browse…</button>
+        </div>
+        <div class="update-actions"><button id="gs-prelaunch-clear">Clear</button></div>
+        <p class="pane-note" id="gs-prelaunch-digest">${draft.sha256 ? `Approved SHA-256: ${escape(draft.sha256)}` : "No pre-launch script."}</p>
+        <button class="primary pane-save" id="gs-general-save">Save general settings</button>`;
+      const pathInput = pane.querySelector("#gs-prelaunch-path");
+      const digest = pane.querySelector("#gs-prelaunch-digest");
+      pane.querySelector("#gs-prelaunch-choose").onclick = async () => {
+        try {
+          const chosen = await invoke("choose_prelaunch_script");
+          if (!chosen) return;
+          draft.path = chosen.path;
+          draft.sha256 = chosen.sha256;
+          pathInput.value = chosen.path;
+          digest.textContent = `Approved SHA-256: ${chosen.sha256}`;
+        } catch (error) { showToast(String(error), true); }
+      };
+      pane.querySelector("#gs-prelaunch-clear").onclick = () => {
+        draft.path = "";
+        draft.sha256 = "";
+        pathInput.value = "";
+        digest.textContent = "No pre-launch script.";
+      };
+      pane.querySelector("#gs-general-save").onclick = async (event) => {
+        const stop = busy(event.target, "Saving…");
+        try {
+          await invoke("set_managed_prelaunch", { gameId: game.id, path: draft.path || null, sha256: draft.sha256 || null });
+          await refreshGame();
+          stop();
+          showToast(draft.path ? "Pre-launch script saved and approved" : "Pre-launch script cleared");
+          renderTab("general");
+        } catch (error) { stop(); showToast(String(error), true); }
+      };
       return;
     }
     if (key === "compatibility") {

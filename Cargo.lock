@@ -3946,9 +3946,11 @@ dependencies = [
 name = "steamtron-core"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "zip",
