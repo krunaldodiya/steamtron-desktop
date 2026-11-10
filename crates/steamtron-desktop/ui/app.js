@@ -570,7 +570,7 @@ function renderManagedPreview(game) {
           <p class="game-meta" id="game-meta">${escape(provisionalMeta || (appId ? `Steam App ${appId}` : "Managed entry"))}</p>
           <p class="game-description${seed?.description ? "" : " hidden"}" id="game-description">${seed?.description ? escape(seed.description) : ""}</p>
           <p class="game-credits" id="game-credits">${escape(provisionalCredits)}</p>
-          <div class="game-actions">${action}<button id="managed-options" class="game-icon-button" title="Game options" aria-label="Game options"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span><button id="managed-remove" class="danger">Remove from library</button></div>
+          <div class="game-actions">${action}<button id="managed-options" class="game-icon-button" title="${document.body.classList.contains("fullscreen-mode") ? "Game settings are available in desktop mode" : "Game options"}" aria-label="Game options"${document.body.classList.contains("fullscreen-mode") ? " disabled" : ""}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span><button id="managed-remove" class="danger">Remove from library</button></div>
           ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : "")}
           <div class="game-chips" id="game-chips"></div>
         </div>
@@ -679,6 +679,10 @@ async function hydrateGameDetail(game) {
 }
 
 function openManagedGameOptions(game) {
+  if (document.body.classList.contains("fullscreen-mode")) {
+    showToast("Game settings are available in desktop mode.", true);
+    return;
+  }
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   const tabs = [
@@ -1503,6 +1507,14 @@ profileDialog.addEventListener("click", (event) => {
 
 function applyFullscreenState(fullscreen) {
   document.body.classList.toggle("fullscreen-mode", fullscreen);
+  for (const button of document.querySelectorAll("#managed-options")) {
+    button.disabled = fullscreen;
+    button.title = fullscreen ? "Game settings are available in desktop mode" : "Game options";
+  }
+  if (fullscreen) {
+    const modal = document.querySelector(".game-settings-modal");
+    if (modal) modal.closest(".modal-backdrop")?.remove();
+  }
   const button = document.querySelector("#window-mode");
   if (button) {
     const label = fullscreen ? "Exit Fullscreen mode (F11)" : "Switch to Fullscreen mode (F11)";
