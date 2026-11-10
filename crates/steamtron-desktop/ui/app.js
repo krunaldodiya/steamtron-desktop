@@ -18,6 +18,7 @@ let homeFocusSection = "recent";
 const LIBRARY_PAGE_SIZE = 60;
 let appView = "library";
 let gameDetailOrigin = "library";
+let gameDetailSeed = null;
 let pendingRestart = loadPendingRestart();
 
 
@@ -548,22 +549,29 @@ function renderManagedPreview(game) {
   const canPlay = managedReady(game) && Boolean(target);
   const steamMode = Boolean(game.launch?.requires_steam || game.steam?.launch_mode === "steam_client");
   const running = runningManaged.has(game.id);
+  const seed = gameDetailSeed;
+  const provisionalHero = seed?.images?.hero || seed?.images?.portrait || (appId ? heroUrl(appId) : "");
+  const provisionalCover = seed?.images?.portrait || (appId ? coverUrl(appId) : "");
+  const provisionalMeta = seed
+    ? [seed.release_date, (seed.genres || []).map((genre) => genre.name).join(", ")].filter(Boolean).join(" · ")
+    : (appId ? `Steam App ${appId}` : "Managed entry");
+  const provisionalCredits = seed ? [seed.developers, seed.publishers].filter(Boolean).join(" · ") : "";
   const action = running
     ? '<button id="managed-stop" class="primary">Stop</button>'
     : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
   detailEl.innerHTML = `<div class="page game-page game-detail">
     <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : "Library"}</button></div>
-    <section class="game-hero${appId ? "" : " no-artwork"}" id="game-hero">
+    <section class="game-hero${provisionalHero ? "" : " no-artwork"}" id="game-hero"${provisionalHero ? ` style="background-image:url('${escape(provisionalHero)}')"` : ""}>
       <div class="game-hero-shade"></div>
       <div class="game-hero-card">
-        <img class="game-cover" id="game-cover" alt="" loading="lazy">
+        <img class="game-cover" id="game-cover" alt="" loading="lazy"${provisionalCover ? ` src="${escape(provisionalCover)}"` : ""}>
         <div class="game-info">
           <h1>${escape(game.title)}</h1>
-          <p class="game-meta" id="game-meta">${escape(appId ? `Steam App ${appId}` : "Managed entry")}</p>
-          <p class="game-description hidden" id="game-description"></p>
-          <p class="game-credits" id="game-credits"></p>
+          <p class="game-meta" id="game-meta">${escape(provisionalMeta || (appId ? `Steam App ${appId}` : "Managed entry"))}</p>
+          <p class="game-description${seed?.description ? "" : " hidden"}" id="game-description">${seed?.description ? escape(seed.description) : ""}</p>
+          <p class="game-credits" id="game-credits">${escape(provisionalCredits)}</p>
           <div class="game-actions">${action}<button id="managed-options" class="game-icon-button" title="Game options" aria-label="Game options"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span></div>
-          ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : ""}
+          ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : "")}
           <div class="game-chips" id="game-chips"></div>
         </div>
       </div>
@@ -597,6 +605,7 @@ async function hydrateGameDetail(game) {
     }
   } catch (_error) { /* keep the gradient */ }
   const chips = [{ text: "Proton: …" }];
+  if (seed?.id) chips.push({ text: `IGDB_ID: ${seed.id}`, copy: String(seed.id), label: "IGDB_ID" });
   if (appId) chips.push({ text: `STEAM_ID: ${appId}`, copy: String(appId), label: "STEAM_ID" });
   renderGameChips(chipsNode, chips);
   if (!appId) {
@@ -609,7 +618,9 @@ async function hydrateGameDetail(game) {
       chips[0].text = `Proton: ${tier || "Unknown"}`;
       try {
         const igdb = await invoke("igdb_id_for", { appid: appId, title: game.title });
-        if (igdb) chips.splice(1, 0, { text: `IGDB_ID: ${igdb}`, copy: String(igdb), label: "IGDB_ID" });
+        if (igdb && !chips.some((chip) => chip.label === "IGDB_ID")) {
+          chips.splice(1, 0, { text: `IGDB_ID: ${igdb}`, copy: String(igdb), label: "IGDB_ID" });
+        }
       } catch (_error) { /* IGDB mapping is optional */ }
       renderGameChips(chipsNode, chips);
     })();
@@ -727,9 +738,10 @@ function renderManagedMode() {
   renderManagedLibrary();
 }
 
-function openManagedGame(id, origin = "library") {
+function openManagedGame(id, origin = "library", seed = null) {
   managedSelectedId = id;
   gameDetailOrigin = origin;
+  gameDetailSeed = seed;
   appView = "game";
   renderManagedMode();
 }
@@ -2655,7 +2667,7 @@ async function openStoreItem(id) {
   }
   const known = managedGameForStoreItem(base);
   if (known) {
-    openManagedGame(known.id, "store");
+    openManagedGame(known.id, "store", base);
     return;
   }
   let item = base;
@@ -2733,7 +2745,7 @@ async function addStoreItemToLibrary(item, button) {
     progress.close();
     clearRestartRequired();
     showToast(`Added ${result.title} to your library`);
-    openManagedGame(result.game_id, "store");
+    openManagedGame(result.game_id, "store", item);
   } catch (error) {
     progress.fail(String(error));
     stop();
@@ -2787,7 +2799,7 @@ function renderStoreDetail() {
       if (!appid || appView !== "store-game" || storeDetail?.id !== item.id) return;
       storeDetail = { ...storeDetail, steam_app_id: appid };
       const managed = managedGameForStoreItem(storeDetail);
-      if (managed) { openManagedGame(managed.id, "store"); return; }
+      if (managed) { openManagedGame(managed.id, "store", storeDetail); return; }
       renderStoreDetail();
     }).catch(() => {});
   }
