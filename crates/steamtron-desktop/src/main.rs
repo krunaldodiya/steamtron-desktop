@@ -2678,7 +2678,7 @@ fn reconcile_registrations() -> Result<steamtron_library::managed::ReconcileRepo
 }
 
 #[tauri::command]
-fn add_managed_game(
+async fn add_managed_game(
     request: steamtron_library::managed::ManagedAddRequest,
 ) -> Result<steamtron_library::managed::ManagedAdded, String> {
     use steamtron_library::managed::ManifestProvider;
@@ -2694,8 +2694,14 @@ fn add_managed_game(
             status.details
         ));
     }
-    steamtron_library::managed::add_managed_game(request, &backend)
-        .map_err(|error| error.to_string())
+    // Manifest download and registration are blocking; keep them off the main
+    // thread so the window stays responsive while the add is in progress.
+    tauri::async_runtime::spawn_blocking(move || {
+        steamtron_library::managed::add_managed_game(request, &backend)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("add task failed: {error}"))?
 }
 
 #[tauri::command]

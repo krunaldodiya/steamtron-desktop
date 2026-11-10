@@ -2648,12 +2648,46 @@ async function openStoreItem(id) {
   renderStoreDetail();
 }
 
+function openAddProgress(title) {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal add-progress" style="max-width:420px;text-align:center">
+    <div class="modal-head"><h2>Add to library</h2></div>
+    <h3 class="add-progress-title">${escape(title)}</h3>
+    <div class="auth-spinner" id="add-progress-spinner"></div>
+    <p class="add-progress-status" id="add-progress-status">Preparing…</p>
+    <div class="add-progress-actions" id="add-progress-actions"></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const spinner = backdrop.querySelector("#add-progress-spinner");
+  const status = backdrop.querySelector("#add-progress-status");
+  const actions = backdrop.querySelector("#add-progress-actions");
+  return {
+    setStatus(message) {
+      status.textContent = message;
+      status.classList.remove("error");
+    },
+    close() { backdrop.remove(); },
+    fail(message) {
+      spinner.classList.add("hidden");
+      status.textContent = message;
+      status.classList.add("error");
+      actions.innerHTML = '<button id="add-progress-close" class="primary">Close</button>';
+      const close = actions.querySelector("#add-progress-close");
+      close.onclick = () => backdrop.remove();
+      focusControl(close);
+    },
+  };
+}
+
 async function addStoreItemToLibrary(item, button) {
   if (!item?.steam_app_id) {
     showToast("This title has no Steam App ID and cannot be added.", true);
     return;
   }
   const stop = busy(button, "Adding…");
+  const progress = openAddProgress(item.name);
+  progress.setStatus("Checking the library…");
   try {
     const snapshot = await invoke("library_snapshot");
     managedLibrary = snapshot;
@@ -2666,6 +2700,7 @@ async function addStoreItemToLibrary(item, button) {
       const profile = await invoke("profile_status");
       if (profile?.authenticated) provider = "api";
     } catch (_error) { /* fall back to the public provider */ }
+    progress.setStatus("Downloading the Lua manifest and registering the App ID…");
     const result = await invoke("add_managed_game", { request: {
       app_id: item.steam_app_id,
       title: item.name,
@@ -2675,10 +2710,12 @@ async function addStoreItemToLibrary(item, button) {
       proton: "",
     } });
     managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
+    progress.close();
     markRestartRequired(`Added ${result.title}. Restart Steam to see it.`);
     showToast(`Added ${result.title} to your library`);
     renderStoreDetail();
   } catch (error) {
+    progress.fail(String(error));
     stop();
     showToast(String(error), true);
   }

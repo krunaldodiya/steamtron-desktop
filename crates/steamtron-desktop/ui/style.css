@@ -472,3 +472,10 @@ body.fullscreen-mode #window-mode .icon-exit { display:block; }
 
 button.game-chip { border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; text-transform:uppercase; letter-spacing:.03em; font-size:11px; padding:6px 11px; border-radius:999px; }
 button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent); color:var(--text); }
+
+.add-progress .modal-head { justify-content:center; }
+.add-progress-title { margin:10px 0 0; font-size:18px; color:#fff; }
+.add-progress .auth-spinner { margin:20px auto 0; }
+.add-progress-status { margin:14px 0 0; min-height:20px; color:var(--muted); overflow-wrap:anywhere; }
+.add-progress-status.error { color:var(--error); }
+.add-progress-actions { display:flex; justify-content:center; margin-top:16px; }
