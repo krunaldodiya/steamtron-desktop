@@ -1847,18 +1847,29 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .map_err(|_| "Game state lock failed.".to_string())?
             .insert(game.id.clone(), pid);
     }
-    let _ = steamtron_core::play_history::record(&game.id, stamp as i64);
     let tracked = game.id.clone();
+    let observed_at = stamp as i64;
     std::thread::spawn(move || {
         let mut child = child;
-        let _ = child.wait();
-        if !steam_mode {
+        if steam_mode {
+            // Steam owns the game process; a successful client launch is the
+            // only evidence available here.
+            let _ = steamtron_core::play_history::record(&tracked, observed_at);
+        } else {
+            // Match the UmuTron milestone: two continuous seconds of the
+            // launched process before it counts as a recent play.
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let alive = child.try_wait().ok().flatten().is_none();
+            if alive {
+                let _ = steamtron_core::play_history::record(&tracked, observed_at);
+            }
             if let Ok(mut runs) = managed_runs().lock() {
                 if runs.get(&tracked) == Some(&pid) {
                     runs.remove(&tracked);
                 }
             }
         }
+        let _ = child.wait();
     });
     Ok(serde_json::json!({
         "pid": pid,
