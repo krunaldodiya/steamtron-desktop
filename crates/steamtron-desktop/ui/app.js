@@ -369,9 +369,11 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
       ? "Correct the game folder or launcher if the wrong files were linked. This never moves, copies, or deletes game files. Choosing a different folder keeps the former managed folder untouched. Linked games are read-only references: downloads, updates and DLC changes are disabled."
       : "Link an installed game folder and every executable you want Play to offer. This never moves, copies, or deletes the selected game files."}</p>
     <label for="gs-link-root">Linked game folder</label>
-    <input id="gs-link-root" value="${escape(draft.root)}" placeholder="/path/to/installed/game">
-    <div class="update-actions"><button id="gs-link-choose">Choose linked game folder…</button></div>
-    <h3>Launchers</h3>
+    <div class="game-link-folder-row">
+      <input id="gs-link-root" value="${escape(draft.root)}" placeholder="/path/to/installed/game" readonly>
+      <button id="gs-link-choose">Browse…</button>
+    </div>
+    <h3 class="game-link-section-title">Launchers</h3>
     <p class="pane-note">This list is the only source of truth for what Play starts. The default launcher starts when there is one entry; otherwise Play asks which launcher to start. Collections such as Uncharted 4 + The Lost Legacy share one folder with separate executables; add each one here. Each launcher can have its own arguments, added after the shared options in General.</p>
     ${linked ? "" : '<p class="pane-note">Choose the Proton compatibility layer in the Compatibility tab. The current selection is used when this game is linked.</p>'}
     <div id="gs-link-launchers"></div>
