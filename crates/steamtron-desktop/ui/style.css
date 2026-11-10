@@ -398,6 +398,10 @@ button.primary:hover { filter:brightness(1.06); }
 #settings { background:#2b3441; border-color:var(--border-strong); }
 .profile-button { width:40px; height:40px; padding:0; border-radius:50%; display:grid; place-items:center; background:#2b3441; border:1px solid var(--border-strong); color:var(--text); }
 .profile-button:hover { border-color:var(--accent); color:var(--accent); }
+.proton-source-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.proton-source-tab { padding:9px 16px; border:1px solid var(--border); border-radius:999px; background:transparent; color:var(--muted); font-size:13px; }
+.proton-source-tab:hover { color:var(--text); border-color:var(--border-strong); }
+.proton-source-tab.active { color:var(--text); background:var(--surface-raised); border-color:var(--accent); }
 .top-actions { gap:10px; position:relative; }
 .store-body { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:32px; align-items:stretch; margin-top:22px; }
 .store-sidebar { position:sticky; top:90px; display:flex; flex-direction:column; gap:6px; }

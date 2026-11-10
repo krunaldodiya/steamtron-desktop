@@ -5,6 +5,7 @@ use std::sync::{Mutex, OnceLock};
 
 mod artwork;
 mod download;
+mod proton_sources;
 
 use serde::Serialize;
 #[cfg(target_os = "linux")]
@@ -2223,9 +2224,15 @@ fn proton_runners_json() -> serde_json::Value {
         .map(|library| library.settings().clone())
         .unwrap_or_default();
     let mut detected = detect_proton_runners();
+    let runners_root = steamtron_core::paths::layout().runners();
     for runner in &settings.proton_runners {
         if !detected.iter().any(|entry| entry["path"] == runner.as_str()) {
-            detected.push(runner_entry(std::path::Path::new(runner), "custom"));
+            let source = if std::path::Path::new(runner).starts_with(&runners_root) {
+                "downloaded"
+            } else {
+                "custom"
+            };
+            detected.push(runner_entry(std::path::Path::new(runner), source));
         }
     }
     serde_json::json!({
@@ -2238,39 +2245,25 @@ fn proton_runners_json() -> serde_json::Value {
 fn proton_runners() -> serde_json::Value {
     proton_runners_json()
 }
+#[tauri::command]
+async fn proton_source_releases(
+    family: String,
+) -> Result<Vec<proton_sources::SourceRelease>, String> {
+    tauri::async_runtime::spawn_blocking(move || proton_sources::list(&family))
+        .await
+        .map_err(|error| format!("Proton source task failed: {error}"))?
+}
 
 #[tauri::command]
-fn add_proton_runner() -> Result<Option<serde_json::Value>, String> {
-    use steamtron_core::library::Library;
-
+async fn install_proton_release(
+    family: String,
+    tag: String,
+    name: String,
+) -> Result<serde_json::Value, String> {
     require_auth()?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Choose a Proton runner")
-        .pick_file()
-    else {
-        return Ok(None);
-    };
-    let runner = if path.join("proton").is_file() {
-        path.join("proton")
-    } else {
-        path
-    };
-    if !runner.is_file() {
-        return Err(format!("not a Proton runner: {}", runner.display()));
-    }
-    let value = runner.display().to_string();
-    let mut library = Library::load().map_err(|error| error.to_string())?;
-    {
-        let settings = library.settings_mut();
-        if !settings.proton_runners.contains(&value) {
-            settings.proton_runners.push(value.clone());
-        }
-        if settings.default_proton.is_empty() {
-            settings.default_proton = value;
-        }
-    }
-    library.save().map_err(|error| error.to_string())?;
-    Ok(Some(proton_runners_json()))
+    tauri::async_runtime::spawn_blocking(move || proton_sources::install(&family, &tag, &name))
+        .await
+        .map_err(|error| format!("Proton install task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -2284,23 +2277,6 @@ fn set_default_proton_runner(path: String) -> Result<serde_json::Value, String> 
     }
     let mut library = Library::load().map_err(|error| error.to_string())?;
     library.settings_mut().default_proton = path;
-    library.save().map_err(|error| error.to_string())?;
-    Ok(proton_runners_json())
-}
-
-#[tauri::command]
-fn remove_proton_runner(path: String) -> Result<serde_json::Value, String> {
-    use steamtron_core::library::Library;
-
-    require_auth()?;
-    let mut library = Library::load().map_err(|error| error.to_string())?;
-    {
-        let settings = library.settings_mut();
-        settings.proton_runners.retain(|runner| runner != &path);
-        if settings.default_proton == path {
-            settings.default_proton.clear();
-        }
-    }
     library.save().map_err(|error| error.to_string())?;
     Ok(proton_runners_json())
 }
@@ -3318,9 +3294,9 @@ fn main() {
             diagnostics_summary,
             clear_diagnostics,
             proton_runners,
-            add_proton_runner,
+            proton_source_releases,
+            install_proton_release,
             set_default_proton_runner,
-            remove_proton_runner,
             open_path,
             running_managed,
             stop_managed,

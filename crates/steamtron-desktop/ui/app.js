@@ -2883,6 +2883,8 @@ async function renderStorageSettings(host) {
   };
 }
 
+let protonSource = "GE-Proton";
+
 async function renderProtonSettings(host) {
   const data = await invoke("proton_runners").catch(() => ({ runners: [], default: "" }));
   const runners = data.runners || [];
@@ -2890,22 +2892,18 @@ async function renderProtonSettings(host) {
   const options = runners.map((runner) =>
     `<option value="${escape(runner.path)}"${runner.path === defaultPath ? " selected" : ""}>${escape(runner.name)}</option>`
   ).join("");
-  const rows = runners.map((runner) => settingsRow(
-    runner.name,
-    `${runner.path} · ${runner.source}${runner.exists ? "" : " · missing"}`,
-    `${runner.path === defaultPath ? "" : `<button data-use-runner="${escape(runner.path)}">Use</button>`}${runner.source === "custom" ? `<button data-remove-runner="${escape(runner.path)}">Remove</button>` : ""}`,
-  )).join("");
+  const sources = ["GE-Proton", "UMU-Proton", "Proton-CachyOS", "Valve-Proton"];
   host.innerHTML = `
     <section class="settings-section"><h2>Default Proton runner</h2><p>Used for new managed games unless a game overrides it.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Default runner</strong><span>${escape(defaultPath || "Not selected")}</span></div><div class="row-control"><select id="setting-default-runner">${options || '<option value="">No runners found</option>'}</select></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Default runner</strong><span>${escape(defaultPath || "Not selected")}</span></div><div class="row-control"><select id="setting-default-runner">${options || '<option value="">No runners installed</option>'}</select></div></div>
     </div></section>
-    <section class="settings-section"><h2>Runners</h2><p>Detected from Steam and UmuTron, plus folders you add.</p><div class="settings-card">
-      ${rows || '<div class="settings-row"><div class="row-text"><span>No Proton runners detected.</span></div></div>'}
-      <div class="settings-row"><div class="row-text"><strong>Add runner</strong><span>Choose a Proton folder or the proton executable.</span></div><div class="row-control"><button id="setting-add-runner">Add runner…</button></div></div>
-    </div></section>`;
+    <section class="settings-section"><h2>Download Proton</h2><p>Official releases from each source. Downloads are verified before they are added as runners.</p>
+      <div class="proton-source-tabs">${sources.map((family) => `<button class="proton-source-tab${family === protonSource ? " active" : ""}" data-proton-source="${family}">${family}</button>`).join("")}</div>
+      <div class="settings-card" id="proton-source-list"><div class="settings-row"><div class="row-text"><span>Loading releases…</span></div></div></div>
+    </section>`;
 
   const select = host.querySelector("#setting-default-runner");
-  select.onchange = async () => {
+  if (select) select.onchange = async () => {
     if (!select.value) return;
     try {
       await invoke("set_default_proton_runner", { path: select.value });
@@ -2913,34 +2911,70 @@ async function renderProtonSettings(host) {
       showToast("Default Proton runner updated");
     } catch (error) { showToast(String(error), true); }
   };
-  for (const button of host.querySelectorAll("[data-use-runner]")) {
-    button.onclick = async () => {
-      try {
-        await invoke("set_default_proton_runner", { path: button.dataset.useRunner });
-        await renderSettingsPage();
-        showToast("Default Proton runner updated");
-      } catch (error) { showToast(String(error), true); }
-    };
-  }
-  for (const button of host.querySelectorAll("[data-remove-runner]")) {
-    button.onclick = async () => {
-      try {
-        await invoke("remove_proton_runner", { path: button.dataset.removeRunner });
-        await renderSettingsPage();
-        showToast("Runner removed");
-      } catch (error) { showToast(String(error), true); }
-    };
-  }
-  host.querySelector("#setting-add-runner").onclick = async (event) => {
-    const stop = busy(event.target, "Choosing…");
+
+  const list = host.querySelector("#proton-source-list");
+  const loadSource = async (family) => {
+    protonSource = family;
+    for (const tab of host.querySelectorAll("[data-proton-source]")) {
+      tab.classList.toggle("active", tab.dataset.protonSource === family);
+    }
+    list.innerHTML = '<div class="settings-row"><div class="row-text"><span>Loading releases…</span></div></div>';
+    let releases = [];
     try {
-      const result = await invoke("add_proton_runner");
-      stop();
-      if (!result) return;
-      await renderSettingsPage();
-      showToast("Proton runner added");
-    } catch (error) { stop(); showToast(String(error), true); }
+      releases = await invoke("proton_source_releases", { family });
+    } catch (error) {
+      list.innerHTML = `<div class="settings-row"><div class="row-text"><span class="status error">${escape(String(error))}</span></div><div class="row-control"><button id="proton-source-retry">Retry</button></div></div>`;
+      list.querySelector("#proton-source-retry").onclick = () => { void loadSource(family); };
+      return;
+    }
+    if (!releases.length) {
+      list.innerHTML = '<div class="settings-row"><div class="row-text"><span>No downloadable releases were found.</span></div></div>';
+      return;
+    }
+    list.innerHTML = releases.map((release, index) => {
+      let control = "";
+      if (release.installed) {
+        control = release.installed_path === defaultPath
+          ? '<span class="settings-badge ok">default</span>'
+          : `<button data-proton-default="${escape(release.installed_path)}">Set as default</button>`;
+      } else if (release.installable) {
+        control = `<button data-proton-install="${index}">Install</button>`;
+      }
+      const detail = [release.name, release.size ? formatBytes(release.size) : "", release.installed ? "Installed" : "Available"].filter(Boolean).join(" · ");
+      return `<div class="settings-row"><div class="row-text"><strong>${escape(release.tag)}</strong><span>${escape(detail)}</span></div><div class="row-control">${control}</div></div>`;
+    }).join("");
+    for (const button of list.querySelectorAll("[data-proton-default]")) {
+      button.onclick = async () => {
+        try {
+          await invoke("set_default_proton_runner", { path: button.dataset.protonDefault });
+          await renderSettingsPage();
+          showToast("Default Proton runner updated");
+        } catch (error) { showToast(String(error), true); }
+      };
+    }
+    for (const button of list.querySelectorAll("[data-proton-install]")) {
+      button.onclick = async () => {
+        const release = releases[Number(button.dataset.protonInstall)];
+        if (!release) return;
+        const stop = busy(button, "Installing…");
+        try {
+          await invoke("install_proton_release", { family: release.family, tag: release.tag, name: release.name });
+          await renderSettingsPage();
+          showToast(`Installed ${release.tag}`);
+        } catch (error) {
+          stop();
+          showToast(String(error), true);
+        }
+      };
+    }
   };
+  for (const tab of host.querySelectorAll("[data-proton-source]")) {
+    tab.onclick = () => {
+      focusControl(tab);
+      void loadSource(tab.dataset.protonSource);
+    };
+  }
+  await loadSource(protonSource);
 }
 
 for (const tab of document.querySelectorAll("[data-settings-tab]")) {
