@@ -2104,28 +2104,165 @@ fn update_library_settings(
     Ok(serde_json::json!(library.settings()))
 }
 
+fn unescape_mount(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 3 < bytes.len() {
+            let octal = &value[index + 1..index + 4];
+            if let Ok(character) = u8::from_str_radix(octal, 8) {
+                output.push(character as char);
+                index += 4;
+                continue;
+            }
+        }
+        output.push(bytes[index] as char);
+        index += 1;
+    }
+    output
+}
+
+#[cfg(target_os = "linux")]
+fn disk_space(path: &std::path::Path) -> (u64, u64) {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return (0, 0);
+    };
+    let mut statistics: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(path.as_ptr(), &mut statistics) } != 0 {
+        return (0, 0);
+    }
+    let block = statistics.f_frsize as u64;
+    (
+        statistics.f_blocks as u64 * block,
+        statistics.f_bavail as u64 * block,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn path_writable(path: &std::path::Path) -> bool {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
+}
+
 #[tauri::command]
-fn add_library_drive() -> Result<Option<serde_json::Value>, String> {
+fn available_library_drives() -> Result<Vec<serde_json::Value>, String> {
+    use steamtron_core::library::Library;
+
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let mut result = Vec::new();
+    #[cfg(target_os = "linux")]
+    {
+        let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
+        let pseudo = [
+            "proc", "sysfs", "devtmpfs", "devpts", "tmpfs", "cgroup", "cgroup2", "pstore",
+            "bpf", "tracefs", "debugfs", "securityfs", "configfs", "fusectl", "mqueue",
+            "hugetlbfs", "autofs", "ramfs", "squashfs", "nsfs", "overlay", "binfmt_misc",
+            "efivarfs", "rpc_pipefs", "fuse.gvfsd-fuse", "fuse.portal",
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for line in mounts.lines() {
+            let mut fields = line.split_whitespace();
+            let device = fields.next().unwrap_or("");
+            let mountpoint = unescape_mount(fields.next().unwrap_or(""));
+            let fstype = fields.next().unwrap_or("");
+            if mountpoint.is_empty() || !mountpoint.starts_with('/') {
+                continue;
+            }
+            if pseudo.contains(&fstype) || mountpoint.starts_with("/sys") || mountpoint.starts_with("/proc") {
+                continue;
+            }
+            let candidate_mount = mountpoint == "/"
+                || mountpoint.starts_with("/mnt/")
+                || mountpoint.starts_with("/media/")
+                || mountpoint.starts_with("/run/media/");
+            if !candidate_mount {
+                continue;
+            }
+            if device != "none" && !device.starts_with('/') {
+                continue;
+            }
+            let path = std::path::Path::new(&mountpoint);
+            if !path.is_dir() {
+                continue;
+            }
+            let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
+            let (total, free) = disk_space(&canonical);
+            if total == 0 {
+                continue;
+            }
+            let registered = library.drives().iter().any(|drive| drive.root == canonical);
+            let label = if mountpoint == "/" {
+                "System Root (/)".to_owned()
+            } else {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&mountpoint)
+                    .to_owned()
+            };
+            result.push(serde_json::json!({
+                "path": canonical.display().to_string(),
+                "label": label,
+                "device": device,
+                "fstype": fstype,
+                "total": total,
+                "free": free,
+                "writable": path_writable(&canonical),
+                "registered": registered,
+                "default": library.drives().iter().any(|drive| drive.root == canonical && drive.default),
+            }));
+        }
+    }
+    result.sort_by(|left, right| {
+        let left_root = left["path"] == "/";
+        let right_root = right["path"] == "/";
+        left_root.cmp(&right_root).then_with(|| {
+            left["label"].as_str().unwrap_or("").cmp(right["label"].as_str().unwrap_or(""))
+        })
+    });
+    Ok(result)
+}
+
+#[tauri::command]
+fn add_library_drive(path: String) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
     require_auth()?;
-    let Some(root) = rfd::FileDialog::new()
-        .set_title("Choose a drive or folder for SteamTron games")
-        .pick_folder()
-    else {
-        return Ok(None);
+    let root = std::path::Path::new(&path);
+    if !root.is_absolute() || !root.is_dir() {
+        return Err("Choose a mounted drive or folder.".into());
+    }
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    #[cfg(target_os = "linux")]
+    if !path_writable(&root) {
+        return Err("This drive is not writable.".into());
+    }
+    let label = if root == std::path::Path::new("/") {
+        "System Root".to_owned()
+    } else {
+        root.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Drive")
+            .to_owned()
     };
-    let label = root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Drive")
-        .to_owned();
     let mut library = Library::load().map_err(|error| error.to_string())?;
+    let default = library.drives().is_empty();
     library
-        .add_drive(&root, label, library.drives().is_empty())
+        .add_drive(&root, label, default)
         .map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
-    Ok(Some(library_json(&library)))
+    Ok(library_json(&library))
 }
 
 #[tauri::command]
@@ -3374,6 +3511,7 @@ fn main() {
             app_version,
             update_library_settings,
             add_library_drive,
+            available_library_drives,
             set_default_library_drive,
             diagnostics_summary,
             clear_diagnostics,

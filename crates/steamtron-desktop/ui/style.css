@@ -413,6 +413,17 @@ button.primary:hover { filter:brightness(1.06); }
 .proton-icon { width:26px; height:26px; padding:0; display:grid; place-items:center; place-content:center; line-height:0; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted); }
 .proton-icon svg { display:block; margin:auto; }
 .proton-icon:hover { color:var(--text); border-color:var(--border-strong); }
+.drive-modal { width:min(600px, 94vw); }
+.drive-modal .modal-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.drive-modal .modal-head h2 { flex:1; text-align:center; margin:0; }
+.drive-choices { display:flex; flex-direction:column; gap:8px; margin:14px 0; max-height:52vh; overflow:auto; }
+.drive-choice { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--surface-raised); cursor:pointer; }
+.drive-choice.disabled { opacity:.65; cursor:default; }
+.drive-choice input { margin-top:3px; }
+.drive-choice-copy { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.drive-choice-copy small { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+.drive-usage { height:6px; margin:8px 0 4px; overflow:hidden; border-radius:999px; background:var(--surface); border:1px solid var(--border); }
+.drive-usage span { display:block; height:100%; background:var(--accent); }
 .top-actions { gap:10px; position:relative; }
 .store-body { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:32px; align-items:stretch; margin-top:22px; }
 .store-sidebar { position:sticky; top:90px; display:flex; flex-direction:column; gap:6px; }

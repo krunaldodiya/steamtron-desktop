@@ -2825,25 +2825,106 @@ async function renderGeneralSettings(host) {
   };
 }
 
+async function showAddDriveDialog() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal drive-modal">
+    <div class="modal-head"><button id="drive-cancel">Cancel</button><h2>Add game drive</h2><button id="drive-add" class="primary" disabled>Add drive</button></div>
+    <p class="pane-note">Choose a mounted partition.</p>
+    <p class="pane-note">Registration keeps existing game locations unchanged. No partition, folder or game file is created.</p>
+    <div id="drive-choices" class="drive-choices"><div class="status">Checking connected drives…</div></div>
+    <div class="update-actions"><button id="drive-refresh">Refresh drives</button></div>
+  </div>`;
+  document.body.appendChild(backdrop);
+  const choices = backdrop.querySelector("#drive-choices");
+  const add = backdrop.querySelector("#drive-add");
+  let selected = null;
+  const close = () => backdrop.remove();
+  backdrop.querySelector("#drive-cancel").onclick = close;
+  backdrop.querySelector(".modal-close")?.addEventListener("click", close);
+
+  const load = async () => {
+    selected = null;
+    add.disabled = true;
+    choices.innerHTML = '<div class="status">Checking connected drives…</div>';
+    let drives = [];
+    try { drives = await invoke("available_library_drives"); }
+    catch (error) {
+      choices.innerHTML = `<div class="status error">${escape(String(error))}</div>`;
+      return;
+    }
+    if (!drives.length) {
+      choices.innerHTML = '<div class="status">No mounted internal partitions found. Mount a supported internal partition, then refresh.</div>';
+      return;
+    }
+    choices.innerHTML = drives.map((drive) => {
+      const blocked = drive.registered || !drive.writable;
+      const reason = drive.registered
+        ? "Already registered — change roles on its Storage card."
+        : !drive.writable
+          ? "This drive is mounted read-only."
+          : `${formatBytes(drive.free)} available of ${formatBytes(drive.total)} · Writable`;
+      return `<label class="drive-choice${blocked ? " disabled" : ""}">
+        <input type="radio" name="library-drive" value="${escape(drive.path)}"${blocked ? " disabled" : ""}>
+        <span class="drive-choice-copy"><strong>${escape(drive.label)}</strong><small>${escape(drive.path)}</small><small>${escape(reason)}</small></span>
+      </label>`;
+    }).join("");
+    for (const radio of choices.querySelectorAll("input[name=library-drive]")) {
+      radio.onchange = () => {
+        selected = radio.value;
+        add.disabled = !selected;
+      };
+    }
+    const first = choices.querySelector("input[name=library-drive]:not(:disabled)");
+    if (first) focusControl(first);
+  };
+
+  add.onclick = async () => {
+    if (!selected) return;
+    const stop = busy(add, "Adding…");
+    try {
+      const result = await invoke("add_library_drive", { path: selected });
+      managedLibrary = result;
+      close();
+      await renderSettingsPage();
+      showToast("Drive added");
+    } catch (error) {
+      stop();
+      showToast(String(error), true);
+    }
+  };
+  backdrop.querySelector("#drive-refresh").onclick = () => { void load(); };
+  await load();
+}
+
 async function renderStorageSettings(host) {
   const snapshot = await refreshSettingsLibrary();
   const drives = snapshot?.drives || [];
   const games = snapshot?.games || [];
   const libraryPath = snapshot?.path || "";
   const dataDir = libraryPath.replace(/\/[^/]+$/, "");
+  const available = await invoke("available_library_drives").catch(() => []);
+  const availableByPath = new Map(available.map((drive) => [drive.path, drive]));
   const gamesOn = (drive) => games.filter((game) => {
     const root = game.installation?.root || "";
     return root === drive.root || root.startsWith(`${drive.root.replace(/\/+$/, "")}/`);
   }).length;
-  const rows = drives.map((drive) => settingsRow(
-    `${drive.label || drive.id}${drive.default ? " · Default" : ""}`,
-    `${drive.root} · ${gamesOn(drive)} game${gamesOn(drive) === 1 ? "" : "s"}`,
-    `<button data-open-drive="${escape(drive.root)}">Open</button>${drive.default ? "" : `<button data-default-drive="${escape(drive.id)}">Make default</button>`}`,
-  )).join("");
+  const rows = drives.map((drive) => {
+    const disk = availableByPath.get(drive.root);
+    const used = disk && disk.total ? Math.min(100, Math.max(0, 100 - (disk.free / disk.total) * 100)) : 0;
+    const usage = disk
+      ? `<div class="drive-usage"><span style="width:${used}%"></span></div><span>${formatBytes(disk.free)} available of ${formatBytes(disk.total)}</span>`
+      : "";
+    return `<div class="settings-row drive-row">
+      <div class="row-text"><strong>${escape(drive.label || drive.id)}${drive.default ? " · Default" : ""}</strong><span>${escape(drive.root)} · ${gamesOn(drive)} game${gamesOn(drive) === 1 ? "" : "s"}</span>${usage}</div>
+      <div class="row-control">${drive.default ? "" : `<button data-default-drive="${escape(drive.id)}">Make default</button>`}<button data-open-drive="${escape(drive.root)}">Open</button></div>
+    </div>`;
+  }).join("");
   host.innerHTML = `
-    <section class="settings-section"><h2>Drives</h2><p>Game content, prefixes and fixes live under <code>SteamTronLibrary/steamtronapps</code> on each drive. Adding a drive never moves existing games.</p><div class="settings-card">
+    <section class="settings-section"><h2>Your game drives</h2><p>Added drives are the only destinations for managed games. Game content lives under <code>SteamTronLibrary/steamtronapps</code>; registration never moves existing files.</p><div class="settings-card">
+      <div class="settings-row"><div class="row-text"><strong>Registered game drives</strong><span>Select one of these mounted roots when adding or restoring a game.</span></div><div class="row-control"><button id="setting-refresh-drives">Refresh drives</button></div></div>
       ${rows || '<div class="settings-row"><div class="row-text"><span>No drives registered yet.</span></div></div>'}
-      <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted drive or folder for new games.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted partition. No folder or game file is created.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
     </div></section>
     <section class="settings-section"><h2>Data folder</h2><p>Library index, tools, diagnostics and launch state for this installation.</p><div class="settings-card">
       ${settingsRow("SteamTron data", dataDir || "Unavailable", `<button id="setting-open-data">Open folder</button>`)}
@@ -2866,18 +2947,8 @@ async function renderStorageSettings(host) {
       } catch (error) { showToast(String(error), true); }
     };
   }
-  const add = host.querySelector("#setting-add-drive");
-  if (add) add.onclick = async () => {
-    const stop = busy(add, "Choosing…");
-    try {
-      const result = await invoke("add_library_drive");
-      stop();
-      if (!result) return;
-      managedLibrary = result;
-      await renderSettingsPage();
-      showToast("Drive added");
-    } catch (error) { stop(); showToast(String(error), true); }
-  };
+  host.querySelector("#setting-refresh-drives").onclick = () => { void renderSettingsPage(); };
+  host.querySelector("#setting-add-drive").onclick = () => { void showAddDriveDialog(); };
   const openData = host.querySelector("#setting-open-data");
   if (openData) openData.onclick = async () => {
     try { await invoke("open_path", { path: dataDir }); }
