@@ -483,3 +483,7 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .cover-card.skeleton { background:#141c26; }
 .cover-card.skeleton .cover { background:#1d3140; animation:pulse 1.2s ease-in-out infinite; }
 .cover-card.skeleton .cover-title { color:transparent; }
+
+.pager-number { min-width:44px; padding:9px 12px; border-radius:8px; background:var(--surface-raised); border:1px solid var(--border); color:var(--text); }
+.pager-number:hover { border-color:var(--border-strong); }
+.pager-number.active { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:600; }

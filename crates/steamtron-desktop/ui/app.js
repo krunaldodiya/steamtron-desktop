@@ -2960,6 +2960,12 @@ function renderStorePage() {
     .join("");
   const visible = storeBuffer.slice((storePage - 1) * STORE_PAGE_SIZE, storePage * STORE_PAGE_SIZE);
   const hasMore = !storeExhausted || storeBuffer.length > storePage * STORE_PAGE_SIZE;
+  const knownPages = storeExhausted ? Math.max(1, Math.ceil(storeBuffer.length / STORE_PAGE_SIZE)) : Infinity;
+  const windowStart = Math.max(1, storePage - 2);
+  const pageNumbers = [];
+  for (let page = windowStart; page < windowStart + 5 && page <= knownPages; page += 1) {
+    pageNumbers.push(page);
+  }
   const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : `${storeBuffer.length} PC titles`;
   detailEl.innerHTML = `<div class="page store-page">
     <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
@@ -2987,7 +2993,7 @@ function renderStorePage() {
         <nav class="pager" aria-label="Store pages">
           <button data-store-page="first"${storePage === 1 ? " disabled" : ""}>First</button>
           <button data-store-page="prev"${storePage === 1 ? " disabled" : ""}>Previous</button>
-          <span class="pager-page">${storePage}</span>
+          ${pageNumbers.map((page) => `<button class="pager-number${page === storePage ? " active" : ""}" data-page-number="${page}">${page}</button>`).join("")}
           <button data-store-page="next"${hasMore ? "" : " disabled"}>Next</button>
         </nav>
         <p class="pager-hint">Page ${storePage} · ${STORE_PAGE_SIZE} titles per page · PgUp / PgDn</p>
@@ -3037,6 +3043,12 @@ function renderStorePage() {
       else if (action === "prev") next = Math.max(1, storePage - 1);
       else if (action === "next") next = storePage + 1;
       if (next !== storePage) void ensureStorePage(next);
+    };
+  }
+  for (const button of detailEl.querySelectorAll("[data-page-number]")) {
+    button.onclick = () => {
+      const next = Number(button.dataset.pageNumber);
+      if (Number.isInteger(next) && next !== storePage) void ensureStorePage(next);
     };
   }
   for (const card of detailEl.querySelectorAll("[data-store-id]")) {
