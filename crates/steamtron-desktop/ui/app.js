@@ -510,8 +510,8 @@ async function protonTier(appid) {
 function renderGameChips(node, chips) {
   if (!node) return;
   node.innerHTML = chips.map((chip) => chip.copy
-    ? `<button class="game-chip" data-copy="${escape(String(chip.copy))}" data-copy-label="${escape(chip.label || "Value")}" title="Click to copy ${escape(chip.label || "value")}">${escape(chip.text)}</button>`
-    : `<span class="game-chip">${escape(chip.text)}</span>`).join("");
+    ? `<button class="game-chip" data-copy="${escape(String(chip.copy))}" data-copy-label="${escape(chip.label || "Value")}" title="${escape(chip.title || `Click to copy ${chip.label || "value"}`)}">${escape(chip.text)}</button>`
+    : `<span class="game-chip"${chip.title ? ` title="${escape(chip.title)}"` : ""}>${escape(chip.text)}</span>`).join("");
 }
 
 async function copyToClipboard(value, label) {
@@ -598,6 +598,10 @@ async function hydrateGameDetail(game) {
   const chips = [{ text: "Proton: …" }];
   if (appId) chips.push({ text: `STEAM_ID: ${appId}`, copy: String(appId), label: "STEAM_ID" });
   renderGameChips(chipsNode, chips);
+  if (!appId) {
+    chips[0] = { text: "Proton: Unknown", title: "ProtonDB rates Steam builds; this entry has no Steam App ID." };
+    renderGameChips(chipsNode, chips);
+  }
   if (appId) {
     void (async () => {
       const tier = await protonTier(appId).catch(() => null);
@@ -2737,7 +2741,10 @@ function renderStoreDetail() {
     ? '<button class="primary" disabled>In library</button>'
     : item.steam_app_id
       ? '<button class="primary" id="store-add">Add to library</button>'
-      : '<button class="primary" disabled>No Steam App ID</button>';
+      : '<button class="primary" disabled title="This title has no Steam release, so it cannot be added to the Steam library.">Not available on Steam</button>';
+  const availabilityNote = !item.steam_app_id && !inLibrary
+    ? '<p class="game-note">This title has no Steam release, so SteamTron cannot add it to the Steam library or rate it on ProtonDB.</p>'
+    : "";
   detailEl.innerHTML = `<div class="page game-page game-detail">
     <div class="game-page-top"><button id="store-back" class="secondary">← Store</button></div>
     <section class="game-hero${hero ? "" : " no-artwork"}" id="game-hero"${hero ? ` style="background-image:url('${escape(hero)}')"` : ""}>
@@ -2750,6 +2757,7 @@ function renderStoreDetail() {
           <p class="game-description">${escape(item.description || "")}</p>
           <p class="game-credits">${escape(credits)}</p>
           <div class="game-actions">${action}</div>
+          ${availabilityNote}
           <div class="game-chips" id="store-chips"></div>
         </div>
       </div>
@@ -2763,7 +2771,10 @@ function renderStoreDetail() {
       renderGameChips(detailEl.querySelector("#store-chips"), chips);
     }).catch(() => {});
   } else {
-    chips[0].text = "Proton: Unknown";
+    chips[0] = {
+      text: "Proton: No Steam build",
+      title: "ProtonDB rates Steam builds; this title has no Steam release.",
+    };
     renderGameChips(detailEl.querySelector("#store-chips"), chips);
   }
   const add = detailEl.querySelector("#store-add");
