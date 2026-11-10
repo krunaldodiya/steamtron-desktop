@@ -366,7 +366,7 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
   }
   pane.innerHTML = `<h3>Game Link</h3>
     <p class="pane-note">${linked
-      ? "Correct the game folder or launcher if the wrong files were linked. This never moves, copies, or deletes game files. Choosing a different folder keeps the former managed folder untouched."
+      ? "Correct the game folder or launcher if the wrong files were linked. This never moves, copies, or deletes game files. Choosing a different folder keeps the former managed folder untouched. Linked games are read-only references: downloads, updates and DLC changes are disabled."
       : "Link an installed game folder and every executable you want Play to offer. This never moves, copies, or deletes the selected game files."}</p>
     <label for="gs-link-root">Linked game folder</label>
     <input id="gs-link-root" value="${escape(draft.root)}" placeholder="/path/to/installed/game">
@@ -954,7 +954,10 @@ function openManagedGameOptions(game) {
   };
 
   for (const button of backdrop.querySelectorAll("[data-game-tab]")) {
-    button.onclick = () => renderTab(button.dataset.gameTab);
+    button.onclick = () => {
+      focusControl(button);
+      renderTab(button.dataset.gameTab);
+    };
   }
   renderTab("general");
   focusControl(backdrop.querySelector(".game-settings-tab.active"));

@@ -205,6 +205,12 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     let game = library
         .game(&game_id)
         .ok_or_else(|| format!("unknown game {game_id}"))?;
+    if game.installation.mode == steamtron_core::library::InstallMode::Linked {
+        return Err(
+            "Linked games are read-only references. Remove the link and download the game to manage its files."
+                .into(),
+        );
+    }
     let app_id = game
         .metadata_app_id
         .ok_or_else(|| "this game has no Steam App ID".to_string())?;
