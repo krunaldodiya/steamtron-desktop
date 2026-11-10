@@ -2835,7 +2835,9 @@ async fn steam_download_size(appid: u32) -> Result<u64, String> {
                 .unwrap_or(false);
             if fresh {
                 if let Some(size) = value.get("size").and_then(|size| size.as_u64()) {
-                    return Ok(size);
+                    if size > 0 {
+                        return Ok(size);
+                    }
                 }
             }
         }
@@ -2862,9 +2864,25 @@ async fn steam_download_size(appid: u32) -> Result<u64, String> {
             if !key.chars().all(|character| character.is_ascii_digit()) {
                 continue;
             }
-            if let Some(size) = depot.get("maxsize").and_then(|size| size.as_u64()) {
-                total = total.saturating_add(size);
+            // Skip DLC and shared redistributable depots: the detail size is
+            // for the base app, matching Steam's install size.
+            if depot.get("dlcappid").is_some() || depot.get("sharedinstall").is_some() {
+                continue;
             }
+            let manifest = depot.get("manifests").and_then(|value| value.get("public"));
+            let size = manifest
+                .and_then(|value| value.get("size"))
+                .and_then(|value| value.as_str())
+                .and_then(|value| value.parse::<u64>().ok())
+                .or_else(|| {
+                    manifest
+                        .and_then(|value| value.get("download"))
+                        .and_then(|value| value.as_str())
+                        .and_then(|value| value.parse::<u64>().ok())
+                })
+                .or_else(|| depot.get("maxsize").and_then(|value| value.as_u64()))
+                .unwrap_or(0);
+            total = total.saturating_add(size);
         }
     }
     if let Some(parent) = path.parent() {
