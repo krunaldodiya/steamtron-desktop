@@ -1029,29 +1029,36 @@ function openManagedGameOptions(game) {
       return;
     }
     if (key === "environment") {
-      const argumentsText = (latestGame.launch?.arguments || []).join(" ");
-      const environment = Object.entries(latestGame.launch?.environment || {}).map(([name, value]) => `${name}=${value}`).join("\n");
-      pane.innerHTML = `<h3>Environment</h3><p class="pane-note">Extra arguments and environment variables passed to the game process.</p>
-        <label for="gs-arguments">Arguments</label>
-        <input id="gs-arguments" value="${escape(argumentsText)}" placeholder="-windowed (space separated)">
-        <label for="gs-environment">Environment (one KEY=VALUE per line)</label>
-        <textarea id="gs-environment" rows="8" placeholder="WINEDLLOVERRIDES=x=n,b">${escape(environment)}</textarea>
-        <div class="update-actions"><button class="primary" id="gs-env-save">Save</button></div>`;
+      const entries = Object.entries(latestGame.launch?.environment || {});
+      pane.innerHTML = `<h3>Environment</h3>
+        <p class="pane-note">Pass key-value variables only to this game's Windows launch. SteamTron manages the runner, prefix, Steam identity, paths and diagnostic logging.</p>
+        <div id="gs-env-rows"></div>
+        <button class="pane-add" id="gs-env-add">Add variable</button>
+        <button class="primary pane-save" id="gs-env-save">Save environment</button>`;
+      const rows = pane.querySelector("#gs-env-rows");
+      const addRow = (name = "", value = "") => {
+        const row = document.createElement("div");
+        row.className = "env-row";
+        row.innerHTML = `<input class="env-key" placeholder="KEY" value="${escape(name)}" aria-label="Variable name"><input class="env-value" placeholder="VALUE" value="${escape(value)}" aria-label="Variable value"><button class="env-remove" aria-label="Remove variable">Remove</button>`;
+        row.querySelector(".env-remove").onclick = () => row.remove();
+        rows.appendChild(row);
+        return row;
+      };
+      for (const [name, value] of entries) addRow(name, value);
+      pane.querySelector("#gs-env-add").onclick = () => {
+        const row = addRow();
+        row.querySelector(".env-key").focus();
+      };
       pane.querySelector("#gs-env-save").onclick = async (event) => {
         const map = {};
-        for (const line of pane.querySelector("#gs-environment").value.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.includes("=")) continue;
-          const index = trimmed.indexOf("=");
-          map[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim();
+        for (const row of rows.querySelectorAll(".env-row")) {
+          const key = row.querySelector(".env-key").value.trim();
+          if (!key) continue;
+          map[key] = row.querySelector(".env-value").value.trim();
         }
         const stop = busy(event.target, "Saving…");
         try {
-          await invoke("update_managed_launch_settings", {
-            gameId: game.id,
-            arguments: pane.querySelector("#gs-arguments").value.trim().split(/\s+/).filter(Boolean),
-            environment: map,
-          });
+          await invoke("update_managed_launch_settings", { gameId: game.id, environment: map });
           await refreshGame();
           stop();
           showToast("Launch environment saved");
