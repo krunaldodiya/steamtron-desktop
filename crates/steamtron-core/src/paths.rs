@@ -131,11 +131,6 @@ impl Layout {
     pub fn credentials(&self) -> PathBuf {
         self.home().join("api-token.json")
     }
-
-    /// UmuTron's library, read-only; used only to plan an import.
-    pub fn umutron_library(&self) -> PathBuf {
-        self.data_home.join("umutron").join("library.json")
-    }
 }
 
 /// The layout for the current process.
@@ -237,15 +232,6 @@ mod tests {
         assert_eq!(layout.cache_dir(), temp.path().join("cache").join("steamtron"));
     }
 
-    #[test]
-    fn umutron_library_is_read_from_the_sibling_data_home() {
-        let temp = tempfile::tempdir().unwrap();
-        let layout = layout_at(temp.path());
-        assert_eq!(
-            layout.umutron_library(),
-            temp.path().join("data").join("umutron").join("library.json")
-        );
-    }
 
     #[test]
     fn private_directory_is_created() {

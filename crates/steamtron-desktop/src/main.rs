@@ -3192,11 +3192,8 @@ fn library_migration_status() -> Result<serde_json::Value, String> {
     let library = Library::open(&library_path).map_err(|error| error.to_string())?;
     let mut sources = Vec::new();
     let layout = steamtron_core::paths::layout();
-    let umutron = std::env::var_os("STEAMTRON_UMUTRON_LIBRARY")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| layout.umutron_library());
     let legacy = layout.legacy_config();
-    for (kind, path) in [("umutron", umutron), ("steamtron", legacy)] {
+    for (kind, path) in [("steamtron", legacy)] {
         if !path.is_file() {
             continue;
         }

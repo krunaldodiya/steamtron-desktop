@@ -46,10 +46,6 @@ fn resolve_smd() -> Result<PathBuf, String> {
         candidates.push(PathBuf::from(value));
     }
     candidates.push(steamtron_core::paths::layout().tools().join("smd"));
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        candidates.push(home.join(".local/opt/umutron/umutron/bin/smd"));
-        candidates.push(home.join(".local/share/umutron/tools/smd"));
-    }
     if let Some(path) = std::env::var_os("PATH") {
         for directory in std::env::split_paths(&path) {
             candidates.push(directory.join("smd"));
