@@ -2267,6 +2267,7 @@ fn install_proton_release(
     if proton_sources::read_states().iter().any(|state| {
         state.family == family
             && state.tag == tag
+            && state.name == name
             && matches!(state.status.as_str(), "starting" | "downloading" | "extracting" | "registering")
     }) {
         return Ok(serde_json::json!({ "started": false }));

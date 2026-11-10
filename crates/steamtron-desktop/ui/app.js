@@ -2902,6 +2902,10 @@ function protonInstallActive(state) {
   return ["starting", "downloading", "extracting", "registering"].includes(state.status);
 }
 
+function protonReleaseKey(release) {
+  return `${release.family}|${release.tag}|${release.name}`;
+}
+
 function protonProgressMarkup(state) {
   const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
   return `<div class="proton-progress"><div class="proton-progress-track"><span style="width:${percent}%"></span></div><small>${percent.toFixed(0)}% · ${escape(state.message || state.status)}</small></div>`;
@@ -2943,7 +2947,7 @@ async function renderProtonSettings(host) {
       list.innerHTML = '<div class="settings-row"><div class="row-text"><span>No downloadable releases were found.</span></div></div>';
       return;
     }
-    const stateFor = (release) => installStates.find((state) => state.family === release.family && state.tag === release.tag);
+    const stateFor = (release) => installStates.find((state) => protonReleaseKey(state) === protonReleaseKey(release));
     list.innerHTML = releases.map((release, index) => {
       let control = "";
       const state = stateFor(release);
@@ -2964,7 +2968,7 @@ async function renderProtonSettings(host) {
         control = `<button data-proton-install="${index}">Install</button>`;
       }
       const detail = [release.name, release.size ? formatBytes(release.size) : "", release.installed ? "Installed" : "Available"].filter(Boolean).join(" · ");
-      const key = `${release.family}-${release.tag}`;
+      const key = protonReleaseKey(release);
       return `<div class="settings-row" data-proton-row="${escape(key)}"><div class="row-text"><strong>${escape(release.tag)}</strong><span>${escape(detail)}</span></div><div class="row-control">${control}</div></div>`;
     }).join("");
     for (const button of list.querySelectorAll("[data-proton-default]")) {
@@ -3048,7 +3052,7 @@ async function renderProtonSettings(host) {
     for (const state of states) {
       if (!protonInstallActive(state)) continue;
       active = true;
-      const key = `${state.family}-${state.tag}`;
+      const key = protonReleaseKey(state);
       const row = [...list.querySelectorAll("[data-proton-row]")].find((node) => node.dataset.protonRow === key);
       if (row) {
         const control = row.querySelector(".row-control");
@@ -3057,9 +3061,9 @@ async function renderProtonSettings(host) {
     }
     const failed = states.find((state) => state.status === "error"
       && Date.now() / 1000 - state.updated_at < 30
-      && !protonNoticeShown.has(`${state.family}-${state.tag}`));
+      && !protonNoticeShown.has(protonReleaseKey(state)));
     if (failed) {
-      protonNoticeShown.add(`${failed.family}-${failed.tag}`);
+      protonNoticeShown.add(protonReleaseKey(failed));
       showToast(failed.message || "Proton installation failed.", true);
     }
     if (active) {

@@ -81,15 +81,26 @@ pub fn runner_root() -> PathBuf {
     steamtron_core::paths::layout().runners()
 }
 
-fn release_dir(family: &str, tag: &str) -> PathBuf {
-    runner_root().join(format!("{}-{}", sanitize(family), sanitize(tag)))
+fn archive_stem(name: &str) -> &str {
+    name.strip_suffix(".tar.gz")
+        .or_else(|| name.strip_suffix(".tar.xz"))
+        .unwrap_or(name)
 }
 
-pub fn state_path(family: &str, tag: &str) -> PathBuf {
+fn release_dir(family: &str, _tag: &str, name: &str) -> PathBuf {
+    runner_root().join(format!("{}-{}", sanitize(family), sanitize(archive_stem(name))))
+}
+
+pub fn state_path(family: &str, tag: &str, name: &str) -> PathBuf {
     steamtron_core::paths::layout()
         .cache_dir()
         .join("proton-install")
-        .join(format!("{}-{}.json", sanitize(family), sanitize(tag)))
+        .join(format!(
+            "{}-{}-{}.json",
+            sanitize(family),
+            sanitize(tag),
+            sanitize(archive_stem(name))
+        ))
 }
 
 fn write_state(path: &Path, state: &InstallState) {
@@ -179,7 +190,7 @@ fn emit(
 }
 
 pub fn run_install(family: &str, tag: &str, name: &str) -> i32 {
-    let path = state_path(family, tag);
+    let path = state_path(family, tag, name);
     emit(Some(&path), family, tag, name, "starting", 0.0, 0, 0, "Starting…");
     match install_with_progress(family, tag, name, Some(&path)) {
         Ok(_) => {
@@ -204,7 +215,7 @@ pub fn install_with_progress(
         .into_iter()
         .find(|release| release.tag == tag && release.name == name && release.installable)
         .ok_or_else(|| "this Proton release is not available from its official source".to_string())?;
-    let destination = release_dir(family, tag);
+    let destination = release_dir(family, tag, name);
     let runner = destination.join("proton");
     if runner.is_file() {
         register(&runner)?;
@@ -437,7 +448,7 @@ fn source_cache_path(family: &str) -> PathBuf {
 }
 
 fn cached_release(mut release: SourceRelease) -> SourceRelease {
-    let runner = release_dir(&release.family, &release.tag).join("proton");
+    let runner = release_dir(&release.family, &release.tag, &release.name).join("proton");
     release.installed = runner.is_file();
     release.installed_path = runner.display().to_string();
     release.removable = true;
@@ -549,7 +560,7 @@ pub fn list(family: &str) -> Result<Vec<SourceRelease>, String> {
             if !url.starts_with(&expected) {
                 continue;
             }
-            let destination = release_dir(family, tag);
+            let destination = release_dir(family, tag, name);
             let runner = destination.join("proton");
             result.push(SourceRelease {
                 family: family.to_owned(),
