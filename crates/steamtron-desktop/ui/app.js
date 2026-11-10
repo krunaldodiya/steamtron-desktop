@@ -2887,6 +2887,8 @@ async function renderStorageSettings(host) {
 
 let protonSource = "GE-Proton";
 let protonInstallTimer = null;
+let protonPollGraceUntil = 0;
+const protonNoticeShown = new Set();
 const protonSourceCache = new Map();
 
 function stopProtonInstallPolling() {
@@ -2971,12 +2973,18 @@ async function renderProtonSettings(host) {
       button.onclick = async () => {
         const release = releases[Number(button.dataset.protonInstall)];
         if (!release) return;
+        const row = button.closest("[data-proton-row]");
+        const control = row?.querySelector(".row-control");
+        if (control) {
+          control.innerHTML = protonProgressMarkup({ percent: 0, status: "starting", message: "Starting…" });
+        }
         try {
           await invoke("install_proton_release", { family: release.family, tag: release.tag, name: release.name });
-          showToast(`Installing ${release.tag} in the background`);
+          protonPollGraceUntil = Date.now() + 15000;
           ensurePolling();
-          void pollInstalls();
+          window.setTimeout(() => { void pollInstalls(); }, 400);
         } catch (error) {
+          if (control) control.innerHTML = `<button data-proton-install="${index}">Install</button>`;
           showToast(String(error), true);
         }
       };
@@ -2991,8 +2999,13 @@ async function renderProtonSettings(host) {
     try { installStates = await invoke("proton_install_states"); } catch (_error) { installStates = []; }
     const cached = protonSourceCache.get(family);
     if (cached && !force) {
-      renderReleases(cached, installStates);
-      return;
+      const finished = installStates.some((state) => state.family === family
+        && state.status === "done"
+        && cached.some((release) => release.tag === state.tag && !release.installed));
+      if (!finished) {
+        renderReleases(cached, installStates);
+        return;
+      }
     }
     list.innerHTML = '<div class="settings-row"><div class="row-text"><span>Loading releases…</span></div></div>';
     try {
@@ -3018,7 +3031,18 @@ async function renderProtonSettings(host) {
         if (control) control.innerHTML = protonProgressMarkup(state);
       }
     }
-    if (!active) {
+    const failed = states.find((state) => state.status === "error"
+      && Date.now() / 1000 - state.updated_at < 30
+      && !protonNoticeShown.has(`${state.family}-${state.tag}`));
+    if (failed) {
+      protonNoticeShown.add(`${failed.family}-${failed.tag}`);
+      showToast(failed.message || "Proton installation failed.", true);
+    }
+    if (active) {
+      protonPollGraceUntil = 0;
+    } else if (Date.now() < protonPollGraceUntil) {
+      return;
+    } else {
       stopProtonInstallPolling();
       await loadSource(protonSource, { force: true });
     }
@@ -3040,7 +3064,9 @@ async function renderProtonSettings(host) {
   }
   await loadSource(protonSource);
   if ((await invoke("proton_install_states").catch(() => [])).some(protonInstallActive)) {
+    protonPollGraceUntil = Date.now() + 15000;
     ensurePolling();
+    void pollInstalls();
   }
 }
 
