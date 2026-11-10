@@ -41,10 +41,16 @@ impl ManifestProvider {
 
 const STEAMML_URL: &str = "https://pub-5b6d3b7c03fd4ac1afb5bd3017850e20.r2.dev/{appid}.zip";
 
-/// Download a Lua manifest archive from SteamML.
+/// Download a Lua manifest archive from SteamML, reusing the global ZIP cache.
 pub fn download_steamml(appid: &str) -> Result<Bundle, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
+    }
+    if let Some(bundle) = crate::read_cached_manifest(appid, "steamml") {
+        if lua_declares_appid(&bundle.lua, appid) {
+            return Ok(bundle);
+        }
+        crate::invalidate_cached_manifest(appid, "steamml");
     }
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
@@ -71,6 +77,7 @@ pub fn download_steamml(appid: &str) -> Result<Bundle, LibraryError> {
             "Lua manifest is for a different App ID".into(),
         ));
     }
+    crate::store_cached_manifest(appid, "steamml", &bytes);
     Ok(bundle)
 }
 

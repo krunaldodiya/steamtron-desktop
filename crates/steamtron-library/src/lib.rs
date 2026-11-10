@@ -211,18 +211,104 @@ pub fn search(query: &str) -> Result<Vec<SearchResult>, LibraryError> {
         .collect())
 }
 
+/// One global ZIP cache entry per provider and App ID. The raw archive is
+/// kept so an add can reuse it without contacting the provider again.
+fn manifest_cache_path_in(cache_root: &Path, provider: &str, appid: &str) -> PathBuf {
+    cache_root
+        .join("manifests")
+        .join(provider)
+        .join(format!("{appid}.zip"))
+}
+
+pub fn manifest_cache_path(appid: &str, provider: &str) -> PathBuf {
+    manifest_cache_path_in(&steamtron_core::paths::layout().cache_dir(), provider, appid)
+}
+
+fn read_cached_manifest_from(cache_root: &Path, appid: &str, provider: &str) -> Option<Bundle> {
+    let path = manifest_cache_path_in(cache_root, provider, appid);
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(_) => return None,
+    };
+    if bytes.len() as u64 > MAX_ARCHIVE {
+        let _ = fs::remove_file(&path);
+        return None;
+    }
+    match parse_bundle(&bytes) {
+        Ok(mut bundle) => {
+            bundle.lua = canonical_lua(&bundle.lua);
+            Some(bundle)
+        }
+        Err(_) => {
+            // A half-written or malformed cache must never block a download.
+            let _ = fs::remove_file(&path);
+            None
+        }
+    }
+}
+
+pub(crate) fn read_cached_manifest(appid: &str, provider: &str) -> Option<Bundle> {
+    read_cached_manifest_from(
+        &steamtron_core::paths::layout().cache_dir(),
+        appid,
+        provider,
+    )
+}
+
+pub(crate) fn invalidate_cached_manifest(appid: &str, provider: &str) {
+    let path = manifest_cache_path(appid, provider);
+    let _ = fs::remove_file(path);
+}
+
+fn store_cached_manifest_in(
+    cache_root: &Path,
+    appid: &str,
+    provider: &str,
+    bytes: &[u8],
+) {
+    let path = manifest_cache_path_in(cache_root, provider, appid);
+    let Some(parent) = path.parent() else { return };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let temporary = path.with_extension(format!("zip.{}.tmp", std::process::id()));
+    if fs::write(&temporary, bytes).is_ok() && fs::rename(&temporary, &path).is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+}
+
+pub(crate) fn store_cached_manifest(appid: &str, provider: &str, bytes: &[u8]) {
+    store_cached_manifest_in(
+        &steamtron_core::paths::layout().cache_dir(),
+        appid,
+        provider,
+        bytes,
+    );
+}
+
 pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
     }
 
+    if let Some(bundle) = read_cached_manifest(appid, "api") {
+        return Ok(bundle);
+    }
+
     // The signed-in UMUTron API owns provider priority: Ryuu first, then
     // Luie, then SteamML. Do not silently use the old public SteamML archive
     // here; it can point at a different game build than the selected fix.
-    download_from_api(appid)
+    let bytes = download_from_api(appid)?;
+    if bytes.len() as u64 > MAX_ARCHIVE {
+        return Err(LibraryError::Archive("archive is too large".into()));
+    }
+    let mut bundle = parse_bundle(&bytes)?;
+    bundle.lua = canonical_lua(&bundle.lua);
+    store_cached_manifest(appid, "api", &bytes);
+    Ok(bundle)
 }
 
-fn download_from_api(appid: &str) -> Result<Bundle, LibraryError> {
+fn download_from_api(appid: &str) -> Result<Vec<u8>, LibraryError> {
     let token = steamtron_auth::access_token();
     if token.is_empty() {
         return Err(LibraryError::Download(
@@ -250,12 +336,7 @@ fn download_from_api(appid: &str) -> Result<Bundle, LibraryError> {
     let bytes = response
         .bytes()
         .map_err(|error| LibraryError::Download(error.to_string()))?;
-    if bytes.len() as u64 > MAX_ARCHIVE {
-        return Err(LibraryError::Archive("archive is too large".into()));
-    }
-    let mut bundle = parse_bundle(&bytes)?;
-    bundle.lua = canonical_lua(&bundle.lua);
-    Ok(bundle)
+    Ok(bytes.to_vec())
 }
 
 fn choose_library(libraries: &[PathBuf]) -> Result<PathBuf, LibraryError> {
@@ -873,6 +954,46 @@ mod tests {
     use super::*;
     use std::io::Write;
     use zip::write::SimpleFileOptions;
+
+    fn zip_bundle(lua: &str, manifest: &str) -> Vec<u8> {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut cursor);
+            writer
+                .start_file("42.lua", SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(lua.as_bytes()).unwrap();
+            writer
+                .start_file("43_7.manifest", SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(manifest.as_bytes()).unwrap();
+            writer.finish().unwrap();
+        }
+        cursor.into_inner()
+    }
+
+    #[test]
+    fn caches_provider_zip_by_appid_and_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let bytes = zip_bundle("addappid(42)\n", "manifest");
+        store_cached_manifest_in(temp.path(), "42", "steamml", &bytes);
+        let path = manifest_cache_path_in(temp.path(), "steamml", "42");
+        assert!(path.is_file());
+        let cached = read_cached_manifest_from(temp.path(), "42", "steamml").unwrap();
+        assert_eq!(cached.lua, "addappid(42)\n");
+        assert_eq!(cached.manifests.get("43_7.manifest").unwrap(), b"manifest");
+        assert!(!manifest_cache_path_in(temp.path(), "api", "42").exists());
+    }
+
+    #[test]
+    fn corrupt_cached_zip_is_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = manifest_cache_path_in(temp.path(), "steamml", "42");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"not a zip").unwrap();
+        assert!(read_cached_manifest_from(temp.path(), "42", "steamml").is_none());
+        assert!(!path.exists());
+    }
 
     #[test]
     fn normalizes_appids_and_urls() {
