@@ -6,7 +6,6 @@ use std::path::Path;
 use std::process::Command;
 
 use serde::Serialize;
-use steamtron_core::config::Config;
 use steamtron_core::steam;
 use steamtron_register::{platform_backend, RegistrationBackend};
 
@@ -164,57 +163,6 @@ pub fn run() -> DoctorReport {
         }
     }
 
-    let config = Config::load();
-    match config {
-        Ok(config) => {
-            for entry in config.entries() {
-                let status = if entry.fixes.is_dir() { CheckStatus::Ok } else { CheckStatus::Error };
-                let item = check(
-                    "fixes-path",
-                    "Fixes path",
-                    status,
-                    format!("{}: {}", entry.appid, entry.fixes.display()),
-                );
-                checks.push(item);
-            }
-            if config.entries().next().is_none() {
-                checks.push(check("fixes-config", "Fixes configuration", CheckStatus::Ok, "No fixes configured."));
-            }
-        }
-        Err(error) => checks.push(check("fixes-config", "Fixes configuration", CheckStatus::Error, error.to_string())),
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let overlay_ok = which("fuse-overlayfs").is_some()
-            && (which("fusermount3").is_some() || which("fusermount").is_some());
-        checks.push(check(
-            "overlay-tools",
-            "Linux overlay tools",
-            if overlay_ok { CheckStatus::Ok } else { CheckStatus::Error },
-            if overlay_ok {
-                "fuse-overlayfs and fusermount are available."
-            } else {
-                "Install fuse-overlayfs and fuse3."
-            },
-        ));
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let winfsp = winfsp_installed();
-        checks.push(check(
-            "overlay-tools",
-            "WinFsp overlay runtime",
-            if winfsp { CheckStatus::Ok } else { CheckStatus::Error },
-            if winfsp {
-                "WinFsp is installed."
-            } else {
-                "Install WinFsp before launching games through the fixes overlay."
-            },
-        ));
-    }
-
     let healthy = checks.iter().all(|item| item.status == CheckStatus::Ok);
     DoctorReport { healthy, checks }
 }
@@ -275,34 +223,6 @@ fn steam_running() -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(target_os = "windows")]
-fn winfsp_installed() -> bool {
-    let mut candidates = Vec::new();
-    for variable in ["ProgramFiles(x86)", "ProgramFiles"] {
-        if let Some(value) = std::env::var_os(variable) {
-            candidates.push(std::path::PathBuf::from(value).join("WinFsp/bin/winfsp-x64.dll"));
-        }
-    }
-    for key in ["HKLM\\SOFTWARE\\WOW6432Node\\WinFsp", "HKLM\\SOFTWARE\\WinFsp"] {
-        if let Ok(output) = Command::new("reg")
-            .args(["query", key, "/v", "InstallDir"])
-            .output()
-        {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                if let Some(value) = text
-                    .lines()
-                    .find(|line| line.contains("InstallDir"))
-                    .and_then(|line| line.split_once("REG_SZ"))
-                    .map(|(_, value)| value.trim().trim_matches('"'))
-                {
-                    candidates.push(std::path::PathBuf::from(value).join("bin/winfsp-x64.dll"));
-                }
-            }
-        }
-    }
-    candidates.into_iter().any(|path| path.is_file())
-}
 
 #[cfg(target_os = "linux")]
 fn which(name: &str) -> Option<std::path::PathBuf> {

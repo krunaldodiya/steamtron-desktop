@@ -2990,7 +2990,20 @@ fn base_title(value: &str) -> String {
 
 fn store_title_matches(wanted: &str, candidate: &str) -> bool {
     let wanted = base_title(wanted);
-    !wanted.is_empty() && wanted == base_title(candidate)
+    let candidate = base_title(candidate);
+    if wanted.is_empty() {
+        return false;
+    }
+    if wanted == candidate {
+        return true;
+    }
+    // Steam often appends a subtitle to the catalogue title, e.g.
+    // "Cricket 26 - The Official Game of the Ashes". Keep the base title equal
+    // and reject numbered sequels ("Red Dead Redemption" vs "… 2").
+    candidate
+        .strip_prefix(&wanted)
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|next| !next.is_ascii_digit())
 }
 
 async fn search_steam_title(term: &str) -> Result<Option<u32>, String> {
@@ -3076,10 +3089,11 @@ async fn store_resolve_steam_cached(igdb_id: u64, title: String) -> Result<Optio
             })
             .unwrap_or(false);
         if fresh {
-            return Ok(entry
-                .get("steam")
-                .and_then(|steam| steam.as_u64())
-                .map(|steam| steam as u32));
+            if let Some(steam) = entry.get("steam").and_then(|steam| steam.as_u64()) {
+                return Ok(Some(steam as u32));
+            }
+            // Do not trust a cached negative: title matching may have improved
+            // since the entry was written.
         }
     }
     let steam = search_steam_title(&title).await?;
