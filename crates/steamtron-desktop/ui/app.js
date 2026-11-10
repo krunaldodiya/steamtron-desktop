@@ -2599,7 +2599,6 @@ let storeServerPage = 0;
 let storeExhausted = false;
 let storeGenres = [];
 let storeLoading = false;
-let storeRefreshing = false;
 let storeError = "";
 let storeTried = false;
 let storeDetail = null;
@@ -2832,7 +2831,6 @@ function resetStorePaging() {
 async function ensureStorePage(page, render = true) {
   storePage = Math.max(1, page);
   storeLoading = true;
-  storeRefreshing = false;
   storeError = "";
   if (render) renderStorePage();
   const target = storePage * STORE_PAGE_SIZE;
