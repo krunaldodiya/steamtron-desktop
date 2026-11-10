@@ -19,37 +19,12 @@ const LIBRARY_PAGE_SIZE = 60;
 let appView = "library";
 let gameDetailOrigin = "library";
 let gameDetailSeed = null;
-let pendingRestart = loadPendingRestart();
-
-
-function loadPendingRestart() {
-  try { return JSON.parse(localStorage.getItem("steamtron.pendingRestart.v1") || "null"); } catch (_error) { return null; }
+// Steam-restart banners were removed by request. Keep the call sites inert.
+function markRestartRequired() {
+  try { localStorage.removeItem("steamtron.pendingRestart.v1"); } catch (_error) {}
 }
 
-function savePendingRestart(value) {
-  pendingRestart = value;
-  try {
-    if (value) localStorage.setItem("steamtron.pendingRestart.v1", JSON.stringify(value));
-    else localStorage.removeItem("steamtron.pendingRestart.v1");
-  } catch (_error) {}
-  renderRestartBanner();
-}
-
-function markRestartRequired(message = "SteamTron changed Steam library files.") {
-  savePendingRestart({ message, at: new Date().toISOString() });
-}
-
-function clearRestartRequired() {
-  savePendingRestart(null);
-}
-
-function renderRestartBanner() {
-  const banner = document.querySelector("#restart-banner");
-  if (!banner) return;
-  banner.classList.toggle("hidden", !pendingRestart);
-  const text = document.querySelector("#restart-banner-text");
-  if (text) text.textContent = pendingRestart?.message || "SteamTron changed Steam library files.";
-}
+function clearRestartRequired() {}
 
 function coverUrl(appid) {
   return `https://cdn.cloudflare.steamstatic.com/steam/apps/${encodeURIComponent(appid)}/library_600x900.jpg`;
@@ -272,6 +247,10 @@ async function refreshManagedRunning() {
 
 function hasManagedLibrary() {
   return Boolean(managedLibrary?.games?.length);
+}
+
+function managedShell() {
+  return managedLibrary !== null;
 }
 
 function managedDrive(game) {
@@ -946,15 +925,15 @@ function renderManagedHome() {
       <div class="home-hero-shade"></div>
       <div class="home-hero-content">
         <p class="eyebrow" id="home-eyebrow">Recently played</p>
-        <h1 id="home-title">${escape(featured?.title || "Your next game")}</h1>
-        <p class="home-meta" id="home-related">${escape(appId ? `Steam App ${appId}` : "Managed entry")}${featured && managedReady(featured) ? " · Ready to play" : ""}</p>
+        <h1 id="home-title">${escape(featured?.title || "No games yet")}</h1>
+        <p class="home-meta" id="home-related">${featured ? escape(appId ? `Steam App ${appId}` : "Managed entry") + (managedReady(featured) ? " · Ready to play" : "") : "Add a game from the Store to get started."}</p>
         <p class="home-description hidden" id="home-description"></p>
         <div class="home-actions"><button class="primary" id="home-play"${featured ? "" : " disabled"}>${running ? "Stop" : "Play"}</button><button id="home-view"${featured ? "" : " disabled"}>View game</button></div>
       </div>
     </section>
     <section class="managed-rail" data-rail="recent">
       <div class="rail-head"><h2>Recently played</h2><span class="muted" id="home-counter">${railCounter}</span></div>
-      <div class="rail-scroll">${games.map((game) => coverCard(game, "recent")).join("")}</div>
+      <div class="rail-scroll">${games.length ? games.map((game) => coverCard(game, "recent")).join("") : '<div class="status">No games yet. Add one from the Store.</div>'}</div>
     </section>
     <section class="managed-rail" data-rail="setup">
       <div class="rail-head"><h2>Recently ready to play</h2></div>
@@ -976,10 +955,16 @@ function renderManagedHome() {
 }
 
 function renderManagedMode() {
-  if (!hasManagedLibrary()) return;
+  if (!managedShell()) return;
   document.body.classList.add("managed");
   if (!managedLibrary.games.some((game) => game.id === managedSelectedId)) {
     managedSelectedId = managedLibrary.games[0]?.id || null;
+  }
+  if (!hasManagedLibrary()) {
+    if (appView === "home") { renderManagedHome(); return; }
+    if (appView === "game") appView = "library";
+    renderManagedLibrary();
+    return;
   }
   if (appView === "home") {
     renderManagedHome();
@@ -1019,7 +1004,7 @@ function setView(view) {
     else renderStorePage();
     return;
   }
-  if (hasManagedLibrary()) {
+  if (managedShell()) {
     renderManagedMode();
   } else if (view === "library" || view === "game") {
     renderGames();
@@ -2470,7 +2455,7 @@ async function load() {
   // legacy Steam skeleton.
   try { managedLibrary = await invoke("library_snapshot"); }
   catch (_error) { managedLibrary = null; }
-  if (hasManagedLibrary()) showManagedLoading();
+  if (managedShell()) showManagedLoading();
   else if (!games.length) showLibraryLoading();
   await loadBackend();
   try {
@@ -2484,7 +2469,7 @@ async function load() {
     try { await invoke("reconcile_registrations"); } catch (_error) { /* keep stored states */ }
     try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { managedLibrary = null; }
     await refreshManagedRunning();
-    if (hasManagedLibrary()) {
+    if (managedShell()) {
       document.body.classList.add("managed");
       renderManagedMode();
       void loadArtwork();
@@ -3471,7 +3456,7 @@ document.querySelector("#nav-library").onclick = () => setView("library");
 document.querySelector("#nav-home").onclick = () => setView("home");
 document.querySelector("#nav-store").onclick = () => setView("store");
 window.addEventListener("focus", async () => {
-  if (!hasManagedLibrary()) return;
+  if (!managedShell()) return;
   await refreshManagedRunning();
   if (appView === "library" || appView === "home" || appView === "game") renderManagedMode();
 });
@@ -3481,10 +3466,6 @@ document.querySelector("#settings").onclick = () => {
 };
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = () => { if (hasManagedLibrary()) renderManagedList(); else renderGames(); };
-document.querySelector("#restart-banner-button").onclick = (event) => restartSteam(event.currentTarget);
-document.querySelector("#restart-banner-dismiss").onclick = () => {
-  clearRestartRequired();
-};
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     document.querySelectorAll(".modal-backdrop").forEach((node) => node.remove());
@@ -3498,5 +3479,4 @@ window.addEventListener("unhandledrejection", (event) => {
   console.error(event.reason);
   showToast(`UI error: ${event.reason}`, true);
 });
-renderRestartBanner();
 boot();

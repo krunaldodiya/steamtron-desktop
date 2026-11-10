@@ -138,10 +138,6 @@ button.loading::before { content:""; display:inline-block; width:12px; height:12
 
 /* Activity, restart banner, and library presentation */
 .hidden { display: none !important; }
-.restart-banner { display:flex; align-items:center; gap:12px; padding:10px 32px; background:#1d3140; border-bottom:1px solid #3b6f4e; color:#d7f3df; font-size:13px; }
-.restart-banner #restart-banner-text { flex:1; }
-.restart-banner button { flex-shrink:0; }
-.banner-dismiss { border:0; background:transparent; color:#8fa3b8; font-size:20px; padding:0 4px; }
 .activity-button { position:relative; display:inline-flex; align-items:center; gap:7px; }
 .activity-count { min-width:18px; height:18px; border-radius:99px; padding:0 5px; display:inline-grid; place-items:center; background:#2f86c9; color:#fff; font-size:10px; font-weight:700; }
 .icon-button { min-width:38px; font-size:16px; padding:8px 10px; }
