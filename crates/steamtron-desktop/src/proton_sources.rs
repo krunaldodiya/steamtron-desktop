@@ -457,10 +457,34 @@ pub fn list_cached(family: &str, force: bool) -> Result<Vec<SourceRelease>, Stri
             }
         }
     }
-    let releases = list(family)?;
+    let previous = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Vec<SourceRelease>>(&bytes).ok())
+        .unwrap_or_default();
+    let fetched = list(family)?;
+    let mut merged = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for release in fetched {
+        if seen.insert((release.tag.clone(), release.name.clone())) {
+            merged.push(release);
+        }
+    }
+    // Keep locally installed releases that upstream has dropped, so they stay
+    // visible and can still be uninstalled; everything else is replaced by the
+    // refreshed list.
+    for release in previous {
+        if seen.contains(&(release.tag.clone(), release.name.clone())) {
+            continue;
+        }
+        let release = cached_release(release);
+        if release.installed {
+            seen.insert((release.tag.clone(), release.name.clone()));
+            merged.push(release);
+        }
+    }
     if let Some(parent) = path.parent() {
         if fs::create_dir_all(parent).is_ok() {
-            if let Ok(payload) = serde_json::to_vec(&releases) {
+            if let Ok(payload) = serde_json::to_vec(&merged) {
                 let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
                 if fs::write(&temporary, payload).is_ok() && fs::rename(&temporary, &path).is_err() {
                     let _ = fs::remove_file(&temporary);
@@ -468,7 +492,7 @@ pub fn list_cached(family: &str, force: bool) -> Result<Vec<SourceRelease>, Stri
             }
         }
     }
-    Ok(releases)
+    Ok(merged)
 }
 
 pub fn list(family: &str) -> Result<Vec<SourceRelease>, String> {
