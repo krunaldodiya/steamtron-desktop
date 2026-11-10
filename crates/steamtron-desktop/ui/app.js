@@ -376,9 +376,40 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
     ${linked ? "" : '<p class="pane-note">Choose the Proton compatibility layer in the Compatibility tab. The current selection is used when this game is linked.</p>'}
     <div id="gs-link-launchers"></div>
     <div class="update-actions"><button id="gs-link-add">Add launcher…</button></div>
-    <div class="update-actions"><button class="primary" id="gs-link-save">${linked ? "Save linked folder" : "Link game"}</button></div>`;
+    <p class="pane-note" id="gs-link-status">A game with at least one launcher is linked automatically.</p>`;
   const rootInput = pane.querySelector("#gs-link-root");
   const list = pane.querySelector("#gs-link-launchers");
+  let savingLink = false;
+
+  async function persistLink() {
+    const root = rootInput.value.trim();
+    if (!root || !draft.launchers.length || savingLink) return false;
+    savingLink = true;
+    try {
+      const result = await invoke("link_managed_game", { request: {
+        game_id: game.id,
+        root,
+        launchers: draft.launchers.map((launcher) => ({
+          name: launcher.name,
+          executable: launcher.executable,
+          arguments: launcher.arguments,
+          primary: launcher.primary,
+        })),
+      } });
+      managedLibrary = result.library;
+      await refreshGame();
+      const status = pane.querySelector("#gs-link-status");
+      if (status) {
+        status.textContent = `Linked automatically · ${result.report.launchers} launcher${result.report.launchers === 1 ? "" : "s"}`;
+      }
+      return true;
+    } catch (error) {
+      showToast(String(error), true);
+      return false;
+    } finally {
+      savingLink = false;
+    }
+  }
 
   const renderLaunchers = () => {
     list.innerHTML = draft.launchers.length
@@ -400,16 +431,22 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
       row.querySelector("[data-link-primary]").onclick = () => {
         draft.launchers.forEach((launcher, position) => { launcher.primary = position === index; });
         renderLaunchers();
+        void persistLink();
       };
       row.querySelector("[data-link-edit]").onclick = () => editLauncher(index);
       row.querySelector("[data-link-delete]").onclick = () => {
         const launcher = draft.launchers[index];
+        if (draft.launchers.length <= 1) {
+          showToast("A linked game needs at least one launcher.", true);
+          return;
+        }
         if (!window.confirm(`Remove "${launcher.name || linkFileName(launcher.executable)}" from this game? The game files are not deleted.`)) return;
         draft.launchers.splice(index, 1);
-        if (draft.launchers.length && !draft.launchers.some((entry) => entry.primary)) {
+        if (!draft.launchers.some((entry) => entry.primary)) {
           draft.launchers[0].primary = true;
         }
         renderLaunchers();
+        void persistLink();
       };
     }
   };
@@ -445,14 +482,21 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
       else draft.launchers.push(value);
       close();
       renderLaunchers();
+      void persistLink();
     };
     backdrop.querySelector("#gs-launcher-name").focus();
   };
 
+  rootInput.addEventListener("change", () => {
+    if (draft.launchers.length) void persistLink();
+  });
   pane.querySelector("#gs-link-choose").onclick = async () => {
     try {
       const path = await invoke("pick_managed_folder", { gameId: game.id });
-      if (path) rootInput.value = path;
+      if (path) {
+        rootInput.value = path;
+        if (draft.launchers.length) void persistLink();
+      }
     } catch (error) { showToast(String(error), true); }
   };
   pane.querySelector("#gs-link-add").onclick = async () => {
@@ -468,33 +512,8 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
       }
       draft.launchers.push({ name: "", executable, arguments: [], primary: draft.launchers.length === 0 });
       renderLaunchers();
+      void persistLink();
     } catch (error) { showToast(String(error), true); }
-  };
-  pane.querySelector("#gs-link-save").onclick = async () => {
-    const root = rootInput.value.trim();
-    if (!root) { showToast("Choose the installed game folder.", true); return; }
-    if (!draft.launchers.length) { showToast("Add at least one launcher executable.", true); return; }
-    const button = pane.querySelector("#gs-link-save");
-    const stop = busy(button, "Saving…");
-    try {
-      const result = await invoke("link_managed_game", { request: {
-        game_id: game.id,
-        root,
-        launchers: draft.launchers.map((launcher) => ({
-          name: launcher.name,
-          executable: launcher.executable,
-          arguments: launcher.arguments,
-          primary: launcher.primary,
-        })),
-      } });
-      managedLibrary = result.library;
-      await refreshGame();
-      showToast(`Linked ${result.report.launchers} launcher${result.report.launchers === 1 ? "" : "s"}`);
-      renderTab("link");
-    } catch (error) {
-      showToast(String(error), true);
-      stop();
-    }
   };
   renderLaunchers();
 }
