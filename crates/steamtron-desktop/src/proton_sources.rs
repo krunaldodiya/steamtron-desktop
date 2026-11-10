@@ -22,6 +22,8 @@ const REPOS: &[(&str, &str)] = &[
 ];
 const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 const FAMILIES: &[&str] = &["GE-Proton", "UMU-Proton", "Proton-CachyOS", "Valve-Proton"];
+const VALVE_SIZE: u64 = 1_600_000_000;
+const STEAMCMD_URL: &str = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceRelease {
@@ -213,6 +215,9 @@ pub fn install_with_progress(
     state: Option<&Path>,
     resume: bool,
 ) -> Result<serde_json::Value, String> {
+    if family == "Valve-Proton" {
+        return install_valve(tag, name, state, resume);
+    }
     let releases = list(family)?;
     migrate_legacy(family, &releases);
     let release = releases
@@ -380,6 +385,160 @@ pub fn install_with_progress(
     Ok(serde_json::json!({ "path": runner.display().to_string(), "installed": true }))
 }
 
+fn valve_app_id(tag: &str) -> Option<u32> {
+    match tag {
+        "Proton Experimental" => Some(1493710),
+        "Proton Hotfix" => Some(2180100),
+        "Proton 11.0 (stable)" => Some(4628710),
+        _ => None,
+    }
+}
+
+fn steamcmd_script() -> Result<PathBuf, String> {
+    let root = steamtron_core::paths::layout().tools().join("steamcmd");
+    let script = root.join("steamcmd.sh");
+    if script.is_file() {
+        return Ok(script);
+    }
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let response = client()?
+        .get(STEAMCMD_URL)
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("SteamCMD download returned HTTP {}", response.status()));
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(32 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("SteamCMD archive is too large".into());
+    }
+    tar::Archive::new(GzDecoder::new(std::io::Cursor::new(bytes)))
+        .unpack(&root)
+        .map_err(|error| format!("SteamCMD archive is invalid: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&script, fs::Permissions::from_mode(0o755));
+    }
+    if !script.is_file() {
+        return Err("SteamCMD archive has no launcher".into());
+    }
+    Ok(script)
+}
+
+fn install_valve(
+    tag: &str,
+    name: &str,
+    state: Option<&Path>,
+    resume: bool,
+) -> Result<serde_json::Value, String> {
+    let app_id = valve_app_id(tag).ok_or_else(|| "unknown Valve Proton channel".to_string())?;
+    let destination = release_dir("Valve-Proton", tag, name);
+    let runner = destination.join("proton");
+    if runner.is_file() {
+        register(&runner)?;
+        return Ok(serde_json::json!({ "path": runner.display().to_string(), "installed": true }));
+    }
+    let script = steamcmd_script()?;
+    let work = runner_root().join(".downloads").join(format!("valve-{app_id}"));
+    if !resume {
+        let _ = fs::remove_dir_all(&work);
+    }
+    fs::create_dir_all(&work).map_err(|error| error.to_string())?;
+    let home = runner_root().join(".downloads").join("steamcmd-home");
+    fs::create_dir_all(&home).map_err(|error| error.to_string())?;
+    emit(state, "Valve-Proton", tag, name, "downloading", 0.0, 0, VALVE_SIZE, "Downloading…");
+    let mut command = std::process::Command::new(&script);
+    command
+        .args([
+            "+force_install_dir",
+            &work.display().to_string(),
+            "+login",
+            "anonymous",
+            "+app_update",
+            &app_id.to_string(),
+            "validate",
+            "+quit",
+        ])
+        .env("HOME", &home)
+        .env("XDG_DATA_HOME", home.join(".local/share"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Could not start SteamCMD: {error}"))?;
+    if let Some(stdout) = child.stdout.take() {
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            if let Some(position) = line.find("progress:") {
+                let value: String = line[position + 9..]
+                    .trim()
+                    .chars()
+                    .take_while(|character| character.is_ascii_digit() || *character == '.')
+                    .collect();
+                if let Ok(progress) = value.parse::<f64>() {
+                    emit(
+                        state,
+                        "Valve-Proton",
+                        tag,
+                        name,
+                        "downloading",
+                        (progress * 0.9).clamp(0.0, 90.0),
+                        0,
+                        VALVE_SIZE,
+                        "Downloading…",
+                    );
+                }
+            }
+        }
+    }
+    let status = child.wait().map_err(|error| error.to_string())?;
+    if !status.success() {
+        return Err("SteamCMD could not install this Proton channel".into());
+    }
+    emit(state, "Valve-Proton", tag, name, "extracting", 92.0, 0, VALVE_SIZE, "Installing…");
+    let common = work.join("steamapps").join("common");
+    let mut candidates = Vec::new();
+    if let Ok(entries) = fs::read_dir(&common) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.join("proton").is_file() {
+                candidates.push(path);
+            }
+        }
+    }
+    if work.join("proton").is_file() {
+        candidates.push(work.clone());
+    }
+    if candidates.len() != 1 {
+        return Err("SteamCMD did not produce one Proton runner".into());
+    }
+    let candidate = candidates.remove(0);
+    if destination.exists() {
+        fs::remove_dir_all(&destination).map_err(|error| error.to_string())?;
+    }
+    if candidate == work {
+        fs::rename(&work, &destination).map_err(|error| error.to_string())?;
+    } else {
+        fs::rename(&candidate, &destination).map_err(|error| error.to_string())?;
+        let _ = fs::remove_dir_all(&work);
+    }
+    if !destination.join("proton").is_file() {
+        return Err("SteamCMD did not install a proton executable".into());
+    }
+    emit(state, "Valve-Proton", tag, name, "registering", 98.0, 0, VALVE_SIZE, "Registering…");
+    register(&destination.join("proton"))?;
+    Ok(serde_json::json!({ "path": destination.join("proton").display().to_string(), "installed": true }))
+}
+
 fn find_proton(root: &Path, depth: usize) -> Option<PathBuf> {
     if depth > 3 {
         return None;
@@ -435,6 +594,10 @@ pub fn pause(family: &str, tag: &str, name: &str) -> Result<(), String> {
     }
     #[cfg(unix)]
     {
+        let group = format!("-{}", state.pid);
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &group])
+            .status();
         let _ = std::process::Command::new("kill")
             .args(["-TERM", &state.pid.to_string()])
             .status();
@@ -446,20 +609,22 @@ pub fn pause(family: &str, tag: &str, name: &str) -> Result<(), String> {
             .status();
     }
     wait_for_exit(state.pid);
-    let stem = sanitize(archive_stem(name));
-    let completed = fs::metadata(runner_root().join(".downloads").join(format!("{stem}.part")))
-        .map(|metadata| metadata.len())
-        .unwrap_or(state.completed);
-    let total = state.total.max(completed);
     let mut state = state;
+    if family != "Valve-Proton" {
+        let stem = sanitize(archive_stem(name));
+        let completed = fs::metadata(runner_root().join(".downloads").join(format!("{stem}.part")))
+            .map(|metadata| metadata.len())
+            .unwrap_or(state.completed);
+        let total = state.total.max(completed);
+        state.percent = if total > 0 {
+            (completed as f64 / total as f64 * 90.0).min(90.0)
+        } else {
+            0.0
+        };
+        state.completed = completed;
+        state.total = total;
+    }
     state.status = "paused".into();
-    state.percent = if total > 0 {
-        (completed as f64 / total as f64 * 90.0).min(90.0)
-    } else {
-        0.0
-    };
-    state.completed = completed;
-    state.total = total;
     state.message = "Paused".into();
     state.updated_at = now();
     write_state(&path, &state);
@@ -477,6 +642,10 @@ pub fn cancel(family: &str, tag: &str, name: &str) -> Result<(), String> {
     }
     #[cfg(unix)]
     {
+        let group = format!("-{}", state.pid);
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &group])
+            .status();
         let _ = std::process::Command::new("kill")
             .args(["-TERM", &state.pid.to_string()])
             .status();
@@ -492,6 +661,9 @@ pub fn cancel(family: &str, tag: &str, name: &str) -> Result<(), String> {
     let stem = sanitize(archive_stem(name));
     let _ = fs::remove_file(work.join(format!("{stem}.part")));
     let _ = fs::remove_dir_all(work.join(format!("{stem}.extract")));
+    if let Some(app_id) = valve_app_id(tag) {
+        let _ = fs::remove_dir_all(work.join(format!("valve-{app_id}")));
+    }
     let mut state = state;
     state.status = "cancelled".into();
     state.message = "Cancelled".into();
@@ -759,17 +931,31 @@ fn valve_releases() -> Result<Vec<SourceRelease>, String> {
             !used.contains(index)
                 && needles.iter().any(|needle| name.to_ascii_lowercase().contains(needle))
         });
-        if let Some((index, (name, runner))) = found {
+        let downloaded = release_dir("Valve-Proton", label, label).join("proton");
+        if downloaded.is_file() {
+            result.push(SourceRelease {
+                family: "Valve-Proton".into(),
+                tag: label.into(),
+                name: label.into(),
+                url: String::new(),
+                size: VALVE_SIZE,
+                installed: true,
+                installed_path: downloaded.display().to_string(),
+                installable: true,
+                removable: true,
+                steam_app_id: Some(app_id),
+            });
+        } else if let Some((index, (name, runner))) = found {
             used.insert(index);
             result.push(SourceRelease {
                 family: "Valve-Proton".into(),
                 tag: label.into(),
                 name: name.clone(),
                 url: String::new(),
-                size: 0,
+                size: VALVE_SIZE,
                 installed: true,
                 installed_path: runner.display().to_string(),
-                installable: false,
+                installable: true,
                 removable: false,
                 steam_app_id: Some(app_id),
             });
@@ -779,10 +965,10 @@ fn valve_releases() -> Result<Vec<SourceRelease>, String> {
                 tag: label.into(),
                 name: label.into(),
                 url: String::new(),
-                size: 0,
+                size: VALVE_SIZE,
                 installed: false,
                 installed_path: String::new(),
-                installable: false,
+                installable: true,
                 removable: false,
                 steam_app_id: Some(app_id),
             });

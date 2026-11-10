@@ -410,7 +410,8 @@ button.primary:hover { filter:brightness(1.06); }
 .proton-progress small { color:var(--muted); font-size:11px; }
 .proton-progress-meta { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .proton-progress-actions { display:flex; gap:4px; }
-.proton-icon { width:26px; height:26px; padding:0; display:grid; place-items:center; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted); }
+.proton-icon { width:26px; height:26px; padding:0; display:grid; place-items:center; place-content:center; line-height:0; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--muted); }
+.proton-icon svg { display:block; margin:auto; }
 .proton-icon:hover { color:var(--text); border-color:var(--border-strong); }
 .top-actions { gap:10px; position:relative; }
 .store-body { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:32px; align-items:stretch; margin-top:22px; }

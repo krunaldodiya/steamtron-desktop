@@ -2981,8 +2981,6 @@ async function renderProtonSettings(host) {
         control = actions.join("");
       } else if (release.installable) {
         control = `<button data-proton-install="${index}">Install</button>`;
-      } else if (release.steam_app_id) {
-        control = `<button data-proton-steam="${release.steam_app_id}">Install via Steam</button>`;
       }
       const detail = [release.name, release.size ? formatBytes(release.size) : "", release.installed ? "Installed" : "Available"].filter(Boolean).join(" · ");
       const key = protonReleaseKey(release);
@@ -3098,14 +3096,6 @@ async function renderProtonSettings(host) {
     protonInstallTimer = setInterval(() => { void pollInstalls(); }, 1000);
   };
   list.addEventListener("click", async (event) => {
-    const steam = event.target.closest("[data-proton-steam]");
-    if (steam) {
-      try {
-        await invoke("install_valve_proton", { appId: Number(steam.dataset.protonSteam) });
-        showToast("Opening Steam to install Proton");
-      } catch (error) { showToast(String(error), true); }
-      return;
-    }
     const action = event.target.closest("[data-proton-action]");
     if (!action) return;
     const [family, tag, name] = action.dataset.protonKey.split("|");

@@ -2322,24 +2322,6 @@ fn cancel_proton_install(family: String, tag: String, name: String) -> Result<()
     proton_sources::cancel(&family, &tag, &name)
 }
 
-#[tauri::command]
-fn install_valve_proton(app_id: u32) -> Result<(), String> {
-    require_auth()?;
-    let url = format!("steam://install/{app_id}");
-    let mut command = std::process::Command::new("steam");
-    command.arg(&url).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    if command.spawn().is_ok() {
-        return Ok(());
-    }
-    std::process::Command::new("xdg-open")
-        .arg(&url)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|error| format!("Could not open Steam: {error}"))?;
-    Ok(())
-}
 
 #[tauri::command]
 fn proton_install_states() -> Vec<proton_sources::InstallState> {
@@ -3402,7 +3384,6 @@ fn main() {
             resume_proton_install,
             pause_proton_install,
             cancel_proton_install,
-            install_valve_proton,
             uninstall_proton_release,
             set_default_proton_runner,
             open_path,
