@@ -2906,9 +2906,24 @@ function protonReleaseKey(release) {
   return `${release.family}|${release.tag}|${release.name}`;
 }
 
+function protonIcon(action, key, title, path) {
+  return `<button class="proton-icon" data-proton-action="${action}" data-proton-key="${escape(key)}" title="${escape(title)}" aria-label="${escape(title)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">${path}</svg></button>`;
+}
+
 function protonProgressMarkup(state) {
   const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
-  return `<div class="proton-progress"><div class="proton-progress-track"><span style="width:${percent}%"></span></div><small>${percent.toFixed(0)}% · ${escape(state.message || state.status)}</small></div>`;
+  const key = protonReleaseKey(state);
+  const paused = state.status === "paused";
+  const actions = [];
+  if (paused) {
+    actions.push(protonIcon("resume", key, "Resume", '<path d="M8 5l11 7-11 7z"></path>'));
+  } else if (state.pid) {
+    actions.push(protonIcon("pause", key, "Pause", '<path d="M9 5v14M15 5v14"></path>'));
+  }
+  if (paused || state.pid) {
+    actions.push(protonIcon("cancel", key, "Cancel", '<path d="M6 6l12 12M18 6L6 18"></path>'));
+  }
+  return `<div class="proton-progress"><div class="proton-progress-track"><span style="width:${percent}%"></span></div><div class="proton-progress-meta"><small>${percent.toFixed(0)}% · ${escape(state.message || state.status)}</small><div class="proton-progress-actions">${actions.join("")}</div></div></div>`;
 }
 
 async function renderProtonSettings(host) {
@@ -2951,7 +2966,7 @@ async function renderProtonSettings(host) {
     list.innerHTML = releases.map((release, index) => {
       let control = "";
       const state = stateFor(release);
-      if (state && protonInstallActive(state)) {
+      if (state && (protonInstallActive(state) || state.status === "paused")) {
         control = protonProgressMarkup(state);
       } else if (release.installed) {
         const actions = [];
@@ -2966,6 +2981,8 @@ async function renderProtonSettings(host) {
         control = actions.join("");
       } else if (release.installable) {
         control = `<button data-proton-install="${index}">Install</button>`;
+      } else if (release.steam_app_id) {
+        control = `<button data-proton-steam="${release.steam_app_id}">Install via Steam</button>`;
       }
       const detail = [release.name, release.size ? formatBytes(release.size) : "", release.installed ? "Installed" : "Available"].filter(Boolean).join(" · ");
       const key = protonReleaseKey(release);
@@ -3080,6 +3097,39 @@ async function renderProtonSettings(host) {
     if (protonInstallTimer) return;
     protonInstallTimer = setInterval(() => { void pollInstalls(); }, 1000);
   };
+  list.addEventListener("click", async (event) => {
+    const steam = event.target.closest("[data-proton-steam]");
+    if (steam) {
+      try {
+        await invoke("install_valve_proton", { appId: Number(steam.dataset.protonSteam) });
+        showToast("Opening Steam to install Proton");
+      } catch (error) { showToast(String(error), true); }
+      return;
+    }
+    const action = event.target.closest("[data-proton-action]");
+    if (!action) return;
+    const [family, tag, name] = action.dataset.protonKey.split("|");
+    if (!family || !tag || !name) return;
+    try {
+      if (action.dataset.protonAction === "pause") {
+        await invoke("pause_proton_install", { family, tag, name });
+        showToast("Proton installation paused");
+        await loadSource(protonSource);
+      } else if (action.dataset.protonAction === "resume") {
+        await invoke("resume_proton_install", { family, tag, name });
+        showToast("Resuming Proton installation");
+        protonPollGraceUntil = Date.now() + 15000;
+        ensurePolling();
+        void pollInstalls();
+      } else if (action.dataset.protonAction === "cancel") {
+        await invoke("cancel_proton_install", { family, tag, name });
+        showToast("Proton installation cancelled");
+        await loadSource(protonSource);
+      }
+    } catch (error) {
+      showToast(String(error), true);
+    }
+  });
   const refresh = host.querySelector("#proton-source-refresh");
   if (refresh) refresh.onclick = () => {
     const stop = busy(refresh, "Refreshing…");

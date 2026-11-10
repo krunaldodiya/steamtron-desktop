@@ -2257,6 +2257,29 @@ async fn proton_source_releases(
     .map_err(|error| format!("Proton source task failed: {error}"))?
 }
 
+fn spawn_proton_install(family: &str, tag: &str, name: &str, resume: bool) -> Result<(), String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("Could not locate SteamTron: {error}"))?;
+    let mut command = std::process::Command::new(executable);
+    command
+        .args(["--proton-install", family, tag, name])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if resume {
+        command.arg("--resume");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    command
+        .spawn()
+        .map_err(|error| format!("Could not start the Proton installer: {error}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn install_proton_release(
     family: String,
@@ -2272,23 +2295,50 @@ fn install_proton_release(
     }) {
         return Ok(serde_json::json!({ "started": false }));
     }
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("Could not locate SteamTron: {error}"))?;
-    let mut command = std::process::Command::new(executable);
-    command
-        .args(["--proton-install", &family, &tag, &name])
+    spawn_proton_install(&family, &tag, &name, false)?;
+    Ok(serde_json::json!({ "started": true }))
+}
+
+#[tauri::command]
+fn resume_proton_install(
+    family: String,
+    tag: String,
+    name: String,
+) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    spawn_proton_install(&family, &tag, &name, true)?;
+    Ok(serde_json::json!({ "started": true }))
+}
+
+#[tauri::command]
+fn pause_proton_install(family: String, tag: String, name: String) -> Result<(), String> {
+    require_auth()?;
+    proton_sources::pause(&family, &tag, &name)
+}
+
+#[tauri::command]
+fn cancel_proton_install(family: String, tag: String, name: String) -> Result<(), String> {
+    require_auth()?;
+    proton_sources::cancel(&family, &tag, &name)
+}
+
+#[tauri::command]
+fn install_valve_proton(app_id: u32) -> Result<(), String> {
+    require_auth()?;
+    let url = format!("steam://install/{app_id}");
+    let mut command = std::process::Command::new("steam");
+    command.arg(&url).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    if command.spawn().is_ok() {
+        return Ok(());
+    }
+    std::process::Command::new("xdg-open")
+        .arg(&url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    command
+        .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|error| format!("Could not start the Proton installer: {error}"))?;
-    Ok(serde_json::json!({ "started": true }))
+        .map_err(|error| format!("Could not open Steam: {error}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -3239,7 +3289,8 @@ fn proton_install_child() -> Option<i32> {
     let family = args.get(2)?;
     let tag = args.get(3)?;
     let name = args.get(4)?;
-    Some(proton_sources::run_install(family, tag, name))
+    let resume = args.get(5).map(String::as_str) == Some("--resume");
+    Some(proton_sources::run_install(family, tag, name, resume))
 }
 
 fn main() {
@@ -3348,6 +3399,10 @@ fn main() {
             proton_source_releases,
             install_proton_release,
             proton_install_states,
+            resume_proton_install,
+            pause_proton_install,
+            cancel_proton_install,
+            install_valve_proton,
             uninstall_proton_release,
             set_default_proton_runner,
             open_path,

@@ -34,6 +34,8 @@ pub struct SourceRelease {
     pub installed_path: String,
     pub installable: bool,
     pub removable: bool,
+    #[serde(default)]
+    pub steam_app_id: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -189,10 +191,10 @@ fn emit(
     }
 }
 
-pub fn run_install(family: &str, tag: &str, name: &str) -> i32 {
+pub fn run_install(family: &str, tag: &str, name: &str, resume: bool) -> i32 {
     let path = state_path(family, tag, name);
     emit(Some(&path), family, tag, name, "starting", 0.0, 0, 0, "Starting…");
-    match install_with_progress(family, tag, name, Some(&path)) {
+    match install_with_progress(family, tag, name, Some(&path), resume) {
         Ok(_) => {
             emit(Some(&path), family, tag, name, "done", 100.0, 0, 0, "Installed");
             0
@@ -209,6 +211,7 @@ pub fn install_with_progress(
     tag: &str,
     name: &str,
     state: Option<&Path>,
+    resume: bool,
 ) -> Result<serde_json::Value, String> {
     let releases = list(family)?;
     migrate_legacy(family, &releases);
@@ -228,23 +231,49 @@ pub fn install_with_progress(
     let root = runner_root();
     let work = root.join(".downloads");
     fs::create_dir_all(&work).map_err(|error| error.to_string())?;
-    let partial = work.join(format!("{}-{}.part", std::process::id(), sanitize(name)));
-    let staging = work.join(format!("{}-{}.extract", std::process::id(), sanitize(tag)));
+    let stem = sanitize(archive_stem(name));
+    let partial = work.join(format!("{stem}.part"));
+    let staging = work.join(format!("{stem}.extract"));
     let _ = fs::remove_dir_all(&staging);
     let result = (|| -> Result<(), String> {
-        emit(state, family, tag, name, "downloading", 0.0, 0, release.size, "Downloading…");
-        let mut response = client()?
+        let existing = if resume {
+            fs::metadata(&partial).map(|metadata| metadata.len()).unwrap_or(0)
+        } else {
+            0
+        };
+        let mut request = client()?
             .get(&release.url)
-            .header("User-Agent", "steamtron-desktop")
-            .send()
-            .map_err(|error| error.to_string())?;
-        if !response.status().is_success() {
+            .header("User-Agent", "steamtron-desktop");
+        if existing > 0 {
+            request = request.header("Range", format!("bytes={existing}-"));
+        }
+        let mut response = request.send().map_err(|error| error.to_string())?;
+        if !response.status().is_success() && response.status().as_u16() != 206 {
             return Err(format!("runner download returned HTTP {}", response.status()));
         }
-        let mut file = fs::File::create(&partial).map_err(|error| error.to_string())?;
+        let append = existing > 0 && response.status().as_u16() == 206;
+        let mut total = if append { existing } else { 0 };
         let mut sha256 = Sha256::new();
         let mut sha512 = Sha512::new();
-        let mut total = 0u64;
+        let mut file = if append {
+            let mut source = fs::File::open(&partial).map_err(|error| error.to_string())?;
+            let mut buffer = vec![0u8; 1024 * 1024];
+            loop {
+                let read = source.read(&mut buffer).map_err(|error| error.to_string())?;
+                if read == 0 {
+                    break;
+                }
+                sha256.update(&buffer[..read]);
+                sha512.update(&buffer[..read]);
+            }
+            fs::OpenOptions::new()
+                .append(true)
+                .open(&partial)
+                .map_err(|error| error.to_string())?
+        } else {
+            fs::File::create(&partial).map_err(|error| error.to_string())?
+        };
+        emit(state, family, tag, name, "downloading", (total as f64 / release.size as f64 * 90.0).min(90.0), total, release.size, if append { "Resuming…" } else { "Downloading…" });
         let mut buffer = vec![0u8; 1024 * 1024];
         loop {
             let read = response.read(&mut buffer).map_err(|error| error.to_string())?;
@@ -386,6 +415,89 @@ fn checksum(url: &str) -> Result<String, String> {
         return Err("published SHA-512 checksum is invalid".into());
     }
     Ok(first)
+}
+
+fn wait_for_exit(pid: u32) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while pid_alive(pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+pub fn pause(family: &str, tag: &str, name: &str) -> Result<(), String> {
+    let path = state_path(family, tag, name);
+    let state = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<InstallState>(&bytes).ok())
+        .ok_or_else(|| "this Proton install is not running".to_string())?;
+    if !is_active(&state.status) {
+        return Err("this Proton install is not running".into());
+    }
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &state.pid.to_string()])
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &state.pid.to_string(), "/F"])
+            .status();
+    }
+    wait_for_exit(state.pid);
+    let stem = sanitize(archive_stem(name));
+    let completed = fs::metadata(runner_root().join(".downloads").join(format!("{stem}.part")))
+        .map(|metadata| metadata.len())
+        .unwrap_or(state.completed);
+    let total = state.total.max(completed);
+    let mut state = state;
+    state.status = "paused".into();
+    state.percent = if total > 0 {
+        (completed as f64 / total as f64 * 90.0).min(90.0)
+    } else {
+        0.0
+    };
+    state.completed = completed;
+    state.total = total;
+    state.message = "Paused".into();
+    state.updated_at = now();
+    write_state(&path, &state);
+    Ok(())
+}
+
+pub fn cancel(family: &str, tag: &str, name: &str) -> Result<(), String> {
+    let path = state_path(family, tag, name);
+    let state = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<InstallState>(&bytes).ok())
+        .ok_or_else(|| "this Proton install is not running".to_string())?;
+    if !is_active(&state.status) && state.status != "paused" {
+        return Err("this Proton install is not running".into());
+    }
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &state.pid.to_string()])
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &state.pid.to_string(), "/F"])
+            .status();
+    }
+    wait_for_exit(state.pid);
+    let work = runner_root().join(".downloads");
+    let stem = sanitize(archive_stem(name));
+    let _ = fs::remove_file(work.join(format!("{stem}.part")));
+    let _ = fs::remove_dir_all(work.join(format!("{stem}.extract")));
+    let mut state = state;
+    state.status = "cancelled".into();
+    state.message = "Cancelled".into();
+    state.updated_at = now();
+    write_state(&path, &state);
+    Ok(())
 }
 
 pub fn uninstall(installed_path: &str) -> Result<(), String> {
@@ -610,6 +722,7 @@ pub fn list(family: &str) -> Result<Vec<SourceRelease>, String> {
                 installed_path: runner.display().to_string(),
                 installable: true,
                 removable: true,
+                steam_app_id: None,
             });
         }
     }
@@ -620,7 +733,7 @@ pub fn list(family: &str) -> Result<Vec<SourceRelease>, String> {
 }
 
 fn valve_releases() -> Result<Vec<SourceRelease>, String> {
-    let mut result = Vec::new();
+    let mut installed: Vec<(String, PathBuf)> = Vec::new();
     let libraries = steamtron_core::steam::libraries().map_err(|error| error.to_string())?;
     for library in libraries {
         let common = library.join("common");
@@ -631,20 +744,66 @@ fn valve_releases() -> Result<Vec<SourceRelease>, String> {
             if !runner.is_file() {
                 continue;
             }
-            let name = entry.file_name().to_string_lossy().into_owned();
+            installed.push((entry.file_name().to_string_lossy().into_owned(), runner));
+        }
+    }
+    let mut used = std::collections::BTreeSet::new();
+    let mut result = Vec::new();
+    let channels: [(&str, u32, &[&str]); 3] = [
+        ("Proton Experimental", 1493710, &["experimental"]),
+        ("Proton Hotfix", 2180100, &["hotfix"]),
+        ("Proton 11.0", 4628710, &["proton 11", "proton - 11", "proton_11"]),
+    ];
+    for (label, app_id, needles) in channels {
+        let found = installed.iter().enumerate().find(|(index, (name, _))| {
+            !used.contains(index)
+                && needles.iter().any(|needle| name.to_ascii_lowercase().contains(needle))
+        });
+        if let Some((index, (name, runner))) = found {
+            used.insert(index);
             result.push(SourceRelease {
                 family: "Valve-Proton".into(),
-                tag: name.clone(),
-                name,
+                tag: label.into(),
+                name: name.clone(),
                 url: String::new(),
                 size: 0,
                 installed: true,
                 installed_path: runner.display().to_string(),
                 installable: false,
                 removable: false,
+                steam_app_id: Some(app_id),
+            });
+        } else {
+            result.push(SourceRelease {
+                family: "Valve-Proton".into(),
+                tag: label.into(),
+                name: label.into(),
+                url: String::new(),
+                size: 0,
+                installed: false,
+                installed_path: String::new(),
+                installable: false,
+                removable: false,
+                steam_app_id: Some(app_id),
             });
         }
     }
-    result.sort_by(|left, right| left.tag.cmp(&right.tag));
+    for (index, (name, runner)) in installed.into_iter().enumerate() {
+        if used.contains(&index) {
+            continue;
+        }
+        result.push(SourceRelease {
+            family: "Valve-Proton".into(),
+            tag: name.clone(),
+            name,
+            url: String::new(),
+            size: 0,
+            installed: true,
+            installed_path: runner.display().to_string(),
+            installable: false,
+            removable: false,
+            steam_app_id: None,
+        });
+    }
     Ok(result)
 }
