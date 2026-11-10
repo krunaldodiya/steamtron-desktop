@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "Main window permissions for SteamTron.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}
