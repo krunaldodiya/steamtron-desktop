@@ -2811,8 +2811,17 @@ function renderStoreDetail() {
   if (coverNode) coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; });
 }
 
+function isPcCatalogItem(item) {
+  const platforms = item.platforms || [];
+  if (!platforms.length) return true; // unknown platform data: keep the title
+  return platforms.some((platform) => {
+    const name = String(platform.name || "").toLowerCase();
+    return name.includes("windows") || name.includes("linux") || name.includes("macos") || name === "mac";
+  });
+}
+
 function applyStorePage(data) {
-  storeItems = data.items || [];
+  storeItems = (data.items || []).filter(isPcCatalogItem);
   storePage = data.page || storePage;
   storePages = data.total_pages || 1;
   storeTotal = data.total_items || 0;
@@ -2897,9 +2906,9 @@ function renderStorePage() {
   const sortOptions = [["popular", "Most popular"], ["rating", "Top rated"], ["latest", "Newest"], ["name_asc", "A–Z"], ["name_desc", "Z–A"]]
     .map(([value, label]) => `<button class="store-option${value === storeSort ? " selected" : ""}" data-store-sort="${value}">${label}</button>`)
     .join("");
-  const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : storeRefreshing ? "Saved catalogue · refreshing…" : `${storeTotal ? storeTotal.toLocaleString() : storeItems.length} games · page ${storePage} of ${storePages}`;
+  const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : storeRefreshing ? "Saved catalogue · refreshing…" : `${storeItems.length} PC titles · page ${storePage} of ${storePages}`;
   detailEl.innerHTML = `<div class="page store-page">
-    <header class="page-head"><h1>Discover your next game</h1><p>Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
+    <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">
       <aside class="store-sidebar">
         <div class="store-sidebar-head"><label for="store-search">Search</label><button type="button" tabindex="0" class="store-clear-link" id="store-clear-search">Clear</button></div>
