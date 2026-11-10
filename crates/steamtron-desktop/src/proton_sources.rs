@@ -211,6 +211,7 @@ pub fn install_with_progress(
     state: Option<&Path>,
 ) -> Result<serde_json::Value, String> {
     let releases = list(family)?;
+    migrate_legacy(family, &releases);
     let release = releases
         .into_iter()
         .find(|release| release.tag == tag && release.name == name && release.installable)
@@ -447,6 +448,41 @@ fn source_cache_path(family: &str) -> PathBuf {
         .join(format!("{}.json", sanitize(family)))
 }
 
+/// Move a runner installed under the old `<family>-<tag>` layout onto its
+/// archive-specific folder, using the old install state to pick the variant.
+fn migrate_legacy(family: &str, releases: &[SourceRelease]) {
+    let mut tags = std::collections::HashSet::new();
+    for release in releases {
+        if !tags.insert(release.tag.clone()) {
+            continue;
+        }
+        let legacy = runner_root().join(format!("{}-{}", sanitize(family), sanitize(&release.tag)));
+        if !legacy.join("proton").is_file() {
+            continue;
+        }
+        let old_state = steamtron_core::paths::layout()
+            .cache_dir()
+            .join("proton-install")
+            .join(format!("{}-{}.json", sanitize(family), sanitize(&release.tag)));
+        let installed_name = fs::read(&old_state)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<InstallState>(&bytes).ok())
+            .map(|state| state.name);
+        let chosen = installed_name
+            .and_then(|name| {
+                releases
+                    .iter()
+                    .find(|item| item.tag == release.tag && item.name == name)
+            })
+            .or_else(|| releases.iter().find(|item| item.tag == release.tag));
+        let Some(chosen) = chosen else { continue };
+        let destination = release_dir(family, &chosen.tag, &chosen.name);
+        if !destination.exists() {
+            let _ = fs::rename(&legacy, &destination);
+        }
+    }
+}
+
 fn cached_release(mut release: SourceRelease) -> SourceRelease {
     let runner = release_dir(&release.family, &release.tag, &release.name).join("proton");
     release.installed = runner.is_file();
@@ -464,6 +500,7 @@ pub fn list_cached(family: &str, force: bool) -> Result<Vec<SourceRelease>, Stri
     if !force {
         if let Ok(bytes) = fs::read(&path) {
             if let Ok(releases) = serde_json::from_slice::<Vec<SourceRelease>>(&bytes) {
+                migrate_legacy(family, &releases);
                 return Ok(releases.into_iter().map(cached_release).collect());
             }
         }
@@ -473,11 +510,12 @@ pub fn list_cached(family: &str, force: bool) -> Result<Vec<SourceRelease>, Stri
         .and_then(|bytes| serde_json::from_slice::<Vec<SourceRelease>>(&bytes).ok())
         .unwrap_or_default();
     let fetched = list(family)?;
+    migrate_legacy(family, &fetched);
     let mut merged = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for release in fetched {
         if seen.insert((release.tag.clone(), release.name.clone())) {
-            merged.push(release);
+            merged.push(cached_release(release));
         }
     }
     // Keep locally installed releases that upstream has dropped, so they stay
