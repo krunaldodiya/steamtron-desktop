@@ -514,7 +514,7 @@ fn main() -> Result<()> {
                         .with_context(|| format!("no fixes configured for {appid}"))?;
                     export_zip(&entry.fixes, &destination, &appid)?;
                     println!("{}", destination.display());
-                    println!("name={}", export_name(&appid, &appid));
+                    println!("name={}", export_name(&appid));
                 }
                 FixesCommand::List => {
                     for entry in config.entries() {

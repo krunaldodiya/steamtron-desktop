@@ -693,6 +693,10 @@ async function startManagedDownload(game) {
 }
 
 if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("fix-progress", (event) => {
+    const button = document.querySelector(".game-settings-pane button.loading");
+    if (button) button.textContent = String(event.payload || "Working…");
+  });
   window.__TAURI__.event.listen("download-progress", (event) => {
     const state = event.payload || {};
     if (downloadController && state.gameId === downloadController.gameId) downloadController.update(state);
@@ -1182,12 +1186,16 @@ function openManagedGameOptions(game) {
             (result) => `Removed ${result.files} fix file${result.files === 1 ? "" : "s"}`);
         };
       }
-      pane.querySelector("#fix-goldberg-apply").onclick = (event) => run(event.currentTarget,
-        () => invoke("apply_managed_goldberg", { gameId: game.id }), "GoldBerg applied");
+      pane.querySelector("#fix-goldberg-apply").onclick = (event) => {
+        showToast("Applying GoldBerg — first use downloads the emulator assets.");
+        void run(event.currentTarget, () => invoke("apply_managed_goldberg", { gameId: game.id }), "GoldBerg applied");
+      };
       pane.querySelector("#fix-goldberg-remove").onclick = (event) => run(event.currentTarget,
         () => invoke("remove_managed_goldberg", { gameId: game.id }), "GoldBerg removed");
-      pane.querySelector("#fix-steamless-apply").onclick = (event) => run(event.currentTarget,
-        () => invoke("apply_managed_steamless", { gameId: game.id }), "Steamless applied");
+      pane.querySelector("#fix-steamless-apply").onclick = (event) => {
+        showToast("Applying Steamless — first use downloads the tool.");
+        void run(event.currentTarget, () => invoke("apply_managed_steamless", { gameId: game.id }), "Steamless applied");
+      };
       pane.querySelector("#fix-steamless-remove").onclick = (event) => run(event.currentTarget,
         () => invoke("remove_managed_steamless", { gameId: game.id }), "Steamless removed");
     };
@@ -4120,6 +4128,28 @@ window.addEventListener("focus", async () => {
   await refreshManagedRunning();
   if (appView === "library" || appView === "home" || appView === "game") renderManagedMode();
 });
+
+let runningPollBusy = false;
+setInterval(async () => {
+  if (!managedShell() || runningPollBusy) return;
+  runningPollBusy = true;
+  try {
+    const next = new Set(await invoke("running_managed"));
+    const changed = next.size !== runningManaged.size
+      || [...next].some((id) => !runningManaged.has(id));
+    if (changed) {
+      runningManaged = next;
+      if (!document.body.classList.contains("settings-open")
+        && ["home", "library", "game"].includes(appView)) {
+        renderManagedMode();
+      }
+    }
+  } catch (_error) {
+    // Keep the last observed state.
+  } finally {
+    runningPollBusy = false;
+  }
+}, 2000);
 document.querySelector("#settings").onclick = () => {
   if (document.body.classList.contains("fullscreen-mode")) openFullscreenOptions();
   else void openSettingsPage();

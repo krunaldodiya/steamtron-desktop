@@ -83,11 +83,12 @@ fn seven_zip() -> Option<PathBuf> {
     })
 }
 
-fn ensure_goldberg_assets() -> Result<PathBuf, String> {
+fn ensure_goldberg_assets(progress: &dyn Fn(&str)) -> Result<PathBuf, String> {
     let root = steamtron_core::paths::layout().goldberg(GSE_TAG);
     if root.join("regular/x64/steam_api64.dll").is_file() {
         return Ok(root);
     }
+    progress("Downloading GoldBerg assets…");
     let parent = root.parent().ok_or_else(|| "invalid Goldberg cache path".to_string())?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let staging = parent.join(format!(".gse-{}", std::process::id()));
@@ -98,6 +99,7 @@ fn ensure_goldberg_assets() -> Result<PathBuf, String> {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
+    progress("Extracting GoldBerg assets…");
     let seven = seven_zip().ok_or_else(|| "7-Zip is required to extract GoldBerg".to_string())?;
     let status = Command::new(&seven)
         .args(["x", "-y", &format!("-o{}", staging.join("out").display()), &archive.display().to_string()])
@@ -286,15 +288,59 @@ fn find_steam_api(game: &Game) -> Result<(PathBuf, u16), String> {
 
 pub fn goldberg_applied(game: &Game) -> bool {
     let Ok(fixes) = fixes_dir(game) else { return false };
-    !read_manifest(&fixes.join(GOLDBERG_MANIFEST)).is_empty()
+    if !read_manifest(&fixes.join(GOLDBERG_MANIFEST)).is_empty() {
+        return true;
+    }
+    // Recover detection if the manifest was lost or the folder was copied in.
+    let assets = steamtron_core::paths::layout().goldberg(GSE_TAG);
+    let release = [assets.join("regular/x64/steam_api64.dll"), assets.join("regular/x32/steam_api.dll")];
+    let Ok(files) = walk(&fixes, 0) else { return false };
+    for path in files {
+        let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        if name == "steam_appid.txt" && path.parent().and_then(|parent| parent.file_name()).and_then(|value| value.to_str()) == Some("steam_settings") {
+            return true;
+        }
+        if (name == "steam_api64.dll" || name == "steam_api.dll")
+            && release.iter().any(|candidate| candidate.is_file() && same_bytes(&path, candidate))
+        {
+            return true;
+        }
+    }
+    false
 }
 
-pub fn apply_goldberg(game_id: &str) -> Result<serde_json::Value, String> {
+fn same_bytes(left: &Path, right: &Path) -> bool {
+    let (Ok(left), Ok(right)) = (fs::read(left), fs::read(right)) else { return false };
+    left == right
+}
+
+fn payload_dirs(fixes: &Path) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    let Ok(files) = walk(fixes, 0) else { return result };
+    for path in files {
+        let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        if (name == "steam_appid.txt" || name == "steam_interfaces.txt")
+            && path.parent().and_then(|parent| parent.file_name()).and_then(|value| value.to_str()) == Some("steam_settings")
+        {
+            if let Some(parent) = path.parent() {
+                if let Some(payload) = parent.parent() {
+                    if !result.contains(&payload.to_path_buf()) {
+                        result.push(payload.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+pub fn apply_goldberg(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_json::Value, String> {
     let mut library = Library::load().map_err(|error| error.to_string())?;
     let mut game = library.game(game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     let fixes = fixes_dir(&game)?;
     fs::create_dir_all(&fixes).map_err(|error| error.to_string())?;
-    let assets = ensure_goldberg_assets()?;
+    let assets = ensure_goldberg_assets(progress)?;
+    progress("Locating the game's Steam API…");
     let (steam_api, machine) = find_steam_api(&game)?;
     let relative = steam_api.strip_prefix(&game.installation.root).map_err(|_| "Steam API is outside the game folder".to_string())?.to_path_buf();
     let emulator = if machine == 0x8664 {
@@ -305,6 +351,7 @@ pub fn apply_goldberg(game_id: &str) -> Result<serde_json::Value, String> {
     if !emulator.is_file() {
         return Err("the GoldBerg release does not contain the required emulator library".into());
     }
+    progress("Writing the GoldBerg overlay…");
     let destination = fixes.join(&relative);
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -349,15 +396,37 @@ pub fn remove_goldberg(game_id: &str) -> Result<serde_json::Value, String> {
     let mut game = library.game(game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     let fixes = fixes_dir(&game)?;
     let manifest_path = fixes.join(GOLDBERG_MANIFEST);
-    let files = read_manifest(&manifest_path);
+    let mut files = read_manifest(&manifest_path);
+    for payload in payload_dirs(&fixes) {
+        if let Ok(entries) = walk(&payload, 0) {
+            for path in entries {
+                let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+                if name == "steam_api64.dll" || name == "steam_api.dll" || name == "steam_interfaces.txt" {
+                    if let Ok(relative) = path.strip_prefix(&fixes) {
+                        files.push(relative.display().to_string());
+                    }
+                }
+            }
+        }
+        let settings = payload.join("steam_settings");
+        if settings.is_dir() {
+            files.push(settings.strip_prefix(&fixes).unwrap_or(&settings).display().to_string());
+        }
+    }
+    files.sort();
+    files.dedup();
     if files.is_empty() {
         return Err("GoldBerg is not applied to this fixes folder.".into());
     }
     let mut removed = 0;
-    for file in files {
-        let path = fixes.join(&file);
-        if path.is_file() {
+    for file in &files {
+        let path = fixes.join(file);
+        if path.is_dir() {
+            let _ = fs::remove_dir_all(&path);
+        } else if path.is_file() {
             let _ = fs::remove_file(&path);
+        }
+        if !path.exists() {
             removed += 1;
         }
     }
@@ -376,11 +445,12 @@ pub fn remove_goldberg(game_id: &str) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "removed": removed }))
 }
 
-fn ensure_steamless_assets() -> Result<PathBuf, String> {
+fn ensure_steamless_assets(progress: &dyn Fn(&str)) -> Result<PathBuf, String> {
     let root = steamtron_core::paths::layout().steamless();
     if root.join("steamless").is_file() && root.join("Steamless.CLI.exe").is_file() {
         return Ok(root);
     }
+    progress("Downloading Steamless…");
     let parent = root.parent().ok_or_else(|| "invalid Steamless cache path".to_string())?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let staging = parent.join(format!(".steamless-{}", std::process::id()));
@@ -415,7 +485,7 @@ pub fn steamless_applied(game: &Game) -> bool {
     !read_manifest(&fixes.join(STEAMLESS_MANIFEST)).is_empty()
 }
 
-pub fn apply_steamless(game_id: &str) -> Result<serde_json::Value, String> {
+pub fn apply_steamless(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_json::Value, String> {
     if std::env::var_os("PATH").map(|path| std::env::split_paths(&path).any(|dir| dir.join("wine").is_file())).unwrap_or(false) == false {
         return Err("Steamless requires Wine. Install Wine and try again.".into());
     }
@@ -423,7 +493,8 @@ pub fn apply_steamless(game_id: &str) -> Result<serde_json::Value, String> {
     let mut game = library.game(game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     let fixes = fixes_dir(&game)?;
     fs::create_dir_all(&fixes).map_err(|error| error.to_string())?;
-    let tool = ensure_steamless_assets()?;
+    let tool = ensure_steamless_assets(progress)?;
+    progress("Unpacking registered launchers…");
     let mut launchers = Vec::new();
     for target in &game.launch_targets {
         if target.executable.is_file() {

@@ -10,7 +10,7 @@ mod proton_sources;
 
 use serde::Serialize;
 #[cfg(target_os = "linux")]
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 mod security;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
@@ -1383,7 +1383,7 @@ fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, 
                 .and_then(|games| games.into_iter().find(|game| game.appid == appid).map(|game| game.name))
         })
         .unwrap_or_else(|| format!("Steam App {appid}"));
-    let name = export_name(&game_title, &appid);
+    let name = export_name(&game_title);
     let Some(path) = rfd::FileDialog::new()
         .set_file_name(&name)
         .add_filter("ZIP", &["zip"])
@@ -1867,14 +1867,108 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     }))
 }
 
+#[cfg(target_os = "linux")]
+fn process_evidence() -> Vec<(String, String, Vec<String>)> {
+    use std::path::Path as StdPath;
+
+    let self_pid = std::process::id();
+    let mut result = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else { return result };
+    for (index, entry) in entries.flatten().enumerate() {
+        if index >= 8192 {
+            break;
+        }
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
+        if pid == self_pid {
+            continue;
+        }
+        let directory = entry.path();
+        let Ok(raw) = std::fs::read(directory.join("cmdline")) else { continue };
+        if raw.len() > 64 * 1024 {
+            continue;
+        }
+        let args: Vec<String> = raw
+            .split(|byte| *byte == 0)
+            .filter(|arg| !arg.is_empty())
+            .map(|arg| String::from_utf8_lossy(arg).into_owned())
+            .collect();
+        let Some(first) = args.first() else { continue };
+        let argv0 = first
+            .replace('\\', "/")
+            .rsplit('/')
+            .next()
+            .unwrap_or(first)
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        let comm = std::fs::read_to_string(directory.join("comm"))
+            .unwrap_or_default()
+            .trim()
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        let mut prefixes = Vec::new();
+        if let Ok(environment) = std::fs::read(directory.join("environ")) {
+            for value in environment.split(|byte| *byte == 0) {
+                let text = String::from_utf8_lossy(value);
+                if let Some((name, value)) = text.split_once('=') {
+                    if name == "WINEPREFIX" || name == "STEAM_COMPAT_DATA_PATH" {
+                        let path = StdPath::new(value);
+                        prefixes.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        result.push((argv0, comm, prefixes));
+    }
+    result
+}
+
 #[tauri::command]
 fn running_managed() -> Result<Vec<String>, String> {
-    let runs = managed_runs()
+    use steamtron_core::library::Library;
+
+    let mut games: std::collections::BTreeSet<String> = managed_runs()
         .lock()
-        .map_err(|_| "Game state lock failed.".to_string())?;
-    let mut games: Vec<String> = runs.keys().cloned().collect();
-    games.sort();
-    Ok(games)
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .keys()
+        .cloned()
+        .collect();
+    #[cfg(target_os = "linux")]
+    if let Ok(library) = Library::load() {
+        let processes = process_evidence();
+        for game in library.games() {
+            let target = game
+                .launch_targets
+                .iter()
+                .find(|target| target.primary)
+                .or_else(|| game.launch_targets.first());
+            let Some(target) = target else { continue };
+            let filename = target
+                .executable
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .trim_end_matches('.')
+                .to_ascii_lowercase();
+            let stem = target
+                .executable
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .trim_end_matches('.')
+                .to_ascii_lowercase();
+            for (argv0, comm, _prefixes) in &processes {
+                let by_name = !filename.is_empty() && argv0 == &filename;
+                let by_wine = matches!(argv0.as_str(), "wine" | "wine64" | "wine-preloader" | "wine64-preloader")
+                    && !stem.is_empty()
+                    && (comm == &stem || (comm.len() >= 8 && stem.starts_with(comm)));
+                if by_name || by_wine {
+                    games.insert(game.id.clone());
+                    break;
+                }
+            }
+        }
+    }
+    Ok(games.into_iter().collect())
 }
 
 #[tauri::command]
@@ -2048,7 +2142,7 @@ fn export_managed_fixes(game_id: String) -> Result<Option<String>, String> {
         .unwrap_or_else(|| game.id.clone());
     let Some(path) = rfd::FileDialog::new()
         .set_title("Export fixes ZIP")
-        .set_file_name(format!("{}.zip", steamtron_core::fixes::export_name(&game.title, &appid)))
+        .set_file_name(steamtron_core::fixes::export_name(&game.title))
         .add_filter("Fixes ZIP", &["zip"])
         .save_file()
     else {
@@ -2060,11 +2154,19 @@ fn export_managed_fixes(game_id: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-async fn apply_managed_goldberg(game_id: String) -> Result<serde_json::Value, String> {
+async fn apply_managed_goldberg(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<serde_json::Value, String> {
     require_auth()?;
-    tauri::async_runtime::spawn_blocking(move || fix_tools::apply_goldberg(&game_id))
-        .await
-        .map_err(|error| format!("GoldBerg task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = |message: &str| {
+            let _ = app.emit("fix-progress", message.to_string());
+        };
+        fix_tools::apply_goldberg(&game_id, &progress)
+    })
+    .await
+    .map_err(|error| format!("GoldBerg task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -2074,11 +2176,19 @@ fn remove_managed_goldberg(game_id: String) -> Result<serde_json::Value, String>
 }
 
 #[tauri::command]
-async fn apply_managed_steamless(game_id: String) -> Result<serde_json::Value, String> {
+async fn apply_managed_steamless(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<serde_json::Value, String> {
     require_auth()?;
-    tauri::async_runtime::spawn_blocking(move || fix_tools::apply_steamless(&game_id))
-        .await
-        .map_err(|error| format!("Steamless task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = |message: &str| {
+            let _ = app.emit("fix-progress", message.to_string());
+        };
+        fix_tools::apply_steamless(&game_id, &progress)
+    })
+    .await
+    .map_err(|error| format!("Steamless task failed: {error}"))?
 }
 
 #[tauri::command]

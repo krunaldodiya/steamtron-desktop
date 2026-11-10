@@ -209,7 +209,7 @@ pub fn install_zip_into(
 }
 
 /// Export a fixes directory as a portable ZIP containing the format marker.
-pub fn export_zip(target: &Path, destination: &Path, appid: &str) -> Result<(), FixesError> {
+pub fn export_zip(target: &Path, destination: &Path, _appid: &str) -> Result<(), FixesError> {
     if !target.is_dir() || target.is_symlink() {
         return Err(FixesError::Invalid("no fixes directory".into()));
     }
@@ -223,9 +223,23 @@ pub fn export_zip(target: &Path, destination: &Path, appid: &str) -> Result<(), 
         return Err(FixesError::Invalid("destination must be a .zip".into()));
     }
     if let Some(parent) = destination.parent() {
+        let metadata = fs::symlink_metadata(parent)
+            .map_err(|error| FixesError::io(parent, error))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(FixesError::Invalid(
+                "destination folder must be a real directory".into(),
+            ));
+        }
         fs::create_dir_all(parent).map_err(|error| FixesError::io(parent, error))?;
     }
-    let temporary = destination.with_extension("zip.steamtron.tmp");
+    if let Ok(metadata) = fs::symlink_metadata(destination) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(FixesError::Invalid(
+                "destination must be a regular ZIP file".into(),
+            ));
+        }
+    }
+    let temporary = destination.with_extension(format!("zip.{}.tmp", std::process::id()));
     let result = (|| -> Result<(), FixesError> {
         let file = fs::File::create(&temporary).map_err(|error| FixesError::io(&temporary, error))?;
         let mut writer = ZipWriter::new(file);
@@ -234,7 +248,7 @@ pub fn export_zip(target: &Path, destination: &Path, appid: &str) -> Result<(), 
             .start_file(MARKER, options)
             .map_err(FixesError::Zip)?;
         writer
-            .write_all(format!("{{\"format\":1,\"appid\":\"{appid}\"}}\n").as_bytes())
+            .write_all(b"{\"format\":1}\n")
             .map_err(|error| FixesError::io(&temporary, error))?;
         let mut files = Vec::new();
         collect_files(target, target, &mut files)?;
@@ -288,7 +302,7 @@ fn collect_files(
     Ok(())
 }
 
-pub fn export_name(title: &str, appid: &str) -> String {
+pub fn export_name(title: &str) -> String {
     let mut value: String = title
         .chars()
         .map(|character| {
@@ -302,7 +316,7 @@ pub fn export_name(title: &str, appid: &str) -> String {
     value = value.split_whitespace().collect::<Vec<_>>().join(" ");
     value = value.trim_matches('.').trim().to_owned();
     if value.is_empty() {
-        value = format!("Steam App {appid}");
+        value = "Game".to_owned();
     }
     value.truncate(180);
     format!("{value}.zip")
@@ -314,8 +328,8 @@ mod tests {
 
     #[test]
     fn export_name_uses_sanitized_title() {
-        assert_eq!(export_name("Resident Evil Village", "1196590"), "Resident Evil Village.zip");
-        assert_eq!(export_name("Game: Deluxe/Test", "42"), "Game Deluxe Test.zip");
+        assert_eq!(export_name("Resident Evil Village"), "Resident Evil Village.zip");
+        assert_eq!(export_name("Game: Deluxe/Test"), "Game Deluxe Test.zip");
     }
 
     #[test]
