@@ -1723,9 +1723,11 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
 
     require_auth()?;
     let library = Library::load().map_err(|error| error.to_string())?;
-    let game = library
+    let mut game = library
         .game(&game_id)
+        .cloned()
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
+    steamtron_core::runtime::use_default_proton(&mut game, &library.settings().default_proton);
     let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
     let steam_mode = game.launch.requires_steam
         || game
@@ -1749,7 +1751,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
 
     let (mut command, mode, program, arguments, overlay, fixes) = if steam_mode {
         let backend = platform_backend().map_err(|error| error.to_string())?;
-        let app_id = steamtron_library::managed::steam_ready(game, &backend)
+        let app_id = steamtron_library::managed::steam_ready(&game, &backend)
             .map_err(|error| error.to_string())?;
         let plan = steam_launch_plan(app_id, &steam_root);
         let command = if cfg!(unix) {
@@ -1770,12 +1772,12 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             None,
         )
     } else {
-        let target = primary_target(game)
+        let target = primary_target(&game)
             .cloned()
             .ok_or_else(|| "This game has no launch target yet.".to_string())?;
-        let plan = managed_launch_plan(game, &target, &steam_root)
+        let plan = managed_launch_plan(&game, &target, &steam_root)
             .map_err(|error| error.to_string())?;
-        let fixes = managed_fixes_dir(game);
+        let fixes = managed_fixes_dir(&game);
         let use_overlay =
             game.fixes_enabled && fixes.as_ref().is_some_and(|path| dir_has_entries(path));
         let command = if use_overlay {
@@ -2047,6 +2049,7 @@ fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value
                     .map(|mut entries| entries.next().is_some())
                     .unwrap_or(false);
             value["installed"] = serde_json::json!(installed);
+            value["prefix_exists"] = serde_json::json!(game.installation.prefix.is_dir());
             value
         })
         .collect();
@@ -3231,6 +3234,8 @@ fn update_managed_launch_settings(
     proton: Option<String>,
     arguments: Option<Vec<String>>,
     environment: Option<std::collections::BTreeMap<String, String>>,
+    prefix_mode: Option<String>,
+    requires_steam: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
@@ -3252,6 +3257,37 @@ fn update_managed_launch_settings(
     }
     if let Some(environment) = environment {
         game.launch.environment = environment;
+    }
+    if let Some(mode) = prefix_mode {
+        let mode = mode.trim().to_owned();
+        if mode != "steam" && mode != "umu" {
+            return Err("prefix source must be steam or umu".into());
+        }
+        if mode == "steam" {
+            let app_id = game
+                .metadata_app_id
+                .ok_or_else(|| "Steam prefix needs a Steam App ID".to_string())?;
+            let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
+            game.installation.prefix = steam_root
+                .join("steamapps")
+                .join("compatdata")
+                .join(app_id.to_string())
+                .join("pfx");
+        } else {
+            let prefix = steamtron_core::library::drive_root_for(&game.installation.root)
+                .and_then(|drive| steamtron_core::library::game_layout(&drive, &game).ok())
+                .map(|layout| layout.prefix)
+                .unwrap_or_else(|| {
+                    let folder = steamtron_core::library::safe_folder(&game.title)
+                        .unwrap_or_else(|_| game.id.clone());
+                    steamtron_core::paths::layout().prefixes().join(folder)
+                });
+            game.installation.prefix = prefix;
+        }
+        game.launch.prefix_mode = mode;
+    }
+    if let Some(requires_steam) = requires_steam {
+        game.launch.requires_steam = requires_steam;
     }
     library
         .upsert_game(game.clone())

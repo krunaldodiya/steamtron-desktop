@@ -814,6 +814,152 @@ async function hydrateGameDetail(game) {
   }
 }
 
+async function renderCompatibilityTab(pane, game, latestGame, refreshGame, renderTab) {
+  const data = await invoke("proton_runners").catch(() => ({ runners: [], default: "" }));
+  const runners = [...(data.runners || [])];
+  const current = latestGame.launch?.proton || latestGame.installation?.proton || data.default || "";
+  if (current && !runners.some((runner) => runner.path === current)) {
+    runners.unshift({ name: current.split(/[\\/]/).pop(), path: current, source: "selected", exists: true });
+  }
+  const options = runners.map((runner) => {
+    const installed = runner.source === "steam" || runner.source === "downloaded" || runner.source === "selected";
+    const suffix = !runner.exists ? " — missing" : installed ? " — installed" : "";
+    return `<option value="${escape(runner.path)}"${runner.path === current ? " selected" : ""}>${escape(runner.name + suffix)}</option>`;
+  }).join("");
+  const prefix = latestGame.installation?.prefix || "";
+  const prefixMode = latestGame.launch?.prefix_mode === "steam" ? "steam" : "umu";
+  const requiresSteam = Boolean(latestGame.launch?.requires_steam);
+  pane.innerHTML = `<h3>Compatibility</h3>
+    <label for="gs-proton-select">Proton</label>
+    <select id="gs-proton-select">${options || '<option value="">No Proton runners installed</option>'}</select>
+    <button class="primary pane-save" id="gs-proton-save">Save Proton</button>
+    <h3>Current selection</h3>
+    <div class="game-options-paths">
+      ${row("Proton", current || "Not selected")}
+      ${row("Prefix", `${prefix || "Not configured"}${latestGame.prefix_exists ? "" : " (not created yet)"}`)}
+    </div>
+    <label for="gs-prefix-select">Prefix source</label>
+    <p class="pane-note">Choose where this game keeps its Wine prefix. Steam mode uses Steam compatdata for this game's App ID.</p>
+    <select id="gs-prefix-select">
+      <option value="steam"${prefixMode === "steam" ? " selected" : ""}${latestGame.metadata_app_id ? "" : " disabled"}>Steam prefix</option>
+      <option value="umu"${prefixMode === "umu" ? " selected" : ""}>SteamTron prefix</option>
+    </select>
+    <button class="primary pane-save" id="gs-prefix-save">Save prefix source</button>
+    <h3>Steam client</h3>
+    <div class="game-options-toggle"><div><strong>Require Steam to be running</strong><p class="pane-note">Off by default. When enabled, Play requires the Steam client to be installed and running. If it is not running, Play stops with an error.</p></div><label class="switch"><input type="checkbox" id="gs-steam-required"${requiresSteam ? " checked" : ""}><span></span></label></div>
+    <button class="primary pane-save" id="gs-steam-save">Save Steam requirement</button>`;
+
+  pane.querySelector("#gs-proton-save").onclick = async (event) => {
+    const stop = busy(event.target, "Saving…");
+    try {
+      await invoke("update_managed_launch_settings", { gameId: game.id, proton: pane.querySelector("#gs-proton-select").value });
+      await refreshGame();
+      stop();
+      showToast("Proton runner saved");
+      renderTab("compatibility");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  pane.querySelector("#gs-prefix-save").onclick = async (event) => {
+    const stop = busy(event.target, "Saving…");
+    try {
+      await invoke("update_managed_launch_settings", { gameId: game.id, prefixMode: pane.querySelector("#gs-prefix-select").value });
+      await refreshGame();
+      stop();
+      showToast("Prefix source saved");
+      renderTab("compatibility");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  pane.querySelector("#gs-steam-save").onclick = async (event) => {
+    const stop = busy(event.target, "Saving…");
+    try {
+      await invoke("update_managed_launch_settings", { gameId: game.id, requiresSteam: pane.querySelector("#gs-steam-required").checked });
+      await refreshGame();
+      stop();
+      showToast("Steam requirement saved");
+      renderTab("compatibility");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+}
+
+async function renderCompatibilityTab(pane, game, refreshGame, renderTab) {
+  const data = await invoke("proton_runners").catch(() => ({ runners: [], default: "" }));
+  const runners = data.runners || [];
+  const defaultRunner = data.default || "";
+  const current = game.launch?.proton || game.installation?.proton || "";
+  const effective = current || defaultRunner;
+  const fileName = (path) => String(path || "").split(/[\\/]/).pop() || path;
+  const options = [`<option value=""${current ? "" : " selected"}>Use global default${defaultRunner ? ` (${escape(fileName(defaultRunner))})` : ""}</option>`];
+  const seen = new Set([""]);
+  for (const runner of runners) {
+    if (seen.has(runner.path)) continue;
+    seen.add(runner.path);
+    const label = `${runner.name}${runner.exists ? " — installed" : " — missing"}`;
+    options.push(`<option value="${escape(runner.path)}"${runner.path === current ? " selected" : ""}>${escape(label)}</option>`);
+  }
+  if (current && !seen.has(current)) {
+    options.push(`<option value="${escape(current)}" selected>${escape(fileName(current))} — selected</option>`);
+  }
+  const prefixMode = game.launch?.prefix_mode === "steam" ? "steam" : "umu";
+  const prefix = game.installation?.prefix || "";
+  const requiresSteam = Boolean(game.launch?.requires_steam);
+  pane.innerHTML = `<h3>Compatibility</h3>
+    <select id="gs-proton-select" aria-label="Proton runner">${options.join("")}</select>
+    <button class="primary pane-save" id="gs-proton-save">Save Proton</button>
+    <h3>Current selection</h3>
+    <p class="pane-note">Proton: ${escape(effective || "Not selected")}</p>
+    <p class="pane-note">Prefix: ${escape(prefix || "Not selected")}${prefix && !game.prefix_exists ? " (not created yet)" : ""}</p>
+    <h3>Prefix source</h3>
+    <p class="pane-note">Choose where this game keeps its Wine prefix. Steam mode uses Steam compatdata for this game's App ID.</p>
+    <select id="gs-prefix-select" aria-label="Prefix source">
+      <option value="steam"${prefixMode === "steam" ? " selected" : ""}${game.metadata_app_id ? "" : " disabled"}>Steam prefix</option>
+      <option value="umu"${prefixMode === "umu" ? " selected" : ""}>SteamTron prefix</option>
+    </select>
+    <button class="primary pane-save" id="gs-prefix-save">Save prefix source</button>
+    <h3>Steam client</h3>
+    <div class="settings-row"><div class="row-text"><strong>Require Steam to be running</strong><span>Off by default. When enabled, Play requires the Steam client and uses Steam compatdata.</span></div><label class="switch"><input type="checkbox" id="gs-steam-required"${requiresSteam ? " checked" : ""}><span></span></label></div>
+    <button class="primary pane-save" id="gs-steam-save">Save Steam requirement</button>`;
+
+  pane.querySelector("#gs-proton-save").onclick = async (event) => {
+    const stop = busy(event.target, "Saving…");
+    try {
+      await invoke("update_managed_launch_settings", {
+        gameId: game.id,
+        proton: pane.querySelector("#gs-proton-select").value,
+      });
+      await refreshGame();
+      stop();
+      showToast("Proton runner saved");
+      renderTab("compatibility");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  pane.querySelector("#gs-prefix-save").onclick = async (event) => {
+    const stop = busy(event.target, "Saving…");
+    try {
+      await invoke("update_managed_launch_settings", {
+        gameId: game.id,
+        prefixMode: pane.querySelector("#gs-prefix-select").value,
+      });
+      await refreshGame();
+      stop();
+      showToast("Prefix source saved");
+      renderTab("compatibility");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  pane.querySelector("#gs-steam-save").onclick = async (event) => {
+    const stop = busy(event.target, "Saving…");
+    try {
+      await invoke("update_managed_launch_settings", {
+        gameId: game.id,
+        requiresSteam: pane.querySelector("#gs-steam-required").checked,
+      });
+      await refreshGame();
+      stop();
+      showToast("Steam requirement saved");
+      renderTab("compatibility");
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+}
+
 function openManagedGameOptions(game) {
   if (document.body.classList.contains("fullscreen-mode")) {
     showToast("Game settings are available in desktop mode.", true);
@@ -877,25 +1023,7 @@ function openManagedGameOptions(game) {
       return;
     }
     if (key === "compatibility") {
-      const proton = latestGame.launch?.proton || latestGame.installation?.proton || "";
-      pane.innerHTML = `<h3>Compatibility</h3><p class="pane-note">Proton runner and prefix used when Play starts this game.</p>
-        <label for="gs-proton">Proton runner</label>
-        <input id="gs-proton" value="${escape(proton)}" placeholder="/path/to/proton">
-        <div class="update-actions"><button class="primary" id="gs-proton-save">Save runner</button></div>
-        <div class="game-options-paths">
-          ${row("Prefix", latestGame.installation?.prefix)}
-          ${row("Prefix source", latestGame.launch?.prefix_mode === "steam" ? "Steam compatdata" : "SteamTron prefix")}
-        </div>`;
-      pane.querySelector("#gs-proton-save").onclick = async (event) => {
-        const stop = busy(event.target, "Saving…");
-        try {
-          await invoke("update_managed_launch_settings", { gameId: game.id, proton: pane.querySelector("#gs-proton").value.trim() });
-          await refreshGame();
-          stop();
-          showToast("Proton runner saved");
-          renderTab("compatibility");
-        } catch (error) { stop(); showToast(String(error), true); }
-      };
+      void renderCompatibilityTab(pane, latestGame, refreshGame, renderTab);
       return;
     }
     if (key === "environment") {
@@ -2739,7 +2867,6 @@ async function renderGeneralSettings(host) {
     </div></section>
     <section class="settings-section"><h2>Steam diagnostics</h2><p>Validate Steam, fixes and the registration backend.</p><div class="settings-card">
       ${settingsRow("Doctor", "Checks Steam, the Lua folder, fixes and the registration backend.", '<button id="setting-doctor-run">Run checks</button>')}
-      <div id="setting-doctor-results"></div>
     </div></section>
     <section class="settings-section"><h2>Diagnostic logs</h2><p>One local folder per game. Completed logs: 8 MiB per file, 100 MiB total, 14-day retention. Cleanup runs before and after launches; active logs are never cleared.</p><div class="settings-card">
       ${settingsRow("Activity", activity, '<button id="setting-open-logs">Open logs folder</button>')}
@@ -2813,15 +2940,34 @@ async function renderGeneralSettings(host) {
   };
   host.querySelector("#setting-doctor-run").onclick = async (event) => {
     const stop = busy(event.target, "Checking…");
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `<div class="modal doctor-modal">
+      <div class="modal-head"><h2>Steam checks</h2><button class="modal-close" id="doctor-close" aria-label="Close">×</button></div>
+      <p class="pane-note" id="doctor-status">Running checks…</p>
+      <div class="doctor-results" id="doctor-results"><div class="settings-row"><div class="row-text"><span>Checking Steam, Lua, fixes and the registration backend…</span></div></div></div>
+      <div class="modal-actions"><button id="doctor-dismiss">Close</button></div>
+    </div>`;
+    document.body.appendChild(backdrop);
+    const close = () => backdrop.remove();
+    backdrop.querySelector("#doctor-close").onclick = close;
+    backdrop.querySelector("#doctor-dismiss").onclick = close;
+    backdrop.addEventListener("click", (click) => { if (click.target === backdrop) close(); });
     try {
       const report = await invoke("doctor_report");
-      stop();
       const rows = (report.checks || []).map((check) =>
         `<div class="settings-row"><div class="row-text"><strong>${escape(check.title)}</strong><span>${escape(check.detail)}</span></div><div class="row-control">${settingsStatusBadge(check.status)}</div></div>`
       ).join("");
-      host.querySelector("#setting-doctor-results").innerHTML = rows || '<div class="settings-row"><div class="row-text"><span>No checks reported.</span></div></div>';
-      showToast(report.healthy ? "Steam checks passed" : "Steam checks need attention", !report.healthy);
-    } catch (error) { stop(); showToast(String(error), true); }
+      backdrop.querySelector("#doctor-results").innerHTML = rows || '<div class="settings-row"><div class="row-text"><span>No checks reported.</span></div></div>';
+      backdrop.querySelector("#doctor-status").textContent = report.healthy
+        ? "All checks passed."
+        : "Some checks need attention.";
+    } catch (reportError) {
+      backdrop.querySelector("#doctor-status").textContent = "Checks could not run.";
+      backdrop.querySelector("#doctor-results").innerHTML = `<div class="settings-row"><div class="row-text"><span class="status error">${escape(String(reportError))}</span></div></div>`;
+    } finally {
+      stop();
+    }
   };
 }
 

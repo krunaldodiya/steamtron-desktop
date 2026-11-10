@@ -55,6 +55,16 @@ pub fn primary_target(game: &Game) -> Option<&LaunchTarget> {
         .or_else(|| game.launch_targets.first())
 }
 
+/// Honour the globally selected Proton runner when a game has no override.
+pub fn use_default_proton(game: &mut Game, default_proton: &str) {
+    if game.launch.proton.is_empty()
+        && game.installation.proton.is_empty()
+        && !default_proton.is_empty()
+    {
+        game.launch.proton = default_proton.to_owned();
+    }
+}
+
 fn proton_runner(game: &Game) -> Option<&Path> {
     for value in [&game.launch.proton, &game.installation.proton] {
         if !value.is_empty() {
@@ -215,6 +225,19 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn default_proton_fills_an_unset_game() {
+        let mut sample = game(
+            Path::new("/tmp"),
+            Path::new("/tmp/proton"),
+            Path::new("/tmp/prefix"),
+        );
+        sample.launch.proton.clear();
+        sample.installation.proton.clear();
+        use_default_proton(&mut sample, "/runners/proton");
+        assert_eq!(sample.launch.proton, "/runners/proton");
+    }
 
     #[cfg(unix)]
     #[test]

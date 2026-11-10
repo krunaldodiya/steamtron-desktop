@@ -365,16 +365,21 @@ fn main() -> Result<()> {
                 } => {
                     let library =
                         steamtron_core::library::Library::load().context("library not found")?;
-                    let game = library
+                    let mut game = library
                         .game(&game_id)
+                        .cloned()
                         .with_context(|| format!("game {game_id} is not in the library"))?;
+                    steamtron_core::runtime::use_default_proton(
+                        &mut game,
+                        &library.settings().default_proton,
+                    );
                     let target = match target {
                         Some(id) => game
                             .launch_targets
                             .iter()
                             .find(|candidate| candidate.id == id)
                             .with_context(|| format!("target {id} does not exist"))?,
-                        None => steamtron_core::runtime::primary_target(game)
+                        None => steamtron_core::runtime::primary_target(&game)
                             .context("game has no launch target")?,
                     };
                     let steam_root = steam::steam_root()?;
@@ -394,7 +399,7 @@ fn main() -> Result<()> {
                     let log = logs.join(format!("play-{stamp}.log"));
                     if steam_mode {
                         let app_id =
-                            steamtron_library::managed::steam_ready(game, &backend)?;
+                            steamtron_library::managed::steam_ready(&game, &backend)?;
                         let plan = steamtron_core::runtime::steam_launch_plan(app_id, &steam_root);
                         let summary = serde_json::json!({
                             "mode": "steam",
@@ -426,7 +431,7 @@ fn main() -> Result<()> {
                         let _ = child.wait();
                         return Ok(());
                     }
-                    let plan = steamtron_core::runtime::managed_launch_plan(game, target, &steam_root)?;
+                    let plan = steamtron_core::runtime::managed_launch_plan(&game, target, &steam_root)?;
                     let summary = serde_json::json!({
                         "mode": "proton",
                         "program": plan.program.display().to_string(),
