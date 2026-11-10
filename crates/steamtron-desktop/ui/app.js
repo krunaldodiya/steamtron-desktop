@@ -570,7 +570,7 @@ function renderManagedPreview(game) {
           <p class="game-meta" id="game-meta">${escape(provisionalMeta || (appId ? `Steam App ${appId}` : "Managed entry"))}</p>
           <p class="game-description${seed?.description ? "" : " hidden"}" id="game-description">${seed?.description ? escape(seed.description) : ""}</p>
           <p class="game-credits" id="game-credits">${escape(provisionalCredits)}</p>
-          <div class="game-actions">${action}<button id="managed-options" class="game-icon-button" title="Game options" aria-label="Game options"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span></div>
+          <div class="game-actions">${action}<button id="managed-options" class="game-icon-button" title="Game options" aria-label="Game options"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span><button id="managed-remove" class="danger">Remove from library</button></div>
           ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : "")}
           <div class="game-chips" id="game-chips"></div>
         </div>
@@ -579,6 +579,23 @@ function renderManagedPreview(game) {
   </div>`;
   detailEl.querySelector("#managed-back").onclick = () => setView(gameDetailOrigin);
   detailEl.querySelector("#managed-options").onclick = () => openManagedGameOptions(game);
+  const remove = detailEl.querySelector("#managed-remove");
+  if (remove) {
+    remove.onclick = async () => {
+      if (runningManaged.has(game.id)) { showToast("Stop the game before removing it.", true); return; }
+      if (!window.confirm(`Remove ${game.title} from your library?\n\nThe Steam registration is removed. Game files stay on disk.`)) return;
+      const stop = busy(remove, "Removing…");
+      try {
+        await invoke("remove_managed_game", { gameId: game.id });
+        managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
+        showToast(`Removed ${game.title} from your library`);
+        setView(gameDetailOrigin === "store" ? "store" : "library");
+      } catch (error) {
+        stop();
+        showToast(String(error), true);
+      }
+    };
+  }
   void hydrateGameDetail(game);
   const play = detailEl.querySelector("#managed-play");
   if (play && canPlay) play.onclick = () => startManagedGame(game, play);
@@ -640,10 +657,24 @@ async function hydrateGameDetail(game) {
     } catch (_error) { /* keep the fallback meta */ }
   }
   try {
-    const size = await invoke("managed_game_size", { gameId: game.id });
-    if (sizeNode) sizeNode.textContent = `Size: ${formatBytes(size)}`;
+    const [disk, download] = await Promise.all([
+      invoke("managed_game_size", { gameId: game.id }).catch(() => 0),
+      appId ? invoke("steam_download_size", { appid: appId }).catch(() => 0) : Promise.resolve(0),
+    ]);
+    if (sizeNode) {
+      if (disk > 0) {
+        sizeNode.textContent = `Size: ${formatBytes(disk)}`;
+        sizeNode.title = "Installed size on disk";
+      } else if (download > 0) {
+        sizeNode.textContent = `Size: ${formatBytes(download)}`;
+        sizeNode.title = "Download size via Steam depots";
+      } else {
+        sizeNode.textContent = "Size: —";
+        sizeNode.title = "Steam depot size is unavailable";
+      }
+    }
   } catch (_error) {
-    if (sizeNode) sizeNode.textContent = "Size: unavailable";
+    if (sizeNode) sizeNode.textContent = "Size: —";
   }
 }
 

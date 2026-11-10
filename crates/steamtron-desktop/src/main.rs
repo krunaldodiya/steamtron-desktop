@@ -2809,6 +2809,114 @@ async fn store_resolve_steam(title: String) -> Result<Option<u32>, String> {
     Ok(None)
 }
 
+
+fn steam_size_cache_path(appid: u32) -> std::path::PathBuf {
+    steamtron_core::paths::layout()
+        .cache_dir()
+        .join("store/sizes")
+        .join(format!("{appid}.json"))
+}
+
+#[tauri::command]
+async fn steam_download_size(appid: u32) -> Result<u64, String> {
+    let path = steam_size_cache_path(appid);
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            let fresh = value
+                .get("at")
+                .and_then(|at| at.as_u64())
+                .map(|at| {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|elapsed| elapsed.as_secs())
+                        .unwrap_or(0);
+                    now.saturating_sub(at) < 24 * 60 * 60
+                })
+                .unwrap_or(false);
+            if fresh {
+                if let Some(size) = value.get("size").and_then(|size| size.as_u64()) {
+                    return Ok(size);
+                }
+            }
+        }
+    }
+    let response = store_client()
+        .get(format!("https://api.steamcmd.net/v1/info/{appid}"))
+        .header("Accept", "application/json")
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Ok(0);
+    }
+    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let depots = payload
+        .get("data")
+        .and_then(|data| data.get(appid.to_string()))
+        .and_then(|info| info.get("depots"))
+        .and_then(|depots| depots.as_object());
+    let mut total = 0u64;
+    if let Some(depots) = depots {
+        for (key, depot) in depots {
+            if !key.chars().all(|character| character.is_ascii_digit()) {
+                continue;
+            }
+            if let Some(size) = depot.get("maxsize").and_then(|size| size.as_u64()) {
+                total = total.saturating_add(size);
+            }
+        }
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let _ = std::fs::write(&path, serde_json::json!({ "size": total, "at": now }).to_string());
+    Ok(total)
+}
+
+#[tauri::command]
+async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    if managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .contains_key(&game_id)
+    {
+        return Err("Stop the game before removing it from the library.".into());
+    }
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    let mut unregistered = false;
+    if let Some(registration) = game.steam.as_ref() {
+        if let Ok(backend) = platform_backend() {
+            if backend
+                .verify(&registration.app_id.to_string())
+                .map(|state| state.registered)
+                .unwrap_or(false)
+            {
+                backend
+                    .unregister(&registration.app_id.to_string())
+                    .map_err(|error| error.to_string())?;
+                unregistered = true;
+            }
+        }
+    }
+    library.remove_game(&game_id);
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "title": game.title,
+        "unregistered": unregistered,
+    }))
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
@@ -3010,6 +3118,8 @@ fn main() {
             reconcile_registrations,
             quit_app,
             managed_game_size,
+            steam_download_size,
+            remove_managed_game,
             proton_tier,
             igdb_id_for,
             store_resolve_steam,
