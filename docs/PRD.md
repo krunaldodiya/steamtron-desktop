@@ -22,7 +22,7 @@ Build a standalone desktop application for Windows and Linux that replaces the
 current in-Steam SteamTron plugin while preserving its functionality.
 
 The desktop app must not require users to understand or manually install
-SLSsteam, SteamTools, BetterSteamTools, LuaTools, Lumen, `stplug-in`, Proton, or
+SLSsteam Moon, SteamTools, BetterSteamTools, LuaTools, `stplug-in`, Proton, or
 fix-overlay tooling.
 
 ## 2. Goals
@@ -68,8 +68,8 @@ fix-overlay tooling.
 | UI | Tauri WebView; HTML/CSS/JS initially |
 | Linux fixes overlay | `fuse-overlayfs` |
 | Windows fixes overlay | Custom WinFsp union filesystem |
-| Linux unlock backend | SLSsteam; Lumen is optional and not required |
-| Windows unlock backend | BetterSteamTools primary; OpenSteamTool fallback |
+| Linux unlock backend | SLSsteam Moon |
+| Windows unlock backend | BetterSteamTools |
 | Lua/manifest format | Shared Lua + `.manifest` files |
 | Shared app model | One Rust core; platform adapters behind traits |
 | Legacy plugin | Keep until parity; then retire |
@@ -81,7 +81,7 @@ fix-overlay tooling.
 - Using LuaTools as a required dependency. It is a competing manager and its
   desktop application is Windows-only.
 - Using SteamTools as the primary Windows backend when BetterSteamTools is
-  available. BetterSteamTools is the active open-source fork of OpenSteamTool.
+  available. BetterSteamTools is the active backend.
 - Using `rclone mount` as a replacement for `fuse-overlayfs`. It does not
   implement overlay copy-up, whiteouts, or game-grade filesystem semantics.
 - Shipping the plugin's CEF injector into the desktop app.
@@ -97,7 +97,7 @@ flowchart LR
   Core --> Unlock[Unlock backend trait]
   Core --> Overlay[Overlay backend trait]
   Unlock --> LinuxUnlock[Linux: SLSsteam]
-  Unlock --> WinUnlock[Windows: BetterSteamTools/OpenSteamTool]
+  Unlock --> WinUnlock[Windows: BetterSteamTools]
   Overlay --> LinuxOverlay[Linux: fuse-overlayfs]
   Overlay --> WinOverlay[Windows: WinFsp union]
 ```
@@ -119,17 +119,17 @@ docs/                   PRD and engineering documentation
 ### Linux unlock
 
 - Required: SLSsteam (`SLSsteam.so` + wrapper)
-- Lumen: optional legacy CEF/UI sidecar; the desktop app does not require or install it
+- SLSsteam Moon is the Linux unlock backend. Lumen is not used or required.
 - Lua directory: `<Steam>/config/stplug-in`
 - Manifest store: `$XDG_CONFIG_HOME/SLSsteam/manifests` (legacy `$XDG_DATA_HOME/SLSsteam/manifests` entries are also cleaned on removal)
 - Depot manifests: `<Steam>/steamapps/depotcache`
-- Detection: SLSsteam `.so` present; Lumen is optional
+- Detection: SLSsteam Moon `.so` present
 - Fixes-only operation must work without SLSsteam.
 
 ### Windows unlock
 
 - Primary: BetterSteamTools
-- Fallback: OpenSteamTool
+- Backend: BetterSteamTools
 - Steam discovery: `STEAM_PATH`, Program Files, registry-backed install path
 - Lua directory: `<Steam>/config/stplug-in`, falling back to `<Steam>/config/lua`
 - Backend files: `OpenSteamTool.dll`, `dwmapi.dll`, `xinput1_4.dll`, `opensteamtool.toml`
@@ -318,7 +318,7 @@ The launch wrapper/overlay backend remains even after plugin removal.
 | 2026-11-03 | Use Tauri 2 and Rust for the desktop app |
 | 2026-11-03 | Linux overlay: fuse-overlayfs |
 | 2026-11-03 | Windows overlay: WinFsp union filesystem |
-| 2026-11-03 | Linux unlock: SLSsteam (Lumen optional) |
-| 2026-11-03 | Windows unlock: BetterSteamTools primary, OpenSteamTool fallback |
+| 2026-11-03 | Linux unlock: SLSsteam Moon |
+| 2026-11-03 | Windows unlock: BetterSteamTools |
 | 2026-11-03 | Do not use LuaTools, SteamTools-only, rclone, or ProjFS as the exact unified solution |
 | 2026-11-05 | Windows WinFsp prototype, Windows Steam lifecycle, and Windows data paths implemented |

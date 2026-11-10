@@ -323,24 +323,9 @@ async fn repair_steam_library() -> Result<String, String> {
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }
-            let home = std::env::var_os("HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let lumen = home.join(".local/share/Lumen");
-            let webkit = home.join(".local/share/Steam/steamui/webkit");
-            for file in ["luatools.js", "steamdb-webkit.css"] {
-                let _ = std::fs::remove_file(webkit.join(file));
-            }
-            if lumen.exists() {
-                let _ = std::process::Command::new("pkill")
-                    .arg("-f")
-                    .arg(lumen.join("lumen"))
-                    .status();
-                let _ = std::fs::remove_dir_all(&lumen);
-            }
             let repaired = repair_missing_appmanifests().unwrap_or_default();
             Ok(format!(
-                "SLSsteam is installed; Lumen was removed. Recreated {} appmanifest{}. You can now start Steam manually.",
+                "SLSsteam Moon is installed. Recreated {} appmanifest{}. You can now start Steam manually.",
                 repaired.len(),
                 if repaired.len() == 1 { "" } else { "s" }
             ))

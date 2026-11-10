@@ -292,7 +292,7 @@ trait RegistrationBackend {
 - **Linux**: SLSsteam-moon; writes the client's app/library state, verified by
   the backend's own metadata (`stplug-in`, library cache, added-times). The
   client may need a restart before ownership is visible.
-- **Windows**: BetterSteamTools (OpenSteamTool fallback); the same contract.
+- **Windows**: BetterSteamTools; the same contract.
 - The app never launches Steam; it asks the user and re-verifies on focus.
 - Registration removal is confirmed and only touches our App IDs.
 - Doctor checks: backend installed/ready, client version support, registration
@@ -301,7 +301,7 @@ trait RegistrationBackend {
 ## 13. Doctor — registration backend validation (must-have)
 
 Doctor validates **only** the Steam registration backends: SLSsteam-moon on Linux,
-BetterSteamTools / OpenSteamTool on Windows. It never inspects or repairs games,
+BetterSteamTools on Windows. It never inspects or repairs games,
 drives, runtimes, fixes, or tools; those surfaces own their own state and errors.
 
 ### 13.1 Contract

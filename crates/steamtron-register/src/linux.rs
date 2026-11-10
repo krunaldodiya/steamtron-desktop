@@ -1,4 +1,4 @@
-//! Linux adapter for SLSsteam/Lumen.
+//! Linux adapter for SLSsteam Moon.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -63,10 +63,6 @@ impl SlsteamBackend {
         self.data_home.join("SLSsteam")
     }
 
-    fn lumen_root(&self) -> PathBuf {
-        self.data_home.join("Lumen")
-    }
-
     fn manifest_store(&self) -> PathBuf {
         self.config_home.join("SLSsteam/manifests")
     }
@@ -87,15 +83,9 @@ impl RegistrationBackend for SlsteamBackend {
 
     fn status(&self) -> Result<BackendStatus, RegistrationError> {
         let sls = self.sls_root().join("SLSsteam.so");
-        let lumen = self.lumen_root().join("lumen");
         let lua_dir = self.lua_dir();
         let installed = sls.is_file();
         let ready = installed && lua_dir.parent().is_some_and(Path::exists);
-        let lumen_note = if lumen.exists() {
-            "Lumen is present but is not required by the desktop app."
-        } else {
-            "Lumen is not installed, which is supported."
-        };
         Ok(BackendStatus {
             platform: "linux",
             backend: self.id(),
@@ -104,9 +94,9 @@ impl RegistrationBackend for SlsteamBackend {
             steam_root: self.steam_root.display().to_string(),
             lua_dir: lua_dir.display().to_string(),
             details: if installed {
-                format!("SLSsteam hook detected. {lumen_note}")
+                "SLSsteam Moon hook detected.".into()
             } else {
-                format!("SLSsteam is not installed; fixes will work, library unlocking will not. {lumen_note}")
+                "SLSsteam Moon is not installed; fixes will work, library unlocking will not.".into()
             },
         })
     }

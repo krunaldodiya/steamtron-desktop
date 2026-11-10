@@ -330,14 +330,14 @@ pub fn launch_unlock_installer() -> Result<String, String> {
             }),
         ];
         let Some(source_script) = candidates.into_iter().flatten().find(|path| path.is_file()) else {
-            return Err("SLSsteam installer was not found. Install SLSsteam/Lumen and refresh Doctor.".into());
+            return Err("SLSsteam Moon installer was not found. Install SLSsteam Moon and refresh Doctor.".into());
         };
         let source = fs::read_to_string(&source_script).map_err(|error| error.to_string())?;
         let filtered = source
             .lines()
             .map(|line| {
                 if line.trim() == "install_lumen" {
-                    "# install_lumen skipped by SteamTron"
+                    "# install_lumen skipped: SteamTron uses SLSsteam Moon only"
                 } else {
                     line
                 }

@@ -4,8 +4,8 @@
 //! manifest and optional depot manifests. Content downloads are a separate
 //! concern: registration never fetches game data.
 //!
-//! * Linux — SLSsteam / Lumen (`<steam>/config/stplug-in/<appid>.lua`).
-//! * Windows — BetterSteamTools / OpenSteamTool.
+//! * Linux — SLSsteam Moon (`<steam>/config/stplug-in/<appid>.lua`).
+//! * Windows — BetterSteamTools.
 
 use std::collections::BTreeMap;
 use std::fs;

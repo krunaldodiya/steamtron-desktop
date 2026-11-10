@@ -1,4 +1,4 @@
-//! Windows adapter for BetterSteamTools/OpenSteamTool.
+//! Windows adapter for BetterSteamTools.
 
 use std::fs;
 use std::path::PathBuf;
@@ -70,9 +70,9 @@ impl RegistrationBackend for BtsBackend {
             steam_root: self.steam_root.display().to_string(),
             lua_dir: lua_dir.display().to_string(),
             details: if installed {
-                "BetterSteamTools/OpenSteamTool detected.".into()
+                "BetterSteamTools detected.".into()
             } else {
-                "BetterSteamTools/OpenSteamTool files are missing from the Steam root.".into()
+                "BetterSteamTools files are missing from the Steam root.".into()
             },
         })
     }

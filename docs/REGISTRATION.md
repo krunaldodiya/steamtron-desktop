@@ -22,8 +22,8 @@ Adding is rejected while `status().ready` is false; Doctor explains the repair.
 
 | Platform | id | Writes |
 |---|---|---|
-| Linux (SLSsteam/Lumen) | `slssteam-moon` | `<steam>/config/stplug-in/<appid>.lua`, manifests under `SLSsteam/manifests` and `steamapps/depotcache` |
-| Windows (BetterSteamTools/OpenSteamTool) | `bettersteamtools` | `<steam>/config/stplug-in` (or `config/lua`) `<appid>.lua`, manifests under `steamapps/depotcache` |
+| Linux (SLSsteam Moon) | `slssteam-moon` | `<steam>/config/stplug-in/<appid>.lua`, manifests under `SLSsteam/manifests` and `steamapps/depotcache` |
+| Windows (BetterSteamTools) | `bettersteamtools` | `<steam>/config/stplug-in` (or `config/lua`) `<appid>.lua`, manifests under `steamapps/depotcache` |
 
 Registration is idempotent: re-adding rewrites the same files.
 
