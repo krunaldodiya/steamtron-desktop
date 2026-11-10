@@ -2777,15 +2777,13 @@ fn store_title_matches(wanted: &str, candidate: &str) -> bool {
     !wanted.is_empty() && wanted == base_title(candidate)
 }
 
-#[tauri::command]
-async fn store_resolve_steam(title: String) -> Result<Option<u32>, String> {
-    let term = title.trim();
-    if term.is_empty() {
+async fn search_steam_title(term: &str) -> Result<Option<u32>, String> {
+    if term.trim().is_empty() {
         return Ok(None);
     }
     let response = store_client()
         .get("https://store.steampowered.com/api/storesearch/")
-        .query(&[("term", term), ("l", "english"), ("cc", "US")])
+        .query(&[("term", term.trim()), ("l", "english"), ("cc", "US")])
         .header("Accept", "application/json")
         .header("User-Agent", "steamtron-desktop")
         .send()
@@ -2809,6 +2807,69 @@ async fn store_resolve_steam(title: String) -> Result<Option<u32>, String> {
     Ok(None)
 }
 
+#[tauri::command]
+async fn store_resolve_steam(title: String) -> Result<Option<u32>, String> {
+    search_steam_title(&title).await
+}
+
+fn steam_id_cache_path() -> std::path::PathBuf {
+    steamtron_core::paths::layout()
+        .cache_dir()
+        .join("store/steam-ids.json")
+}
+
+fn read_steam_id_cache() -> serde_json::Map<String, serde_json::Value> {
+    let text = std::fs::read_to_string(steam_id_cache_path()).unwrap_or_default();
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn write_steam_id_cache(igdb_id: u64, steam_id: Option<u32>) {
+    let mut cache = read_steam_id_cache();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    cache.insert(
+        igdb_id.to_string(),
+        serde_json::json!({ "steam": steam_id, "at": now }),
+    );
+    let path = steam_id_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string(&cache) {
+        let _ = std::fs::write(path, text);
+    }
+}
+
+#[tauri::command]
+async fn store_resolve_steam_cached(igdb_id: u64, title: String) -> Result<Option<u32>, String> {
+    if let Some(entry) = read_steam_id_cache().get(&igdb_id.to_string()) {
+        let fresh = entry
+            .get("at")
+            .and_then(|at| at.as_u64())
+            .map(|at| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_secs())
+                    .unwrap_or(0);
+                now.saturating_sub(at) < 7 * 24 * 60 * 60
+            })
+            .unwrap_or(false);
+        if fresh {
+            return Ok(entry
+                .get("steam")
+                .and_then(|steam| steam.as_u64())
+                .map(|steam| steam as u32));
+        }
+    }
+    let steam = search_steam_title(&title).await?;
+    write_steam_id_cache(igdb_id, steam);
+    Ok(steam)
+}
 
 fn steam_size_cache_path(appid: u32) -> std::path::PathBuf {
     steamtron_core::paths::layout()
@@ -3141,6 +3202,7 @@ fn main() {
             proton_tier,
             igdb_id_for,
             store_resolve_steam,
+            store_resolve_steam_cached,
             fullscreen_state,
             toggle_fullscreen,
             set_ui_scale,

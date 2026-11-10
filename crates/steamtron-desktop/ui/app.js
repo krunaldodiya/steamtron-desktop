@@ -2841,7 +2841,7 @@ function renderStoreDetail() {
   detailEl.querySelector("#store-back").onclick = () => setView("store");
   renderGameChips(detailEl.querySelector("#store-chips"), chips);
   if (!item.steam_app_id) {
-    void invoke("store_resolve_steam", { title: item.name }).then((appid) => {
+    void invoke("store_resolve_steam_cached", { igdbId: Number(item.id), title: item.name }).then((appid) => {
       if (!appid || appView !== "store-game" || storeDetail?.id !== item.id) return;
       storeDetail = { ...storeDetail, steam_app_id: appid };
       const managed = managedGameForStoreItem(storeDetail);
@@ -2867,6 +2867,39 @@ function renderStoreDetail() {
   }
   const coverNode = detailEl.querySelector(".game-cover");
   if (coverNode) coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; });
+}
+
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length);
+  let index = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const current = index;
+      index += 1;
+      results[current] = await worker(items[current]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+const steamAvailability = new Map();
+
+async function resolveSteamForItem(item) {
+  if (item.steam_app_id) return item.steam_app_id;
+  const key = String(item.id);
+  if (steamAvailability.has(key)) return steamAvailability.get(key);
+  try {
+    const appid = await invoke("store_resolve_steam_cached", {
+      igdbId: Number(item.id),
+      title: item.name,
+    });
+    const value = appid || null;
+    steamAvailability.set(key, value);
+    return value;
+  } catch (_error) {
+    return undefined; // network failure: keep the item rather than emptying the page
+  }
 }
 
 function isPcCatalogItem(item) {
@@ -2895,7 +2928,7 @@ async function ensureStorePage(page, render = true) {
   if (render) renderStorePage();
   const target = storePage * STORE_PAGE_SIZE;
   let guard = 0;
-  while (storeBuffer.length < target && !storeExhausted && guard < 8) {
+  while (storeBuffer.length < target && !storeExhausted && guard < 20) {
     guard += 1;
     const nextServerPage = storeServerPage + 1;
     let data;
@@ -2916,8 +2949,18 @@ async function ensureStorePage(page, render = true) {
     if (generation !== storeGeneration) return; // a newer filter owns the buffer
     storeServerPage = nextServerPage;
     const items = data.items || [];
-    for (const item of items) {
-      if (!isPcCatalogItem(item)) continue;
+    const existing = new Set(storeBuffer.map((entry) => entry.id));
+    const candidates = items.filter((item) => isPcCatalogItem(item) && !existing.has(item.id));
+    // Verify Steam availability (cached per IGDB id) and keep only titles that
+    // genuinely exist on Steam; edition variants are matched.
+    const checked = await mapLimit(candidates, 5, async (item) => {
+      const steam = await resolveSteamForItem(item);
+      if (steam === undefined) return item;
+      if (!steam) return null;
+      return { ...item, steam_app_id: steam };
+    });
+    for (const item of checked) {
+      if (!item) continue;
       if (!storeBuffer.some((entry) => entry.id === item.id)) storeBuffer.push(item);
     }
     const totalPages = data.total_pages || 1;
