@@ -1703,8 +1703,8 @@ fn dir_has_entries(path: &std::path::Path) -> bool {
 fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     use std::fs::File;
     use std::process::Stdio;
-    use steamtron_core::library::{LaunchMode, Library};
-    use steamtron_core::runtime::{managed_launch_plan, primary_target, steam_launch_plan};
+    use steamtron_core::library::Library;
+    use steamtron_core::runtime::{managed_launch_plan, primary_target};
 
     require_auth()?;
     let library = Library::load().map_err(|error| error.to_string())?;
@@ -1714,11 +1714,38 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
     steamtron_core::runtime::use_default_proton(&mut game, &library.settings().default_proton);
     let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
-    let steam_mode = game.launch.requires_steam
-        || game
-            .steam
-            .as_ref()
-            .is_some_and(|registration| matches!(registration.launch_mode, LaunchMode::SteamClient));
+    if game.launch.requires_steam {
+        game.launch.environment.remove("PROTON_DISABLE_LSTEAMCLIENT");
+        if let Some(overrides) = game.launch.environment.get_mut("WINEDLLOVERRIDES") {
+            let kept: Vec<&str> = overrides
+                .split(';')
+                .filter(|part| !part.split('=').next().is_some_and(|name| name.trim().eq_ignore_ascii_case("lsteamclient")))
+                .filter(|part| !part.is_empty())
+                .collect();
+            if kept.is_empty() {
+                game.launch.environment.remove("WINEDLLOVERRIDES");
+            } else {
+                *overrides = kept.join(";");
+            }
+        }
+        if !steam_process_running() {
+            return Err(
+                "This game requires a running Steam client for Steamworks. Start Steam in the background, then try again."
+                    .into(),
+            );
+        }
+        // Steamworks games borrow Steam's compatdata prefix, but still launch
+        // through Proton directly; Steam is never asked to start the game.
+        if let Some(app_id) = game.metadata_app_id {
+            if game.launch.prefix_mode != "steam" {
+                game.launch.prefix_mode = "steam".into();
+                game.installation.prefix = steam_root
+                    .join("steamapps/compatdata")
+                    .join(app_id.to_string())
+                    .join("pfx");
+            }
+        }
+    }
 
     let layout = steamtron_core::paths::layout();
     let logs = layout.diagnostics_for(&game.id);
@@ -1734,93 +1761,69 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .try_clone()
         .map_err(|error| format!("{}: {error}", log.display()))?;
 
-    let (mut command, mode, program, arguments, overlay, fixes) = if steam_mode {
-        let backend = platform_backend().map_err(|error| error.to_string())?;
-        let app_id = steamtron_library::managed::steam_ready(&game, &backend)
-            .map_err(|error| error.to_string())?;
-        let plan = steam_launch_plan(app_id, &steam_root);
-        let command = if cfg!(unix) {
-            let mut command = std::process::Command::new("setsid");
-            command.arg(&plan.program).args(&plan.arguments);
-            command
-        } else {
-            let mut command = std::process::Command::new(&plan.program);
-            command.args(&plan.arguments);
-            command
-        };
-        (
-            command,
-            "steam",
-            plan.program.display().to_string(),
-            plan.arguments,
-            false,
-            None,
-        )
+    let (mut command, mode, program, arguments, overlay, fixes) = {
+    let target = primary_target(&game)
+        .cloned()
+        .ok_or_else(|| "This game has no launch target yet.".to_string())?;
+    let plan = managed_launch_plan(&game, &target, &steam_root)
+        .map_err(|error| error.to_string())?;
+    let fixes = managed_fixes_dir(&game);
+    let use_overlay =
+        game.fixes_enabled && fixes.as_ref().is_some_and(|path| dir_has_entries(path));
+    let command = if use_overlay {
+        let fixes_path = fixes.as_ref().expect("checked above").clone();
+        let appid = game
+            .metadata_app_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| game.id.clone());
+        let exe = steamtron_executable()?;
+        let mut command = std::process::Command::new(&exe);
+        command
+            .arg("--steamtron-overlay")
+            .args([
+                "--appid",
+                &appid,
+                "--common",
+                &game.installation.root.display().to_string(),
+                "--fixes",
+                &fixes_path.display().to_string(),
+                "--proton-path",
+                &plan.program.display().to_string(),
+                "--compat",
+                &game.installation.prefix.display().to_string(),
+                "--cwd",
+                &game.installation.root.display().to_string(),
+                "--steam-root",
+                &steam_root.display().to_string(),
+                "--",
+                &plan.arguments[1],
+            ])
+            .args(&target.arguments);
+        command
     } else {
-        let target = primary_target(&game)
-            .cloned()
-            .ok_or_else(|| "This game has no launch target yet.".to_string())?;
-        let plan = managed_launch_plan(&game, &target, &steam_root)
-            .map_err(|error| error.to_string())?;
-        let fixes = managed_fixes_dir(&game);
-        let use_overlay =
-            game.fixes_enabled && fixes.as_ref().is_some_and(|path| dir_has_entries(path));
-        let command = if use_overlay {
-            let fixes_path = fixes.as_ref().expect("checked above").clone();
-            let appid = game
-                .metadata_app_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| game.id.clone());
-            let exe = steamtron_executable()?;
-            let mut command = std::process::Command::new(&exe);
-            command
-                .arg("--steamtron-overlay")
-                .args([
-                    "--appid",
-                    &appid,
-                    "--common",
-                    &game.installation.root.display().to_string(),
-                    "--fixes",
-                    &fixes_path.display().to_string(),
-                    "--proton-path",
-                    &plan.program.display().to_string(),
-                    "--compat",
-                    &game.installation.prefix.display().to_string(),
-                    "--cwd",
-                    &game.installation.root.display().to_string(),
-                    "--steam-root",
-                    &steam_root.display().to_string(),
-                    "--",
-                    &plan.arguments[1],
-                ])
-                .args(&target.arguments);
-            command
-        } else {
-            plan.command()
-        };
-        (
-            command,
-            "proton",
-            plan.program.display().to_string(),
-            plan.arguments,
-            use_overlay,
-            fixes,
-        )
+        plan.command()
+    };
+    (
+        command,
+        "proton",
+        plan.program.display().to_string(),
+        plan.arguments,
+        use_overlay,
+        fixes,
+    )
     };
 
-    if !steam_mode {
-        if managed_runs()
-            .lock()
-            .map_err(|_| "Game state lock failed.".to_string())?
-            .contains_key(&game.id)
-        {
-            return Err("This game is already running.".into());
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
+    if managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .contains_key(&game.id)
+    {
+        return Err("This game is already running.".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
     }
     let child = command
         .stdin(Stdio::null())
@@ -1829,32 +1832,24 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .spawn()
         .map_err(|error| format!("Could not start the game: {error}"))?;
     let pid = child.id();
-    if !steam_mode {
-        managed_runs()
-            .lock()
-            .map_err(|_| "Game state lock failed.".to_string())?
-            .insert(game.id.clone(), pid);
-    }
+    managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .insert(game.id.clone(), pid);
     let tracked = game.id.clone();
     let observed_at = stamp as i64;
     std::thread::spawn(move || {
         let mut child = child;
-        if steam_mode {
-            // Steam owns the game process; a successful client launch is the
-            // only evidence available here.
+        // Match the UmuTron milestone: two continuous seconds of the launched
+        // process before it counts as a recent play.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let alive = child.try_wait().ok().flatten().is_none();
+        if alive {
             let _ = steamtron_core::play_history::record(&tracked, observed_at);
-        } else {
-            // Match the UmuTron milestone: two continuous seconds of the
-            // launched process before it counts as a recent play.
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            let alive = child.try_wait().ok().flatten().is_none();
-            if alive {
-                let _ = steamtron_core::play_history::record(&tracked, observed_at);
-            }
-            if let Ok(mut runs) = managed_runs().lock() {
-                if runs.get(&tracked) == Some(&pid) {
-                    runs.remove(&tracked);
-                }
+        }
+        if let Ok(mut runs) = managed_runs().lock() {
+            if runs.get(&tracked) == Some(&pid) {
+                runs.remove(&tracked);
             }
         }
         let _ = child.wait();
@@ -3287,6 +3282,32 @@ fn update_managed_launch_settings(
     }
     if let Some(requires_steam) = requires_steam {
         game.launch.requires_steam = requires_steam;
+        if requires_steam {
+            game.launch.environment.remove("PROTON_DISABLE_LSTEAMCLIENT");
+            if let Some(overrides) = game.launch.environment.get_mut("WINEDLLOVERRIDES") {
+                let kept: Vec<&str> = overrides
+                    .split(';')
+                    .filter(|part| !part.split('=').next().is_some_and(|name| name.trim().eq_ignore_ascii_case("lsteamclient")))
+                    .filter(|part| !part.is_empty())
+                    .collect();
+                if kept.is_empty() {
+                    game.launch.environment.remove("WINEDLLOVERRIDES");
+                } else {
+                    *overrides = kept.join(";");
+                }
+            }
+            if game.launch.prefix_mode != "steam" {
+                if let Some(app_id) = game.metadata_app_id {
+                    let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
+                    game.installation.prefix = steam_root
+                        .join("steamapps")
+                        .join("compatdata")
+                        .join(app_id.to_string())
+                        .join("pfx");
+                    game.launch.prefix_mode = "steam".into();
+                }
+            }
+        }
     }
     library
         .upsert_game(game.clone())

@@ -134,6 +134,13 @@ pub fn managed_launch_plan(
     if let Some(app_id) = game.metadata_app_id {
         environment.insert("SteamAppId".into(), app_id.to_string());
         environment.insert("SteamGameId".into(), app_id.to_string());
+        if game.launch.prefix_mode == "steam" {
+            let app_id = app_id.to_string();
+            environment.insert("STEAM_COMPAT_APP_ID".into(), app_id.clone());
+            environment.insert("SteamPath".into(), steam_root.display().to_string());
+            environment.insert("SteamOverlayGameId".into(), app_id);
+            environment.insert("STORE".into(), "steam".into());
+        }
     }
     Ok(LaunchPlan {
         program: proton.to_path_buf(),

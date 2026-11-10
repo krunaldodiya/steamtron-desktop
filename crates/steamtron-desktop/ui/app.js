@@ -601,7 +601,7 @@ function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
   const canPlay = managedReady(game) && Boolean(target);
-  const steamMode = Boolean(game.launch?.requires_steam || game.steam?.launch_mode === "steam_client");
+  const requiresSteam = Boolean(game.launch?.requires_steam);
   const running = runningManaged.has(game.id);
   const seed = gameDetailSeed;
   const provisionalHero = seed?.images?.hero || seed?.images?.portrait || (appId ? heroUrl(appId) : "");
@@ -615,7 +615,7 @@ function renderManagedPreview(game) {
     ? '<button id="managed-stop" class="primary">Stop</button>'
     : !installed
       ? '<button id="managed-download" class="primary">Download</button>'
-      : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>${steamMode ? "Play via Steam" : "Play"}</button>`;
+      : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
   detailEl.innerHTML = `<div class="page game-page game-detail">
     <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : "Library"}</button></div>
     <section class="game-hero${provisionalHero ? "" : " no-artwork"}" id="game-hero"${provisionalHero ? ` style="background-image:url('${escape(provisionalHero)}')"` : ""}>
@@ -628,7 +628,7 @@ function renderManagedPreview(game) {
           <p class="game-description${seed?.description ? "" : " hidden"}" id="game-description">${seed?.description ? escape(seed.description) : ""}</p>
           <p class="game-credits" id="game-credits">${escape(provisionalCredits)}</p>
           <div class="game-actions">${action}<button id="managed-remove" class="danger">Remove from library</button><button id="managed-options" class="game-icon-button" title="${document.body.classList.contains("fullscreen-mode") ? "Game settings are available in desktop mode" : "Game options"}" aria-label="Game options"${document.body.classList.contains("fullscreen-mode") ? " disabled" : ""}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span></div>
-          ${steamMode ? '<p class="muted game-note">Steam client required to launch.</p>' : (!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : ""))}
+          ${!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : requiresSteam ? '<p class="muted game-note">Steam must be running in the background for Steamworks. The game still launches directly through Proton.</p>' : "")}
           <div class="game-chips" id="game-chips"></div>
         </div>
       </div>
