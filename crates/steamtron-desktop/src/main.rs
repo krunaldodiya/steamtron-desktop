@@ -4398,12 +4398,9 @@ fn library_snapshot() -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
     let library = Library::load().map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({
-        "path": library.path().display().to_string(),
-        "settings": library.settings(),
-        "drives": library.drives(),
-        "games": library.games(),
-    }))
+    // Use the enriched projection: raw Game structs do not carry the live
+    // `installed` flag, prefix state, or recent-play order the UI depends on.
+    Ok(library_json(&library))
 }
 
 #[tauri::command]
