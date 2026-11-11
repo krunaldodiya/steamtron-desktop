@@ -661,6 +661,12 @@ function downloadTerminal(state) {
 
 function downloadSummary(state) {
   const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
+  if (!state.total) {
+    const parts = [];
+    if (state.completed > 0) parts.push(`${formatBytes(state.completed)} downloaded`);
+    if (state.message) parts.push(state.message);
+    return parts.join(" · ") || "Preparing download…";
+  }
   const parts = [
     `${percent.toFixed(1)}%`,
     `${formatBytes(state.completed || 0)} of ${formatBytes(state.total || 0)}`,
@@ -724,9 +730,7 @@ async function chooseDownloadDrive(game) {
     return root === drive.root || root.startsWith(`${drive.root.replace(/\/+$/, "")}/`);
   });
   select.innerHTML = drives.map((drive) => {
-    const disk = freeByPath.get(drive.root);
-    const free = disk ? ` · ${formatBytes(disk.free)} free` : "";
-    return `<option value="${escape(drive.id)}"${drive === (currentDrive || drives.find((entry) => entry.default) || drives[0]) ? " selected" : ""}>${escape(drive.label || drive.id)} · ${escape(drive.root)}${free}</option>`;
+    return `<option value="${escape(drive.id)}"${drive === (currentDrive || drives.find((entry) => entry.default) || drives[0]) ? " selected" : ""}>${escape(drive.label || drive.id)} · ${escape(drive.root)}</option>`;
   }).join("");
   startButton.disabled = false;
   meta.textContent = "Checking download size…";

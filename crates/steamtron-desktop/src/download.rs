@@ -304,6 +304,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         let mut last_bytes = 0u64;
         let mut last_time = Instant::now();
         let mut speed = 0.0f64;
+        let mut stage_message = "Preparing depots…".to_owned();
         let started = Instant::now();
         let reader = BufReader::new(stdout);
         for line in reader.lines().flatten() {
@@ -319,10 +320,31 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                             .map(|depot| depot.get("sizeBytes").and_then(|size| size.as_u64()).unwrap_or(0))
                             .sum();
                     }
+                    stage_message = "Preparing depot downloads…".into();
                 }
                 Some("started") => {
                     if let Some(dir) = value.get("downloadDir").and_then(|dir| dir.as_str()) {
                         download_dir = Some(PathBuf::from(dir));
+                    }
+                    stage_message = "Starting downloader…".into();
+                }
+                Some("status") => {
+                    stage_message = match value.get("step").and_then(|step| step.as_str()) {
+                        Some("disk_space") => "Checking disk space…",
+                        Some("downloading_manifests") => "Fetching depot manifests…",
+                        Some("generating_keys") => "Generating depot keys…",
+                        Some("keys_generated") => "Preparing downloader…",
+                        Some("starting_downloader") => "Starting downloader…",
+                        Some("running_downloader") => "Contacting depot sources…",
+                        Some("installing_files") => "Installing files…",
+                        Some("cancelled_cleanup") => "Cancelling…",
+                        _ => "Preparing download…",
+                    }
+                    .to_owned();
+                }
+                Some("manifest_source") => {
+                    if let Some(message) = value.get("message").and_then(|message| message.as_str()) {
+                        stage_message = message.to_owned();
                     }
                 }
                 Some("error") => {
@@ -377,7 +399,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                         state.total = total;
                         state.speed = speed;
                         state.status = "downloading".into();
-                        state.message = format!("Downloading · {}", elapsed_text(started.elapsed()));
+                        state.message = if completed == 0 {
+                            stage_message.clone()
+                        } else {
+                            format!("Downloading · {}", elapsed_text(started.elapsed()))
+                        };
                         publish(&app, state);
                     }
                 }
