@@ -1147,7 +1147,7 @@ function openManagedGameOptions(game) {
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
           <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game folder from your library."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
-          <div class="files-card"><p class="pane-note">Download the latest Lua/manifest bundle and refresh the Steam registration for this game.</p><button class="files-wide" id="files-regenerate">Regenerate manifests + app manifest</button></div>`;
+          <div class="files-card"><p class="pane-note">Download the latest Lua/manifest bundle and refresh the Steam registration for this game.</p><button class="files-wide" id="files-regenerate">Regenerate manifests + Steam registration</button></div>`;
 
         const status = pane.querySelector("#files-status");
         const refreshGameAndTab = async () => {
