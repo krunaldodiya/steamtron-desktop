@@ -930,6 +930,19 @@ fn reconcile_managed_installs() -> Result<usize, String> {
                 }
             }
         }
+        let malformed = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first()).is_some_and(|target| {
+            let first = std::fs::read(&target.executable).ok().map(|bytes| bytes.get(..2).map(|head| head == b"MZ").unwrap_or(false));
+            first == Some(false)
+                && std::fs::read_dir(&root).map(|entries| entries.flatten().any(|entry| entry.file_name().to_string_lossy().starts_with(".smd-depot-"))).unwrap_or(false)
+        });
+        if malformed {
+            let _ = std::fs::remove_dir_all(&root);
+            game.launch_targets.clear();
+            game.installation.confirmed = false;
+            changed += 1;
+            let _ = library.upsert_game(game);
+            continue;
+        }
         let installed = root.is_dir()
             && std::fs::read_dir(&root)
                 .map(|mut entries| entries.next().is_some())
@@ -1901,6 +1914,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    command.env("STEAMTRON_GAME_ID", &game.id);
     steamtron_core::prelaunch::run(&game, std::path::Path::new(&program), &stdout)?;
     let child = command
         .stdin(Stdio::null())
@@ -1943,7 +1957,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn process_evidence() -> Vec<(u32, String, String, Vec<String>)> {
+fn process_evidence() -> Vec<(u32, String, String, Vec<String>, String)> {
     use std::path::Path as StdPath;
 
     let self_pid = std::process::id();
@@ -1981,6 +1995,7 @@ fn process_evidence() -> Vec<(u32, String, String, Vec<String>)> {
             .trim_end_matches('.')
             .to_ascii_lowercase();
         let mut prefixes = Vec::new();
+        let mut steamtron_game = String::new();
         if let Ok(environment) = std::fs::read(directory.join("environ")) {
             for value in environment.split(|byte| *byte == 0) {
                 let text = String::from_utf8_lossy(value);
@@ -1988,11 +2003,13 @@ fn process_evidence() -> Vec<(u32, String, String, Vec<String>)> {
                     if name == "WINEPREFIX" || name == "STEAM_COMPAT_DATA_PATH" {
                         let path = StdPath::new(value);
                         prefixes.push(path.display().to_string());
+                    } else if name == "STEAMTRON_GAME_ID" {
+                        steamtron_game = value.to_owned();
                     }
                 }
             }
         }
-        result.push((pid, argv0, comm, prefixes));
+        result.push((pid, argv0, comm, prefixes, steamtron_game));
     }
     result
 }
@@ -2007,27 +2024,13 @@ fn game_process_pids(game: &steamtron_core::library::Game) -> Vec<u32> {
     else {
         return Vec::new();
     };
-    let filename = target
-        .executable
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
-    let stem = target
-        .executable
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("")
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
+    let _ = target;
     let mut result = Vec::new();
-    for (pid, argv0, comm, _prefixes) in process_evidence() {
-        let by_name = !filename.is_empty() && argv0 == filename;
-        let by_wine = matches!(argv0.as_str(), "wine" | "wine64" | "wine-preloader" | "wine64-preloader")
-            && !stem.is_empty()
-            && (comm == stem || (comm.len() >= 8 && stem.starts_with(&comm)));
-        if by_name || by_wine {
+    for (pid, _argv0, _comm, _prefixes, steamtron_game) in process_evidence() {
+        // Only processes launched by SteamTron carry this marker. Games
+        // started by another launcher (including UmuTron) must not flip our
+        // Play button into Stop.
+        if steamtron_game == game.id {
             result.push(pid);
         }
     }

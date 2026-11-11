@@ -57,6 +57,25 @@ pub(crate) fn resolve_smd() -> Result<PathBuf, String> {
         .ok_or_else(|| "smd was not found. Install UmuTron or set STEAMTRON_SMD.".to_string())
 }
 
+pub(crate) fn configure_smd(data_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(data_dir).map_err(|error| error.to_string())?;
+    let path = data_dir.join("settings.json");
+    let mut settings = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    // The bundled native chunk downloader rejects this provider's manifest
+    // shape (ZIP container magic); DepotDownloader is the reliable backend and
+    // is what UmuTron uses.
+    settings.insert("use_native_downloader".into(), serde_json::Value::Bool(false));
+    let payload = serde_json::to_vec_pretty(&settings).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension("json.steamtron.tmp");
+    std::fs::write(&temporary, payload).map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn smd_lua(app_id: u32, lua_path: &Path, cache: &Path) -> Result<PathBuf, String> {
     let content = std::fs::read_to_string(lua_path)
         .map_err(|error| format!("{}: {error}", lua_path.display()))?;
@@ -176,8 +195,20 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
             }
         }
         state.message = "Download complete".into();
-    } else if state.message.is_empty() {
-        state.message = "Download failed. See the diagnostic log.".into();
+    } else {
+        // A failed first download leaves smd's preallocated, possibly sparse
+        // files. Do not let them masquerade as an installed game.
+        let managed_root = steamtron_core::paths::layout()
+            .home()
+            .parent()
+            .map(|_| ())
+            .is_some();
+        if managed_root && root.is_dir() {
+            let _ = std::fs::remove_dir_all(root);
+        }
+        if state.message.is_empty() {
+            state.message = "Download failed. See the diagnostic log.".into();
+        }
     }
     if let Ok(mut states) = states().lock() {
         states.insert(game_id.to_owned(), state.clone());
@@ -223,6 +254,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         return Err("The Lua manifest is missing. Re-add the game first.".into());
     }
     let cache = steamtron_core::paths::layout().cache_dir().join("smd");
+    configure_smd(&cache.join("data"))?;
     let smd_lua = smd_lua(app_id, &lua, &cache)?;
     let smd = resolve_smd()?;
     std::fs::create_dir_all(&root).map_err(|error| format!("{}: {error}", root.display()))?;
@@ -305,6 +337,9 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         let mut last_time = Instant::now();
         let mut speed = 0.0f64;
         let mut stage_message = "Preparing depots…".to_owned();
+        let mut completion_ok: Option<bool> = None;
+        let mut failure_message: Option<String> = None;
+        let mut reported_percent = 0.0f64;
         let started = Instant::now();
         let reader = BufReader::new(stdout);
         for line in reader.lines().flatten() {
@@ -347,15 +382,53 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                         stage_message = message.to_owned();
                     }
                 }
+                Some("output") => {
+                    if let Some(line) = value.get("output").and_then(|output| output.as_str()) {
+                        if let Some(position) = line.find('%') {
+                            if let Ok(percent) = line[..position].trim().parse::<f64>() {
+                                reported_percent = percent.clamp(0.0, 100.0);
+                                stage_message = format!("Downloading · {reported_percent:.0}%");
+                            }
+                        }
+                    }
+                }
+                Some("depot_complete") => {
+                    stage_message = "Finalizing depot…".into();
+                }
                 Some("error") => {
+                    failure_message = value
+                        .get("message")
+                        .and_then(|message| message.as_str())
+                        .map(str::to_owned);
                     if let Ok(mut states) = states().lock() {
                         if let Some(state) = states.get_mut(&game_id) {
-                            state.message = value
-                                .get("message")
-                                .and_then(|message| message.as_str())
-                                .unwrap_or("download error")
-                                .to_owned();
+                            state.message = failure_message
+                                .clone()
+                                .unwrap_or_else(|| "download error".into());
                         }
+                    }
+                }
+                Some("complete") => {
+                    let diag = value.get("diag");
+                    let outcome = diag
+                        .and_then(|diag| diag.get("outcome"))
+                        .and_then(|outcome| outcome.as_str())
+                        .unwrap_or("");
+                    let params = value.get("params");
+                    let ok = params.and_then(|params| params.get("ok")).and_then(|ok| ok.as_u64());
+                    let total = params.and_then(|params| params.get("total")).and_then(|total| total.as_u64());
+                    let results_ok = value
+                        .get("results")
+                        .and_then(|results| results.as_array())
+                        .map(|results| results.iter().all(|result| result.get("error").is_none()))
+                        .unwrap_or(true);
+                    completion_ok = Some(
+                        outcome != "failed"
+                            && ok.zip(total).map(|(ok, total)| ok >= total).unwrap_or(true)
+                            && results_ok,
+                    );
+                    if let Some(message) = value.get("message").and_then(|message| message.as_str()) {
+                        stage_message = message.to_owned();
                     }
                 }
                 _ => {}
@@ -394,13 +467,17 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                 last_emit = now;
                 if let Ok(mut states) = states().lock() {
                     if let Some(state) = states.get_mut(&game_id) {
-                        state.percent = percent;
+                        state.percent = if total > 0 { percent } else { reported_percent };
                         state.completed = completed;
                         state.total = total;
                         state.speed = speed;
                         state.status = "downloading".into();
                         state.message = if completed == 0 {
-                            stage_message.clone()
+                            if reported_percent > 0.0 {
+                                format!("Downloading · {reported_percent:.0}%")
+                            } else {
+                                stage_message.clone()
+                            }
                         } else {
                             format!("Downloading · {}", elapsed_text(started.elapsed()))
                         };
@@ -409,7 +486,8 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                 }
             }
         }
-        let success = child.wait().map(|status| status.success()).unwrap_or(false);
+        let exit_success = child.wait().map(|status| status.success()).unwrap_or(false);
+        let success = exit_success && completion_ok.unwrap_or(true) && failure_message.is_none();
         finalize(&app, &game_id, &root, download_dir, success);
     });
 

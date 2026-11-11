@@ -314,6 +314,7 @@ function renderManagedLibrary() {
 }
 
 async function startManagedGame(game, button) {
+  if (!window.confirm(`Play ${game.title}?`)) return;
   const stop = button ? busy(button, "Starting…") : () => {};
   try {
     const result = await invoke("play_managed", { gameId: game.id });
@@ -663,6 +664,7 @@ function downloadSummary(state) {
   const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
   if (!state.total) {
     const parts = [];
+    if (state.percent > 0) parts.push(`${percent.toFixed(0)}%`);
     if (state.completed > 0) parts.push(`${formatBytes(state.completed)} downloaded`);
     if (state.message) parts.push(state.message);
     return parts.join(" · ") || "Preparing download…";
