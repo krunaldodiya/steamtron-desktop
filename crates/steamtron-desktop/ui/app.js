@@ -607,7 +607,7 @@ function renderManagedPreview(game) {
           ${downloading ? '<p class="muted game-note">Downloading game files…</p>' : (!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : requiresSteam ? '<p class="muted game-note">Steam must be running in the background for Steamworks. The game still launches directly through Proton.</p>' : ""))}
           <div class="download-inline hidden" id="managed-download-inline">
             <div class="download-inline-track"><span></span></div>
-            <div class="download-inline-meta"><span class="download-inline-meta-text"></span><button class="danger" id="managed-download-cancel">Cancel</button></div>
+            <div class="download-inline-meta"><span class="download-inline-meta-text"></span></div>
           </div>
           <div class="game-chips" id="game-chips"></div>
         </div>
@@ -627,15 +627,6 @@ function renderManagedPreview(game) {
       }
     }).catch(() => {});
   }
-  const cancelDownload = detailEl.querySelector("#managed-download-cancel");
-  if (cancelDownload) cancelDownload.onclick = async () => {
-    try {
-      await invoke("cancel_managed_download", { gameId: game.id });
-      managedDownloads.delete(game.id);
-      showToast("Download cancelled");
-      renderManagedMode();
-    } catch (error) { showToast(String(error), true); }
-  };
   detailEl.querySelector("#managed-options").onclick = () => openManagedGameOptions(game);
   const remove = detailEl.querySelector("#managed-remove");
   if (remove) {
@@ -679,6 +670,7 @@ function downloadSummary(state) {
     const seconds = Math.ceil((state.total - state.completed) / state.speed);
     parts.push(`ETA ${Math.floor(seconds / 60)}m ${seconds % 60}s`);
   }
+  if ((Number(state.completed) || 0) === 0 && state.message) parts.push(state.message);
   return parts.join(" · ");
 }
 
@@ -713,19 +705,10 @@ async function chooseDownloadDrive(game) {
   const startButton = backdrop.querySelector("#download-drive-start");
   backdrop.querySelector("#download-drive-close").onclick = close;
   backdrop.querySelector("#download-drive-cancel").onclick = close;
-  let size = 0;
   let drives = [];
-  let freeByPath = new Map();
   try {
-    const [snapshot, available] = await Promise.all([
-      invoke("library_snapshot"),
-      invoke("available_library_drives").catch(() => []),
-    ]);
+    const snapshot = await invoke("library_snapshot");
     drives = snapshot?.drives || [];
-    freeByPath = new Map((available || []).map((drive) => [drive.path, drive]));
-    if (game.metadata_app_id) {
-      size = await invoke("steam_download_size", { appid: game.metadata_app_id }).catch(() => 0);
-    }
   } catch (error) {
     meta.textContent = String(error);
     meta.classList.add("error");
@@ -745,8 +728,24 @@ async function chooseDownloadDrive(game) {
     const free = disk ? ` · ${formatBytes(disk.free)} free` : "";
     return `<option value="${escape(drive.id)}"${drive === (currentDrive || drives.find((entry) => entry.default) || drives[0]) ? " selected" : ""}>${escape(drive.label || drive.id)} · ${escape(drive.root)}${free}</option>`;
   }).join("");
-  meta.textContent = size > 0 ? `Download size: ${formatBytes(size)}` : "Download size: unknown";
   startButton.disabled = false;
+  meta.textContent = "Checking download size…";
+  if (game.metadata_app_id) {
+    void invoke("steam_download_size", { appid: game.metadata_app_id }).then((size) => {
+      meta.textContent = size > 0 ? `Download size: ${formatBytes(size)}` : "Download size: unknown";
+    }).catch(() => { meta.textContent = "Download size: unknown"; });
+  } else {
+    meta.textContent = "Download size: unknown";
+  }
+  void invoke("available_library_drives").catch(() => []).then((available) => {
+    const freeByPath = new Map((available || []).map((drive) => [drive.path, drive]));
+    for (const option of select.options) {
+      const drive = drives.find((entry) => entry.id === option.value);
+      const disk = drive ? freeByPath.get(drive.root) : null;
+      if (!drive || !disk) continue;
+      option.textContent = `${drive.label || drive.id} · ${drive.root} · ${formatBytes(disk.free)} free`;
+    }
+  });
   startButton.onclick = async () => {
     const driveId = select.value;
     if (!driveId) return;
@@ -754,7 +753,7 @@ async function chooseDownloadDrive(game) {
     try {
       const snapshot = await invoke("prepare_managed_download", { gameId: game.id, driveId });
       managedLibrary = snapshot;
-      managedDownloads.set(game.id, { gameId: game.id, status: "starting", percent: 0, completed: 0, total: size, speed: 0, message: "Starting download…" });
+      managedDownloads.set(game.id, { gameId: game.id, status: "starting", percent: 0, completed: 0, total: 0, speed: 0, message: "Contacting depot sources…" });
       close();
       renderManagedMode();
       await invoke("start_managed_download", { gameId: game.id });
