@@ -379,7 +379,7 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
     <p class="pane-note">This list is the only source of truth for what Play starts. The default launcher starts when there is one entry; otherwise Play asks which launcher to start. Collections such as Uncharted 4 + The Lost Legacy share one folder with separate executables; add each one here. Each launcher can have its own arguments, added after the shared options in General.</p>
     ${linked ? "" : '<p class="pane-note">Choose the Proton compatibility layer in the Compatibility tab. The current selection is used when this game is linked.</p>'}
     <div id="gs-link-launchers"></div>
-    <div class="update-actions"><button id="gs-link-add">Add launcher…</button></div>
+    <div class="pane-actions"><button id="gs-link-add">Add launcher…</button></div>
     <p class="pane-note" id="gs-link-status">A game with at least one launcher is linked automatically.</p>`;
   const rootInput = pane.querySelector("#gs-link-root");
   const list = pane.querySelector("#gs-link-launchers");
@@ -1008,7 +1008,7 @@ function openManagedGameOptions(game) {
           <input id="gs-prelaunch-path" value="${escape(draft.path)}" placeholder="No pre-launch script" readonly>
           <button id="gs-prelaunch-choose">Browse…</button>
         </div>
-        <div class="update-actions"><button id="gs-prelaunch-clear">Clear</button></div>
+        <div class="pane-actions"><button id="gs-prelaunch-clear">Clear</button></div>
         <p class="pane-note" id="gs-prelaunch-digest">${draft.sha256 ? `Approved SHA-256: ${escape(draft.sha256)}` : "No pre-launch script."}</p>
         <button class="primary pane-save" id="gs-general-save">Save general settings</button>`;
       const pathInput = pane.querySelector("#gs-prelaunch-path");
@@ -1088,7 +1088,7 @@ function openManagedGameOptions(game) {
       pane.innerHTML = `<h3>Debug</h3><p class="pane-note">Latest Proton diagnostic log for this game. The viewer shows the newest 64 KiB.</p>
         <pre class="game-log" id="gs-log">Loading…</pre>
         <p class="pane-note" id="gs-log-path"></p>
-        <div class="update-actions"><button id="gs-log-copy">Copy</button><button class="danger" id="gs-log-clear">Clear</button></div>`;
+        <div class="pane-actions"><button id="gs-log-copy">Copy</button><button class="danger" id="gs-log-clear">Clear</button></div>`;
       const logNode = pane.querySelector("#gs-log");
       const pathNode = pane.querySelector("#gs-log-path");
       void invoke("managed_game_log", { gameId: game.id }).then((log) => {

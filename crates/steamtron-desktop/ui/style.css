@@ -599,3 +599,6 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .files-wide { width:100%; padding:11px 16px; }
 .files-pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .files-pair button { width:100%; padding:11px 14px; }
+
+/* Game Settings action rows scroll with their section, unlike page footers. */
+.game-settings-pane .pane-actions { position:static; display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 0; padding:0; background:transparent; }
