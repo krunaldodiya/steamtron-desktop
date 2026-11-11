@@ -610,3 +610,4 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .profile-body h3 { margin:0 0 8px; font-size:18px; }
 .profile-body .auth-status { margin:0 0 4px; }
 .profile-modal .profile-actions { justify-content:center; padding:8px 24px 22px; margin:0; }
+.profile-modal .profile-actions button { min-width:140px; }
