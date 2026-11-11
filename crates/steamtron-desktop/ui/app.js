@@ -944,6 +944,7 @@ function openManagedGameOptions(game) {
   }
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
+  const installed = Boolean(game.installed) || game.installation?.mode === "linked";
   const tabs = [
     ["general", "General"],
     ["compatibility", "Compatibility"],
@@ -951,10 +952,10 @@ function openManagedGameOptions(game) {
     ["debug", "Debug"],
     ["link", "Game Link"],
   ];
-  if (game.metadata_app_id) {
-    tabs.push(["dlc", "DLC"], ["updates", "Updates"]);
+  if (installed) {
+    if (game.metadata_app_id) tabs.push(["dlc", "DLC"], ["updates", "Updates"]);
+    tabs.push(["files", "Installed Files"], ["fixes", "Fixes"]);
   }
-  tabs.push(["files", "Installed Files"], ["fixes", "Fixes"]);
   backdrop.innerHTML = `<div class="modal game-settings-modal">
     <div class="game-settings-head"><h2>Game Settings · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <div class="game-settings-body">
