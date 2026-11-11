@@ -4215,6 +4215,36 @@ fn clear_managed_game_logs(game_id: String) -> Result<usize, String> {
 
 
 #[tauri::command]
+fn prepare_managed_download(game_id: String, drive_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let mut game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    if !game_process_pids(&game).is_empty() {
+        return Err("Stop the game before downloading it.".into());
+    }
+    let drive = library
+        .drives()
+        .iter()
+        .find(|drive| drive.id == drive_id)
+        .cloned()
+        .ok_or_else(|| "unknown drive".to_string())?;
+    let layout = steamtron_core::library::game_layout(&drive.root, &game)
+        .map_err(|error| error.to_string())?;
+    game.installation.mode = steamtron_core::library::InstallMode::Managed;
+    game.installation.root = layout.content;
+    game.installation.prefix = layout.prefix;
+    game.installation.manifest = layout.manifest;
+    library.upsert_game(game).map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(library_json(&library))
+}
+
+#[tauri::command]
 fn start_managed_download(app: tauri::AppHandle, game_id: String) -> Result<download::DownloadState, String> {
     download::start(app, game_id)
 }
@@ -4412,6 +4442,7 @@ fn main() {
             set_managed_prelaunch,
             managed_game_log,
             start_managed_download,
+            prepare_managed_download,
             cancel_managed_download,
             managed_download_status,
             clear_managed_game_logs,

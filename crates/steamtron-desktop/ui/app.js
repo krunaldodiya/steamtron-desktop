@@ -583,11 +583,15 @@ function renderManagedPreview(game) {
     : (appId ? `Steam App ${appId}` : "Managed entry");
   const provisionalCredits = seed ? [seed.developers, seed.publishers].filter(Boolean).join(" · ") : "";
   const installed = managedReady(game);
+  const download = managedDownloads.get(game.id);
+  const downloading = Boolean(download && !downloadTerminal(download));
   const action = running
     ? '<button id="managed-stop" class="danger">Stop</button>'
-    : !installed
-      ? '<button id="managed-download" class="primary">Download</button>'
-      : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
+    : downloading
+      ? '<button id="managed-downloading" class="primary" disabled>Downloading</button>'
+      : !installed
+        ? '<button id="managed-download" class="primary">Download</button>'
+        : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
   detailEl.innerHTML = `<div class="page game-page game-detail">
     <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : "Library"}</button></div>
     <section class="game-hero${provisionalHero ? "" : " no-artwork"}" id="game-hero"${provisionalHero ? ` style="background-image:url('${escape(provisionalHero)}')"` : ""}>
@@ -600,15 +604,38 @@ function renderManagedPreview(game) {
           <p class="game-description${seed?.description ? "" : " hidden"}" id="game-description">${seed?.description ? escape(seed.description) : ""}</p>
           <p class="game-credits" id="game-credits">${escape(provisionalCredits)}</p>
           <div class="game-actions">${action}<button id="managed-remove" class="danger">Remove from library</button><button id="managed-options" class="game-icon-button" title="${document.body.classList.contains("fullscreen-mode") ? "Game settings are available in desktop mode" : "Game options"}" aria-label="Game options"${document.body.classList.contains("fullscreen-mode") ? " disabled" : ""}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span></div>
-          ${!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : requiresSteam ? '<p class="muted game-note">Steam must be running in the background for Steamworks. The game still launches directly through Proton.</p>' : "")}
+          ${downloading ? '<p class="muted game-note">Downloading game files…</p>' : (!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : requiresSteam ? '<p class="muted game-note">Steam must be running in the background for Steamworks. The game still launches directly through Proton.</p>' : ""))}
+          <div class="download-inline hidden" id="managed-download-inline">
+            <div class="download-inline-track"><span></span></div>
+            <div class="download-inline-meta"><span class="download-inline-meta-text"></span><button class="danger" id="managed-download-cancel">Cancel</button></div>
+          </div>
           <div class="game-chips" id="game-chips"></div>
         </div>
       </div>
     </section>
   </div>`;
   detailEl.querySelector("#managed-back").onclick = () => setView(gameDetailOrigin);
-  const download = detailEl.querySelector("#managed-download");
-  if (download) download.onclick = () => startManagedDownload(game);
+  const downloadButton = detailEl.querySelector("#managed-download");
+  if (downloadButton) downloadButton.onclick = () => startManagedDownload(game);
+  if (downloading) applyInlineDownload(game.id);
+  else if (!managedDownloads.has(game.id) && !downloadStatusChecked.has(game.id)) {
+    downloadStatusChecked.add(game.id);
+    void invoke("managed_download_status", { gameId: game.id }).then((state) => {
+      if (state && !downloadTerminal(state)) {
+        managedDownloads.set(game.id, state);
+        if (appView === "game" && managedSelectedId === game.id) renderManagedMode();
+      }
+    }).catch(() => {});
+  }
+  const cancelDownload = detailEl.querySelector("#managed-download-cancel");
+  if (cancelDownload) cancelDownload.onclick = async () => {
+    try {
+      await invoke("cancel_managed_download", { gameId: game.id });
+      managedDownloads.delete(game.id);
+      showToast("Download cancelled");
+      renderManagedMode();
+    } catch (error) { showToast(String(error), true); }
+  };
   detailEl.querySelector("#managed-options").onclick = () => openManagedGameOptions(game);
   const remove = detailEl.querySelector("#managed-remove");
   if (remove) {
@@ -634,66 +661,127 @@ function renderManagedPreview(game) {
   if (stopButton) stopButton.onclick = () => stopManagedGame(game, stopButton);
 }
 
-let downloadController = null;
+const managedDownloads = new Map();
+const downloadStatusChecked = new Set();
 
-function openDownloadModal(game) {
+function downloadTerminal(state) {
+  return ["done", "error", "cancelled"].includes(state?.status);
+}
+
+function downloadSummary(state) {
+  const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
+  const parts = [
+    `${percent.toFixed(1)}%`,
+    `${formatBytes(state.completed || 0)} of ${formatBytes(state.total || 0)}`,
+  ];
+  if (state.speed > 0) parts.push(`${formatBytes(state.speed)}/s`);
+  if (state.total > state.completed && state.speed > 0) {
+    const seconds = Math.ceil((state.total - state.completed) / state.speed);
+    parts.push(`ETA ${Math.floor(seconds / 60)}m ${seconds % 60}s`);
+  }
+  return parts.join(" · ");
+}
+
+function applyInlineDownload(gameId) {
+  const state = managedDownloads.get(gameId);
+  const inline = document.querySelector("#managed-download-inline");
+  if (!inline) return;
+  if (!state || downloadTerminal(state)) {
+    inline.classList.add("hidden");
+    return;
+  }
+  inline.classList.remove("hidden");
+  const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
+  const bar = inline.querySelector(".download-inline-track span");
+  const meta = inline.querySelector(".download-inline-meta-text");
+  if (bar) bar.style.width = `${percent}%`;
+  if (meta) meta.textContent = downloadSummary(state);
+}
+
+async function chooseDownloadDrive(game) {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal download-modal">
-    <div class="modal-head"><h2>Downloading · ${escape(game.title)}</h2></div>
-    <div class="download-bar"><span id="download-bar-fill"></span></div>
-    <p class="download-status" id="download-status">Preparing depots…</p>
-    <p class="download-meta" id="download-meta"></p>
-    <div class="modal-actions"><button class="danger" id="download-cancel">Cancel</button><button id="download-close" class="hidden">Close</button></div>
-  </div>`;
+  backdrop.innerHTML = `<div class="modal download-drive-modal"><div class="modal-head"><h2>Destination library drive</h2><button class="modal-close" id="download-drive-close" aria-label="Close">×</button></div>
+    <p class="pane-note">Choose where SteamTron installs the game content.</p>
+    <select id="download-drive-select" aria-label="Destination drive"><option>Loading drives…</option></select>
+    <p class="download-drive-meta" id="download-drive-meta">Checking download size…</p>
+    <div class="modal-actions"><button id="download-drive-cancel">Cancel</button><button class="primary" id="download-drive-start" disabled>Download</button></div></div>`;
   document.body.appendChild(backdrop);
-  const fill = backdrop.querySelector("#download-bar-fill");
-  const status = backdrop.querySelector("#download-status");
-  const meta = backdrop.querySelector("#download-meta");
-  const closeButton = backdrop.querySelector("#download-close");
-  const cancelButton = backdrop.querySelector("#download-cancel");
-  const close = () => { backdrop.remove(); downloadController = null; };
-  closeButton.onclick = close;
-  cancelButton.onclick = async () => {
-    try { await invoke("cancel_managed_download", { gameId: game.id }); }
-    catch (error) { showToast(String(error), true); }
-  };
-  return {
-    gameId: game.id,
-    update(state) {
-      const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
-      fill.style.width = `${percent}%`;
-      status.textContent = `${percent.toFixed(1)}% · ${formatBytes(state.completed || 0)} of ${formatBytes(state.total || 0)}`;
-      meta.textContent = state.speed > 0 ? `${formatBytes(state.speed)}/s · ${state.message || ""}` : (state.message || "");
-    },
-    complete(success, message) {
-      cancelButton.classList.add("hidden");
-      closeButton.classList.remove("hidden");
-      closeButton.classList.add("primary");
-      fill.style.width = success ? "100%" : fill.style.width;
-      status.textContent = success ? "Download complete" : `Download failed: ${message || "see diagnostics"}`;
-      status.classList.toggle("error", !success);
-      meta.textContent = "";
-    },
-    fail(message) {
-      cancelButton.classList.add("hidden");
-      closeButton.classList.remove("hidden");
-      closeButton.classList.add("primary");
-      status.textContent = `Download failed: ${message}`;
-      status.classList.add("error");
-    },
+  const close = () => backdrop.remove();
+  const select = backdrop.querySelector("#download-drive-select");
+  const meta = backdrop.querySelector("#download-drive-meta");
+  const startButton = backdrop.querySelector("#download-drive-start");
+  backdrop.querySelector("#download-drive-close").onclick = close;
+  backdrop.querySelector("#download-drive-cancel").onclick = close;
+  let size = 0;
+  let drives = [];
+  let freeByPath = new Map();
+  try {
+    const [snapshot, available] = await Promise.all([
+      invoke("library_snapshot"),
+      invoke("available_library_drives").catch(() => []),
+    ]);
+    drives = snapshot?.drives || [];
+    freeByPath = new Map((available || []).map((drive) => [drive.path, drive]));
+    if (game.metadata_app_id) {
+      size = await invoke("steam_download_size", { appid: game.metadata_app_id }).catch(() => 0);
+    }
+  } catch (error) {
+    meta.textContent = String(error);
+    meta.classList.add("error");
+    return;
+  }
+  if (!drives.length) {
+    select.innerHTML = '<option value="">No drives registered</option>';
+    meta.textContent = "Add a drive in Settings → Storage first.";
+    return;
+  }
+  const currentDrive = drives.find((drive) => {
+    const root = game.installation?.root || "";
+    return root === drive.root || root.startsWith(`${drive.root.replace(/\/+$/, "")}/`);
+  });
+  select.innerHTML = drives.map((drive) => {
+    const disk = freeByPath.get(drive.root);
+    const free = disk ? ` · ${formatBytes(disk.free)} free` : "";
+    return `<option value="${escape(drive.id)}"${drive === (currentDrive || drives.find((entry) => entry.default) || drives[0]) ? " selected" : ""}>${escape(drive.label || drive.id)} · ${escape(drive.root)}${free}</option>`;
+  }).join("");
+  meta.textContent = size > 0 ? `Download size: ${formatBytes(size)}` : "Download size: unknown";
+  startButton.disabled = false;
+  startButton.onclick = async () => {
+    const driveId = select.value;
+    if (!driveId) return;
+    const stop = busy(startButton, "Preparing…");
+    try {
+      const snapshot = await invoke("prepare_managed_download", { gameId: game.id, driveId });
+      managedLibrary = snapshot;
+      managedDownloads.set(game.id, { gameId: game.id, status: "starting", percent: 0, completed: 0, total: size, speed: 0, message: "Starting download…" });
+      close();
+      renderManagedMode();
+      await invoke("start_managed_download", { gameId: game.id });
+    } catch (error) {
+      stop();
+      managedDownloads.delete(game.id);
+      showToast(String(error), true);
+    }
   };
 }
 
-async function startManagedDownload(game) {
-  if (downloadController) return;
-  downloadController = openDownloadModal(game);
-  try {
-    await invoke("start_managed_download", { gameId: game.id });
-  } catch (error) {
-    downloadController.fail(String(error));
+function startManagedDownload(game) {
+  void chooseDownloadDrive(game);
+}
+
+function applyDownloadEvent(state) {
+  if (!state?.gameId) return;
+  managedDownloads.set(state.gameId, state);
+  if (appView === "game" && managedSelectedId === state.gameId) {
+    if (!document.querySelector("#managed-download-inline")) {
+      renderManagedMode();
+    } else {
+      applyInlineDownload(state.gameId);
+    }
   }
 }
+
 
 if (window.__TAURI__?.event?.listen) {
   window.__TAURI__.event.listen("fix-progress", (event) => {
@@ -701,18 +789,24 @@ if (window.__TAURI__?.event?.listen) {
     if (button) button.textContent = String(event.payload || "Working…");
   });
   window.__TAURI__.event.listen("download-progress", (event) => {
-    const state = event.payload || {};
-    if (downloadController && state.gameId === downloadController.gameId) downloadController.update(state);
+    applyDownloadEvent(event.payload || {});
   });
   window.__TAURI__.event.listen("download-complete", async (event) => {
     const payload = event.payload || {};
-    if (downloadController && payload.gameId === downloadController.gameId) {
-      downloadController.complete(Boolean(payload.success), payload.message || "");
+    if (payload.gameId) {
+      const current = managedDownloads.get(payload.gameId);
+      if (current) {
+        current.status = payload.success ? "done" : "error";
+        current.message = payload.message || current.message;
+      }
     }
     if (payload.success) {
       managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
+      if (payload.gameId) managedDownloads.delete(payload.gameId);
       if (["home", "library", "game"].includes(appView)) renderManagedMode();
       showToast("Download complete");
+    } else if (payload.gameId) {
+      if (appView === "game" && managedSelectedId === payload.gameId) renderManagedMode();
     }
   });
 }

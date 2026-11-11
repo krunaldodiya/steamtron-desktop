@@ -611,3 +611,13 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .profile-body .auth-status { margin:0 0 4px; }
 .profile-modal .profile-actions { justify-content:center; padding:8px 24px 22px; margin:0; }
 .profile-modal .profile-actions button { min-width:140px; }
+
+/* Inline game download progress. */
+.download-inline { margin-top:10px; max-width:560px; }
+.download-inline-track { height:8px; overflow:hidden; border-radius:999px; border:1px solid var(--border); background:var(--surface); }
+.download-inline-track span { display:block; height:100%; width:0; background:var(--accent); transition:width .3s ease; }
+.download-inline-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:7px; color:var(--muted); font-size:12px; }
+.download-inline-meta button { padding:5px 10px; font-size:11px; }
+.download-drive-modal #download-drive-select { width:100%; margin:14px 0 10px; }
+.download-drive-meta { color:var(--muted); font-size:12px; margin:4px 0 14px; }
+.download-drive-meta.error { color:#ff9b9b; }
