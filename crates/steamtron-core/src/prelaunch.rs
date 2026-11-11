@@ -5,7 +5,6 @@
 //! all game-specific fix logic belongs to the script and must be idempotent.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};

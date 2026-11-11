@@ -1139,19 +1139,46 @@ function openManagedGameOptions(game) {
         let size = 0;
         try { size = await invoke("managed_game_size", { gameId: game.id }); } catch (_error) { size = 0; }
         const name = game.installation?.root?.split(/[\\/]/).filter(Boolean).pop() || game.title;
+        const linked = latestGame.installation?.mode === "linked";
         pane.innerHTML = `<h3>Installed Files</h3>
           <div class="files-card files-size-card"><strong>Size of installation: ${formatBytes(size)} (${escape(name)})</strong><button id="files-browse">Browse…</button></div>
-          <div class="files-card">
-            <p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p>
-            <button class="primary files-verify" id="files-verify">Verify files integrity</button>
-            <p class="files-status" id="files-status"></p>
-          </div>`;
+          <div class="files-card"><p class="pane-note">Create a backup of the installed files to restore this game in the future.</p><button class="files-wide" id="files-backup">Back up game files…</button></div>
+          <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify">Verify files integrity</button><p class="files-status" id="files-status"></p></div>
+          <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
+          <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game folder from your library."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
+          <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
+          <div class="files-card"><p class="pane-note">Download the latest Lua/manifest bundle and refresh the Steam registration for this game.</p><button class="files-wide" id="files-regenerate">Regenerate manifests + app manifest</button></div>`;
+
+        const status = pane.querySelector("#files-status");
+        const refreshGameAndTab = async () => {
+          await refreshGame();
+          await renderFilesTab();
+        };
+        const run = async (button, work, message, done) => {
+          const stop = busy(button, "Working…");
+          try {
+            const result = await work();
+            stop();
+            showToast(typeof message === "function" ? message(result) : message);
+            if (done) await done();
+            else await refreshGameAndTab();
+          } catch (error) {
+            stop();
+            showToast(String(error), true);
+            if (status) { status.textContent = String(error); status.classList.add("error"); }
+          }
+        };
+
         pane.querySelector("#files-browse").onclick = async () => {
-          try { await invoke("open_path", { path: game.installation.root }); }
+          try { await invoke("open_path", { path: latestGame.installation.root }); }
           catch (error) { showToast(String(error), true); }
         };
+        pane.querySelector("#files-backup").onclick = (event) => run(event.currentTarget, async () => {
+          const result = await invoke("backup_managed_game", { gameId: game.id });
+          if (!result) throw new Error("Backup cancelled.");
+          return result.path;
+        }, (path) => `Backup written to ${path}`, async () => {});
         pane.querySelector("#files-verify").onclick = async (event) => {
-          const status = pane.querySelector("#files-status");
           const stop = busy(event.target, "Verifying…");
           status.textContent = "Verifying files against depot manifests…";
           status.classList.remove("error");
@@ -1168,6 +1195,65 @@ function openManagedGameOptions(game) {
             status.classList.add("error");
           }
         };
+        pane.querySelector("#files-move").onclick = async () => {
+          const snapshot = await invoke("library_snapshot").catch(() => managedLibrary);
+          const drives = snapshot?.drives || [];
+          if (!drives.length) { showToast("No other drives are registered.", true); return; }
+          const backdrop = document.createElement("div");
+          backdrop.className = "modal-backdrop";
+          backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Move install folder</h2><button class="modal-close" id="move-close">×</button></div><p class="pane-note">Choose a registered drive. Existing files are moved; no copy is left behind.</p><div class="drive-choices">${drives.map((drive) => `<label class="drive-choice"><input type="radio" name="move-drive" value="${escape(drive.id)}"><span class="drive-choice-copy"><strong>${escape(drive.label || drive.id)}</strong><small>${escape(drive.root)}</small></span></label>`).join("")}</div><div class="modal-actions"><button id="move-cancel">Cancel</button><button class="primary" id="move-confirm" disabled>Move</button></div></div>`;
+          document.body.appendChild(backdrop);
+          const confirm = backdrop.querySelector("#move-confirm");
+          backdrop.querySelector("#move-close").onclick = () => backdrop.remove();
+          backdrop.querySelector("#move-cancel").onclick = () => backdrop.remove();
+          for (const radio of backdrop.querySelectorAll("input[name=move-drive]")) {
+            radio.onchange = () => { confirm.disabled = false; };
+          }
+          confirm.onclick = async () => {
+            const drive = backdrop.querySelector("input[name=move-drive]:checked")?.value;
+            if (!drive) return;
+            const stop = busy(confirm, "Moving…");
+            try {
+              await invoke("move_managed_game", { gameId: game.id, driveId: drive });
+              backdrop.remove();
+              showToast("Install folder moved");
+              await refreshGameAndTab();
+            } catch (error) { stop(); showToast(String(error), true); }
+          };
+        };
+        pane.querySelector("#files-unlink").onclick = async () => {
+          if (!window.confirm("Unlink this game? The library entry and Steam registration are removed; all game files stay on disk.")) return;
+          try {
+            await invoke("remove_managed_game", { gameId: game.id });
+            close();
+            setView("library");
+            showToast("Game unlinked; files were kept");
+          } catch (error) { showToast(String(error), true); }
+        };
+        pane.querySelector("#files-uninstall").onclick = async () => {
+          if (!window.confirm("Uninstall this game? The entire game folder is permanently deleted.")) return;
+          if (!window.confirm(`Delete ${latestGame.title}'s installed files permanently? This cannot be undone.`)) return;
+          try {
+            await invoke("uninstall_managed_game", { gameId: game.id });
+            close();
+            managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
+            setView("library");
+            showToast("Game uninstalled");
+          } catch (error) { showToast(String(error), true); }
+        };
+        pane.querySelector("#files-export-saves").onclick = (event) => run(event.currentTarget, async () => {
+          const path = await invoke("export_managed_saves", { gameId: game.id });
+          if (!path) throw new Error("Export cancelled.");
+          return path;
+        }, (path) => `Saves exported to ${path}`, async () => {});
+        pane.querySelector("#files-import-saves").onclick = (event) => run(event.currentTarget, async () => {
+          const result = await invoke("import_managed_saves", { gameId: game.id });
+          if (!result) throw new Error("Import cancelled.");
+          return result;
+        }, (result) => `Imported ${result.files} save file${result.files === 1 ? "" : "s"}`, async () => {});
+        pane.querySelector("#files-regenerate").onclick = (event) => run(event.currentTarget,
+          () => invoke("regenerate_managed_manifests", { gameId: game.id }),
+          (result) => `Regenerated manifests (${result.manifests} depot manifest${result.manifests === 1 ? "" : "s"})`);
       };
       void renderFilesTab();
       return;
@@ -3288,6 +3374,9 @@ async function renderStorageSettings(host) {
       ${rows || '<div class="settings-row"><div class="row-text"><span>No drives registered yet.</span></div></div>'}
       <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted partition. No folder or game file is created.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
     </div></section>
+    <section class="settings-section"><h2>Game backups</h2><p>Restore a portable SteamTron game backup to a registered game or create its library entry automatically.</p><div class="settings-card">
+      <div class="settings-row"><div class="row-text"><strong>Restore game backup</strong><span>Adds the game to your library automatically if it is not already present.</span></div><div class="row-control"><button id="setting-restore-game" class="primary">Restore…</button></div></div>
+    </div></section>
     <section class="settings-section"><h2>Data folder</h2><p>Library index, tools, diagnostics and launch state for this installation.</p><div class="settings-card">
       ${settingsRow("SteamTron data", dataDir || "Unavailable", `<button id="setting-open-data">Open folder</button>`)}
       ${settingsRow("Library file", libraryPath || "Unavailable", "")}
@@ -3320,6 +3409,18 @@ async function renderStorageSettings(host) {
       } catch (error) { showToast(String(error), true); }
     };
   }
+  host.querySelector("#setting-restore-game").onclick = async (event) => {
+    const stop = busy(event.target, "Restoring…");
+    try {
+      const result = await invoke("restore_game_backup");
+      stop();
+      if (!result) { showToast("Restore cancelled."); return; }
+      managedLibrary = result.library;
+      await load();
+      await renderSettingsPage();
+      showToast(`Restored ${result.title || "game"} to ${result.root}`);
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
   host.querySelector("#setting-refresh-drives").onclick = () => { void renderSettingsPage(); };
   host.querySelector("#setting-add-drive").onclick = () => { void showAddDriveDialog(); };
   const openData = host.querySelector("#setting-open-data");

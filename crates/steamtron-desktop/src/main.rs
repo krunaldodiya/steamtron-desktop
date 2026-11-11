@@ -3166,6 +3166,384 @@ fn directory_size(root: &std::path::Path) -> u64 {
     total
 }
 
+fn copy_tree(source: &std::path::Path, destination: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    for entry in std::fs::read_dir(source).map_err(|error| error.to_string())?.flatten() {
+        let path = entry.path();
+        let target = destination.join(entry.file_name());
+        if path.is_dir() {
+            copy_tree(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn backup_managed_game(game_id: String) -> Result<Option<serde_json::Value>, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library.game(&game_id).ok_or_else(|| "unknown game".to_string())?;
+    if !game.installation.root.is_dir() {
+        return Err("The installation folder does not exist.".into());
+    }
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Back up game files")
+        .set_file_name(format!("{}_backup.tar.gz", steamtron_core::fixes::export_name(&game.title).trim_end_matches(".zip")))
+        .add_filter("Game backup", &["tar.gz", "tgz"])
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    if path.starts_with(&game.installation.root) {
+        return Err("Choose a backup location outside the game folder.".into());
+    }
+    let root = game.installation.root.clone();
+    let destination = path.clone();
+    let metadata = serde_json::json!({
+        "format": 1,
+        "game_id": game.id,
+        "title": game.title,
+        "appid": game.metadata_app_id,
+        "created_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0),
+    });
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut archive = tar::Builder::new(encoder);
+        let payload = serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?;
+        let mut header = tar::Header::new_gnu();
+        header.set_size(payload.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, ".steamtron-backup.json", payload.as_slice()).map_err(|error| error.to_string())?;
+        archive.append_dir_all(".", &root).map_err(|error| error.to_string())?;
+        archive.finish().map_err(|error| error.to_string())?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|error| format!("backup task failed: {error}"))??;
+    Ok(Some(serde_json::json!({ "path": path.display().to_string() })))
+}
+
+#[derive(serde::Deserialize)]
+struct BackupMetadata {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    appid: Option<u32>,
+    #[serde(default)]
+    game_id: String,
+}
+
+#[tauri::command]
+async fn restore_game_backup() -> Result<Option<serde_json::Value>, String> {
+    use steamtron_core::library::Library;
+    use steamtron_library::managed::{add_managed_game, ManagedAddRequest, ManifestProvider};
+
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Restore game backup")
+        .add_filter("SteamTron backup", &["tar.gz", "tgz"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let archive_path = path.clone();
+    let metadata = tauri::async_runtime::spawn_blocking(move || -> Result<BackupMetadata, String> {
+        let file = std::fs::File::open(&archive_path).map_err(|error| error.to_string())?;
+        let decoder = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        for entry in archive.entries().map_err(|error| error.to_string())? {
+            let mut entry = entry.map_err(|error| error.to_string())?;
+            if entry.path().map(|path| path == std::path::Path::new(".steamtron-backup.json")).unwrap_or(false) {
+                let mut bytes = Vec::new();
+                std::io::Read::read_to_end(&mut entry, &mut bytes).map_err(|error| error.to_string())?;
+                return serde_json::from_slice::<BackupMetadata>(&bytes).map_err(|error| error.to_string());
+            }
+        }
+        Err("This is not a SteamTron game backup.".into())
+    })
+    .await
+    .map_err(|error| format!("backup read failed: {error}"))??;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let existing = metadata.appid
+        .and_then(|appid| library.game_by_app_id(appid).cloned())
+        .or_else(|| if metadata.game_id.is_empty() { None } else { library.game(&metadata.game_id).cloned() })
+        .or_else(|| library.games().iter().find(|game| game.title == metadata.title).cloned());
+    let target_root = if let Some(game) = existing {
+        game.installation.root.clone()
+    } else {
+        let appid = metadata.appid.ok_or_else(|| "The backup has no Steam App ID and the game is not in the library.".to_string())?;
+        let title = if metadata.title.trim().is_empty() { format!("Steam App {appid}") } else { metadata.title.clone() };
+        let drive = library.default_drive().cloned().or_else(|| library.drives().first().cloned()).ok_or_else(|| "Register a drive before restoring a backup.".to_string())?;
+        let backend = platform_backend().map_err(|error| error.to_string())?;
+        let added = add_managed_game(
+            ManagedAddRequest {
+                app_id: appid,
+                title,
+                drive_root: drive.root.clone(),
+                drive_label: drive.label.clone(),
+                provider: ManifestProvider::Api,
+                proton: String::new(),
+            },
+            &backend,
+        )
+        .map_err(|error| error.to_string())?;
+        std::path::PathBuf::from(added.root)
+    };
+    std::fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
+    let extract_root = target_root.clone();
+    let restore_path = path.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let file = std::fs::File::open(&restore_path).map_err(|error| error.to_string())?;
+        let decoder = flate2::read::GzDecoder::new(file);
+        let mut archive = tar::Archive::new(decoder);
+        for entry in archive.entries().map_err(|error| error.to_string())? {
+            let mut entry = entry.map_err(|error| error.to_string())?;
+            let entry_path = entry.path().map_err(|error| error.to_string())?.into_owned();
+            if entry_path == std::path::Path::new(".steamtron-backup.json") {
+                continue;
+            }
+            let relative = entry_path.strip_prefix(".").unwrap_or(&entry_path);
+            let destination = extract_root.join(relative);
+            if !destination.starts_with(&extract_root) {
+                return Err("Backup contains an unsafe path.".into());
+            }
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            if entry.header().entry_type().is_dir() {
+                std::fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+            } else {
+                let mut output = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
+                std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("restore task failed: {error}"))??;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    Ok(Some(serde_json::json!({
+        "title": metadata.title,
+        "root": target_root.display().to_string(),
+        "library": library_json(&library),
+    })))
+}
+
+#[tauri::command]
+fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let mut game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
+    let drive = library.drives().iter().find(|drive| drive.id == drive_id).cloned().ok_or_else(|| "unknown drive".to_string())?;
+    let layout = steamtron_core::library::game_layout(&drive.root, &game).map_err(|error| error.to_string())?;
+    if game.installation.root == layout.content {
+        return Err("The game is already on that drive.".into());
+    }
+    if layout.content.exists() {
+        return Err("A game folder already exists on the target drive.".into());
+    }
+    if let Some(parent) = layout.content.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    if std::fs::rename(&game.installation.root, &layout.content).is_err() {
+        copy_tree(&game.installation.root, &layout.content)?;
+        std::fs::remove_dir_all(&game.installation.root).map_err(|error| error.to_string())?;
+    }
+    if let Some(fixes) = managed_fixes_dir(&game) {
+        if fixes.is_dir() {
+            if let Some(parent) = layout.fixes.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::rename(&fixes, &layout.fixes);
+        }
+    }
+    game.installation.root = layout.content;
+    game.installation.manifest = layout.manifest;
+    game.installation.mode = steamtron_core::library::InstallMode::Managed;
+    library.upsert_game(game).map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(library_json(&library))
+}
+
+#[tauri::command]
+fn uninstall_managed_game(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
+    if library.game(&game_id).is_some() {
+        if !game_process_pids(&game).is_empty() {
+            return Err("Stop the game before uninstalling it.".into());
+        }
+    }
+    if game.installation.mode == steamtron_core::library::InstallMode::Linked {
+        return Err("Unlink external games instead of deleting their folder.".into());
+    }
+    let root = game.installation.root.clone();
+    if root.as_os_str().is_empty() || root == std::path::Path::new("/") {
+        return Err("Refusing to delete an unsafe game folder.".into());
+    }
+    if let Ok(backend) = platform_backend() {
+        if let Some(registration) = game.steam.as_ref() {
+            let _ = backend.unregister(&registration.app_id.to_string());
+        }
+    }
+    if root.exists() {
+        std::fs::remove_dir_all(&root).map_err(|error| format!("{}: {error}", root.display()))?;
+    }
+    library.remove_game(&game_id);
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({ "uninstalled": true, "title": game.title }))
+}
+
+#[tauri::command]
+async fn regenerate_managed_manifests(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
+    let app_id = game.metadata_app_id.ok_or_else(|| "This game has no Steam App ID.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundle = steamtron_library::download_bundle(&app_id.to_string()).map_err(|error| error.to_string())?;
+        let backend = platform_backend().map_err(|error| error.to_string())?;
+        backend
+            .register(&steamtron_register::RegistrationRequest {
+                app_id: &app_id.to_string(),
+                title: &game.title,
+                lua: &bundle.lua,
+                manifests: &bundle.manifests,
+            })
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>(serde_json::json!({
+            "appid": app_id,
+            "manifests": bundle.manifests.len(),
+        }))
+    })
+    .await
+    .map_err(|error| format!("manifest task failed: {error}"))?
+}
+
+#[tauri::command]
+fn export_managed_saves(game_id: String) -> Result<Option<String>, String> {
+    use std::io::Write;
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library.game(&game_id).ok_or_else(|| "unknown game".to_string())?;
+    let Some(path) = rfd::FileDialog::new().set_title("Export save snapshot").set_file_name(format!("{}_saves.zip", steamtron_core::fixes::export_name(&game.title).trim_end_matches(".zip"))).add_filter("ZIP", &["zip"]).save_file() else {
+        return Ok(None);
+    };
+    let mut files = Vec::new();
+    if let Some(mut folders) = save_folders(game) {
+        for (relative, folder) in folders.drain(..) {
+            if let Ok(entries) = walk_files(&folder) {
+                for file in entries {
+                    if let Ok(inside) = file.strip_prefix(&folder) {
+                        let name = format!("{relative}/{}", inside.display()).replace('\\', "/");
+                        files.push((file.clone(), name));
+                    }
+                }
+            }
+        }
+    }
+    if files.is_empty() {
+        return Err("No save files were found for this game yet.".into());
+    }
+    let file = std::fs::File::create(&path).map_err(|error| error.to_string())?;
+    let mut writer = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (source, name) in files {
+        writer.start_file(name, options).map_err(|error| error.to_string())?;
+        let bytes = std::fs::read(&source).map_err(|error| error.to_string())?;
+        writer.write_all(&bytes).map_err(|error| error.to_string())?;
+    }
+    writer.finish().map_err(|error| error.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+fn import_managed_saves(game_id: String) -> Result<Option<serde_json::Value>, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library.game(&game_id).ok_or_else(|| "unknown game".to_string())?;
+    let Some(path) = rfd::FileDialog::new().set_title("Import save snapshot").add_filter("ZIP", &["zip"]).pick_file() else {
+        return Ok(None);
+    };
+    let drive_c = game.installation.prefix.join("drive_c");
+    if drive_c.as_os_str().is_empty() || !game.installation.prefix.is_dir() {
+        return Err("This game does not have an active prefix.".into());
+    }
+    let file = std::fs::File::open(&path).map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let mut count = 0;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(name) = entry.enclosed_name() else { continue };
+        let name_text = name.to_string_lossy().replace('\\', "/");
+        let destination = if name_text.starts_with("SAVES/") || name_text.starts_with("Savegame/") || name_text.starts_with("bin/SAVES/") || name_text.starts_with("bin/Savegame/") {
+            game.installation.root.join(&name)
+        } else {
+            drive_c.join(&name)
+        };
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut output = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
+        std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+        count += 1;
+    }
+    Ok(Some(serde_json::json!({ "files": count })))
+}
+
+fn walk_files(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut result = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        for entry in std::fs::read_dir(&directory).map_err(|error| error.to_string())?.flatten() {
+            let path = entry.path();
+            if path.is_dir() { stack.push(path); } else { result.push(path); }
+        }
+    }
+    Ok(result)
+}
+
+fn save_folders(game: &steamtron_core::library::Game) -> Option<Vec<(String, std::path::PathBuf)>> {
+    let prefix = &game.installation.prefix;
+    let drive_c = prefix.join("drive_c");
+    if !drive_c.is_dir() { return None; }
+    let safe = game.title.replace(['\\', '/', ':', '*', '?', '"', '<', '>', '|'], " ");
+    let candidates = [
+        drive_c.join("users/steamuser/Saved Games").join(&safe),
+        drive_c.join("users/steamuser/Documents/My Games").join(&safe),
+        drive_c.join("users/steamuser/Documents").join(&safe),
+        drive_c.join("users/steamuser/AppData/Local").join(&safe),
+        drive_c.join("users/steamuser/AppData/Roaming").join(&safe),
+        drive_c.join("users/Public/Documents").join(&safe),
+    ];
+    let mut result = Vec::new();
+    for candidate in candidates {
+        if candidate.is_dir() && std::fs::read_dir(&candidate).map(|mut entries| entries.next().is_some()).unwrap_or(false) {
+            if let Ok(relative) = candidate.strip_prefix(&drive_c) {
+                result.push((relative.display().to_string(), candidate));
+            }
+        }
+    }
+    if result.is_empty() { None } else { Some(result) }
+}
+
 #[tauri::command]
 async fn verify_managed_files(game_id: String) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
@@ -4019,6 +4397,13 @@ fn main() {
             quit_app,
             managed_game_size,
             verify_managed_files,
+            backup_managed_game,
+            restore_game_backup,
+            move_managed_game,
+            export_managed_saves,
+            import_managed_saves,
+            uninstall_managed_game,
+            regenerate_managed_manifests,
             steam_download_size,
             remove_managed_game,
             detach_umutron_paths,

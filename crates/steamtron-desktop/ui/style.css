@@ -594,3 +594,8 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .dlc-table td:first-child, .dlc-table th:first-child { width:54px; text-align:center; }
 .dlc-table td:last-child, .dlc-table th:last-child { width:80px; text-align:right; }
 .dlc-note { color:var(--muted); font-size:11px; }
+
+/* Installed Files: wide and paired actions. */
+.files-wide { width:100%; padding:11px 16px; }
+.files-pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.files-pair button { width:100%; padding:11px 14px; }

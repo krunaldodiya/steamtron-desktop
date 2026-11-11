@@ -3978,6 +3978,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "xz2",
+ "zip",
 ]
 
 [[package]]
