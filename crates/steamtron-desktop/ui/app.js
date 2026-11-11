@@ -3031,6 +3031,7 @@ async function load() {
       if (added.length) await loadFixes();
     } catch (_error) { /* non-fatal */ }
     try { await invoke("auto_pin_installed"); } catch (_error) { /* non-fatal */ }
+    try { await invoke("reconcile_managed_installs"); } catch (_error) { /* non-fatal */ }
     try { await invoke("reconcile_registrations"); } catch (_error) { /* keep stored states */ }
     try { managedLibrary = await invoke("library_snapshot"); } catch (_error) { managedLibrary = null; }
     await refreshManagedRunning();

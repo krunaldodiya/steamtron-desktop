@@ -79,7 +79,7 @@ pub(crate) fn smd_lua(app_id: u32, lua_path: &Path, cache: &Path) -> Result<Path
     Ok(target)
 }
 
-fn detect_launch_target(root: &Path) -> Option<(PathBuf, String)> {
+pub(crate) fn detect_launch_target(root: &Path) -> Option<(PathBuf, String)> {
     let mut best: Option<(u64, PathBuf)> = None;
     let mut stack = vec![root.to_path_buf()];
     let blocked = ["_commonredist", "directx", "vcredist", "support", "tools", "redist"];

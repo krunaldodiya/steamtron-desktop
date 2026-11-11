@@ -889,6 +889,81 @@ fn auto_launch_targets() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn reconcile_managed_installs() -> Result<usize, String> {
+    use steamtron_core::library::Library;
+
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let games: Vec<_> = library.games().to_vec();
+    let mut changed = 0usize;
+    for mut game in games {
+        let root = game.installation.root.clone();
+        if !root.is_dir() {
+            continue;
+        }
+        // A download that outlived the app can leave smd's
+        // "<AppID> - <Game>" folder inside the managed root. Promote its
+        // contents before detecting a launcher.
+        if let Some(appid) = game.metadata_app_id {
+            let prefix = format!("{appid} - ");
+            let entries: Vec<_> = std::fs::read_dir(&root)
+                .map(|entries| entries.flatten().collect())
+                .unwrap_or_default();
+            let has_files = entries.iter().any(|entry| entry.path().is_file());
+            if !has_files {
+                for entry in &entries {
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !path.is_dir() || !name.starts_with(&prefix) {
+                        continue;
+                    }
+                    if let Ok(children) = std::fs::read_dir(&path) {
+                        for child in children.flatten() {
+                            let target = root.join(child.file_name());
+                            if !target.exists() {
+                                let _ = std::fs::rename(child.path(), target);
+                            }
+                        }
+                    }
+                    let _ = std::fs::remove_dir(&path);
+                    changed += 1;
+                    break;
+                }
+            }
+        }
+        let installed = root.is_dir()
+            && std::fs::read_dir(&root)
+                .map(|mut entries| entries.next().is_some())
+                .unwrap_or(false);
+        if installed {
+            if !game.installation.confirmed {
+                game.installation.confirmed = true;
+                changed += 1;
+            }
+            if game.launch_targets.is_empty() {
+                if let Some((executable, name)) = download::detect_launch_target(&root) {
+                    game.launch_targets = vec![steamtron_core::library::LaunchTarget {
+                        id: "t1".into(),
+                        name,
+                        executable,
+                        arguments: Vec::new(),
+                        primary: true,
+                    }];
+                    changed += 1;
+                }
+            }
+            steamtron_core::library::mark_setup_completed(&mut game);
+        }
+        if changed > 0 {
+            let _ = library.upsert_game(game);
+        }
+    }
+    if changed > 0 {
+        library.save().map_err(|error| error.to_string())?;
+    }
+    Ok(changed)
+}
+
+#[tauri::command]
 fn auto_pin_installed() -> Result<Vec<String>, String> {
     require_auth()?;
     let managed = steam::managed_appids().map_err(|error| error.to_string())?;
@@ -4400,6 +4475,7 @@ fn main() {
             list_fixes,
             auto_launch_targets,
             auto_pin_installed,
+            reconcile_managed_installs,
             pick_launch_executable,
             add_launch_target,
             update_launch_target,
