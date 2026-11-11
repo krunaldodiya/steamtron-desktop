@@ -190,8 +190,9 @@ function managedDrive(game) {
 
 function managedReady(game) {
   if (!game) return false;
-  if (typeof game.installed === "boolean") return game.installed;
-  return Boolean(game.installation?.root);
+  // Always trust the snapshot's live filesystem check; a bare root string is
+  // recorded when the game is added and does not mean content exists.
+  return game.installed === true;
 }
 
 function managedPlayable(game) {
@@ -1444,11 +1445,14 @@ function renderManagedMode() {
   renderManagedLibrary();
 }
 
-function openManagedGame(id, origin = "library", seed = null) {
+async function openManagedGame(id, origin = "library", seed = null) {
   managedSelectedId = id;
   gameDetailOrigin = origin;
   gameDetailSeed = seed;
   appView = "game";
+  // Re-read installed/content state when opening the page so a newly added,
+  // not-yet-downloaded game always shows Download instead of a stale Play.
+  managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
   renderManagedMode();
 }
 
