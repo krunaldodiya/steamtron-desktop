@@ -21,19 +21,18 @@
       </div>
     </div>
   </div>
-  <div id="profile-dialog" class="auth-gate hidden" role="dialog" aria-modal="true" aria-labelledby="profile-title">
-    <div class="auth-modal">
-      <div class="auth-modal-head">Account · SteamTron</div>
-      <div class="auth-lock" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"></path></svg>
+  <div id="profile-dialog" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+    <div class="modal profile-modal">
+      <div class="game-settings-head"><h2 id="profile-title">Account · SteamTron</h2><button class="modal-close" id="profile-close-icon" aria-label="Close">×</button></div>
+      <div class="profile-body">
+        <div class="auth-lock" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"></path></svg>
+        </div>
+        <h3>Signed in</h3>
+        <p id="profile-email" class="auth-status">…</p>
+        <p id="profile-base" class="auth-status" style="opacity:.7"></p>
       </div>
-      <h2 id="profile-title">Signed in</h2>
-      <p id="profile-email" class="auth-status">…</p>
-      <p id="profile-base" class="auth-status" style="opacity:.7"></p>
-      <div class="auth-actions">
-        <button id="profile-logout" class="danger">Log out</button>
-        <button id="profile-close" class="secondary">Close</button>
-      </div>
+      <div class="modal-actions profile-actions"><button id="profile-logout" class="danger">Log out</button><button id="profile-close" class="secondary">Close</button></div>
     </div>
   </div>
   <header class="topbar">

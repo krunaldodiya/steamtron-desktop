@@ -2027,6 +2027,7 @@ async function openProfileDialog() {
 
 document.querySelector("#profile").onclick = () => { void openProfileDialog(); };
 document.querySelector("#profile-close").onclick = closeProfileDialog;
+document.querySelector("#profile-close-icon").onclick = closeProfileDialog;
 document.querySelector("#profile-logout").onclick = async () => {
   try {
     await invoke("profile_logout");

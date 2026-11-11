@@ -602,3 +602,11 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 
 /* Game Settings action rows scroll with their section, unlike page footers. */
 .game-settings-pane .pane-actions { position:static; display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 0; padding:0; background:transparent; }
+
+/* Account dialog uses the shared Game Settings modal shell. */
+.profile-modal { width:min(520px, calc(100vw - 32px)); padding:0; overflow:hidden; }
+.profile-body { padding:26px 26px 10px; text-align:center; }
+.profile-body .auth-lock { margin:0 auto 16px; }
+.profile-body h3 { margin:0 0 8px; font-size:18px; }
+.profile-body .auth-status { margin:0 0 4px; }
+.profile-modal .profile-actions { justify-content:center; padding:8px 24px 22px; margin:0; }
