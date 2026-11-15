@@ -92,6 +92,229 @@ function busy(button, label) {
   };
 }
 
+const dialogWindows = [];
+let dialogZ = 300;
+let dialogSeq = 0;
+
+function dialogDockNode() {
+  let dock = document.querySelector("#dialog-dock");
+  if (!dock) {
+    dock = document.createElement("div");
+    dock.id = "dialog-dock";
+    dock.className = "dialog-dock";
+    document.body.appendChild(dock);
+  }
+  return dock;
+}
+
+function dialogTitleOf(modal) {
+  const node = modal.querySelector(".modal-head h2, .game-settings-head h2, h2");
+  return (node?.textContent || "Dialog").trim() || "Dialog";
+}
+
+function dialogEntryFor(backdrop) {
+  return dialogWindows.find((entry) => entry.backdrop === backdrop) || null;
+}
+
+function raiseDialog(entry) {
+  dialogZ += 1;
+  entry.backdrop.style.zIndex = String(dialogZ);
+}
+
+function cleanupDialog(entry) {
+  if (!entry) return;
+  entry.observer?.disconnect();
+  const index = dialogWindows.indexOf(entry);
+  if (index >= 0) dialogWindows.splice(index, 1);
+  if (entry.dockButton) entry.dockButton.remove();
+  entry.dockButton = null;
+}
+
+function dialogTop() {
+  for (let index = dialogWindows.length - 1; index >= 0; index -= 1) {
+    const entry = dialogWindows[index];
+    if (!document.body.contains(entry.backdrop)) {
+      cleanupDialog(entry);
+      continue;
+    }
+    if (entry.minimized || entry.backdrop.classList.contains("hidden")) continue;
+    return entry;
+  }
+  return null;
+}
+
+function dismissDialog(entry) {
+  if (!entry) return;
+  if (document.body.contains(entry.backdrop)) entry.backdrop.remove();
+  cleanupDialog(entry);
+}
+
+function focusFirstDialogControl(entry) {
+  if (!entry) return;
+  const preferred = entry.modal.querySelector(".modal-actions .primary, [data-confirm-ok]");
+  const fallback = entry.modal.querySelector(".modal-actions button, button, input, select, textarea");
+  const target = preferred || fallback;
+  if (target) focusControl(target);
+}
+
+function minimizeDialog(entry) {
+  if (!entry || entry.minimized) return;
+  entry.minimized = true;
+  entry.backdrop.classList.add("dialog-minimized");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "dialog-dock-item";
+  button.title = `Restore ${entry.title}`;
+  button.innerHTML = `<span class="dialog-dock-icon" aria-hidden="true">▢</span><span class="dialog-dock-title">${escape(entry.title)}</span>`;
+  button.onclick = () => restoreDialog(entry);
+  dialogDockNode().appendChild(button);
+  entry.dockButton = button;
+  if (navState.focused && entry.backdrop.contains(navState.focused)) {
+    navState.focused.classList.remove("nav-focus");
+    navState.focused = null;
+  }
+  focusControl(button);
+}
+
+function restoreDialog(entry) {
+  if (!entry || !document.body.contains(entry.backdrop)) return;
+  entry.minimized = false;
+  entry.backdrop.classList.remove("dialog-minimized", "hidden");
+  if (entry.dockButton) {
+    entry.dockButton.remove();
+    entry.dockButton = null;
+  }
+  raiseDialog(entry);
+  focusFirstDialogControl(entry);
+}
+
+function toggleDialogMaximize(entry) {
+  if (!entry) return;
+  entry.maximized = !entry.maximized;
+  entry.modal.classList.toggle("dialog-maximized", entry.maximized);
+  const button = entry.modal.querySelector(".dialog-maximize");
+  if (button) {
+    const label = `${entry.maximized ? "Restore down" : "Maximize"} ${entry.title}`;
+    button.title = entry.maximized ? "Restore down" : "Maximize";
+    button.setAttribute("aria-label", label);
+  }
+}
+
+function registerDialog(backdrop, options = {}) {
+  const modal = backdrop.querySelector(".modal");
+  if (!modal) return null;
+  const existing = dialogEntryFor(backdrop);
+  if (existing) {
+    raiseDialog(existing);
+    return existing;
+  }
+  modal.classList.add("dialog-window");
+  if (options.confirm) modal.classList.add("dialog-confirm");
+  const title = options.title || dialogTitleOf(modal);
+  const header = modal.querySelector(".modal-head, .game-settings-head");
+  if (header) header.classList.add("dialog-head");
+  const entry = {
+    id: ++dialogSeq,
+    backdrop,
+    modal,
+    title,
+    minimized: false,
+    maximized: false,
+    dockButton: null,
+    observer: null,
+  };
+  dialogWindows.push(entry);
+  backdrop.dataset.dialogId = String(entry.id);
+  raiseDialog(entry);
+  if (header && !modal.dataset.dialogControls) {
+    const controls = document.createElement("div");
+    controls.className = "dialog-controls";
+    const min = document.createElement("button");
+    min.type = "button";
+    min.className = "dialog-control dialog-minimize";
+    min.title = "Minimize";
+    min.setAttribute("aria-label", `Minimize ${title}`);
+    min.innerHTML = "&#8211;";
+    min.onclick = () => minimizeDialog(entry);
+    const max = document.createElement("button");
+    max.type = "button";
+    max.className = "dialog-control dialog-maximize";
+    max.title = "Maximize";
+    max.setAttribute("aria-label", `Maximize ${title}`);
+    max.innerHTML = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="2" width="8" height="8" rx="1"></rect></svg>';
+    max.onclick = () => toggleDialogMaximize(entry);
+    let close = modal.querySelector(".modal-close");
+    if (!close) {
+      close = document.createElement("button");
+      close.type = "button";
+      close.className = "modal-close";
+      close.innerHTML = "×";
+      close.setAttribute("aria-label", `Close ${title}`);
+      close.onclick = () => dismissDialog(entry);
+    }
+    close.classList.add("dialog-control", "dialog-close");
+    controls.append(min, max, close);
+    header.appendChild(controls);
+    modal.dataset.dialogControls = "1";
+  } else if (header) {
+    // Re-registered static dialog: rebind the controls to the new entry.
+    const controls = header.querySelector(".dialog-controls");
+    if (controls) {
+      const min = controls.querySelector(".dialog-minimize");
+      const max = controls.querySelector(".dialog-maximize");
+      if (min) min.onclick = () => minimizeDialog(entry);
+      if (max) max.onclick = () => toggleDialogMaximize(entry);
+    }
+  }
+  entry.observer = new MutationObserver(() => {
+    if (!document.body.contains(backdrop)) cleanupDialog(entry);
+  });
+  entry.observer.observe(document.body, { childList: true });
+  return entry;
+}
+
+function closeTopDialog() {
+  const entry = dialogTop();
+  if (!entry) return false;
+  const close = entry.modal.querySelector(".modal-close");
+  if (close) close.click();
+  else dismissDialog(entry);
+  if (document.body.contains(entry.backdrop) && entry.backdrop.classList.contains("hidden")) {
+    cleanupDialog(entry);
+  }
+  return true;
+}
+
+function confirmDialog(options = {}) {
+  const title = options.title || "Confirm";
+  const message = options.message || "";
+  const confirmLabel = options.confirmLabel || "Continue";
+  const cancelLabel = options.cancelLabel || "Cancel";
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `<div class="modal">
+      <div class="modal-head"><h2>${escape(title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
+      <div class="dialog-confirm-body">${escape(message)}</div>
+      <div class="modal-actions"><button data-confirm-cancel>${escape(cancelLabel)}</button><button class="${options.danger ? "danger" : "primary"}" data-confirm-ok>${escape(confirmLabel)}</button></div>
+    </div>`;
+    document.body.appendChild(backdrop);
+    const entry = registerDialog(backdrop, { title, confirm: true });
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      dismissDialog(entry);
+      resolve(value);
+    };
+    backdrop.querySelector("[data-confirm-cancel]").onclick = () => finish(false);
+    backdrop.querySelector("[data-confirm-ok]").onclick = () => finish(true);
+    backdrop.querySelector(".modal-close").onclick = () => finish(false);
+    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) finish(false); });
+    focusControl(backdrop.querySelector("[data-confirm-ok]") || backdrop.querySelector("[data-confirm-cancel]"));
+  });
+}
+
 function showErrorDialog(message, title = "Action failed") {
   const existing = document.querySelector(".error-dialog-backdrop");
   if (existing) existing.remove();
@@ -106,6 +329,7 @@ function showErrorDialog(message, title = "Action failed") {
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.querySelector("#error-dialog-ok").onclick = close;
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  registerDialog(backdrop);
   backdrop.querySelector("#error-dialog-ok").focus();
 }
 
@@ -124,6 +348,7 @@ function showSteamRunningDialog(action) {
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.querySelector("#steam-running-ok").onclick = close;
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
+  registerDialog(backdrop);
   backdrop.querySelector("#steam-running-ok").focus();
 }
 
@@ -323,7 +548,7 @@ function renderManagedLibrary() {
 }
 
 async function startManagedGame(game, button) {
-  if (!window.confirm(`Play ${game.title}?`)) return;
+  if (!(await confirmDialog({ title: "Play game", message: `Play ${game.title}?`, confirmLabel: "Play" }))) return;
   const stop = button ? busy(button, "Starting…") : () => {};
   try {
     const result = await invoke("play_managed", { gameId: game.id });
@@ -339,7 +564,7 @@ async function startManagedGame(game, button) {
 }
 
 async function stopManagedGame(game, button) {
-  if (!window.confirm(`Stop ${game.title}? Unsaved game progress may be lost.`)) return;
+  if (!(await confirmDialog({ title: "Stop game", message: `Stop ${game.title}? Unsaved game progress may be lost.`, confirmLabel: "Stop", danger: true }))) return;
   const stop = button ? busy(button, "Stopping…") : () => {};
   try {
     await invoke("stop_managed", { gameId: game.id });
@@ -449,13 +674,18 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
         void persistLink();
       };
       row.querySelector("[data-link-edit]").onclick = () => editLauncher(index);
-      row.querySelector("[data-link-delete]").onclick = () => {
+      row.querySelector("[data-link-delete]").onclick = async () => {
         const launcher = draft.launchers[index];
         if (draft.launchers.length <= 1) {
           showToast("A linked game needs at least one launcher.", true);
           return;
         }
-        if (!window.confirm(`Remove "${launcher.name || linkFileName(launcher.executable)}" from this game? The game files are not deleted.`)) return;
+        if (!(await confirmDialog({
+          title: "Remove launcher",
+          message: `Remove "${launcher.name || linkFileName(launcher.executable)}" from this game? The game files are not deleted.`,
+          confirmLabel: "Remove",
+          danger: true,
+        }))) return;
         draft.launchers.splice(index, 1);
         if (!draft.launchers.some((entry) => entry.primary)) {
           draft.launchers[0].primary = true;
@@ -483,6 +713,7 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
       <p class="muted">Passed directly to this launcher. Shell commands are not evaluated.</p>
       <div class="modal-actions"><button id="gs-launcher-cancel">Cancel</button><button class="primary" id="gs-launcher-save">Save</button></div></div>`;
     document.body.appendChild(backdrop);
+    registerDialog(backdrop);
     const close = () => backdrop.remove();
     backdrop.querySelector(".modal-close").onclick = close;
     backdrop.querySelector("#gs-launcher-cancel").onclick = close;
@@ -642,7 +873,12 @@ function renderManagedPreview(game) {
   if (remove) {
     remove.onclick = async () => {
       if (runningManaged.has(game.id)) { showToast("Stop the game before removing it.", true); return; }
-      if (!window.confirm(`Remove ${game.title} from your library?\n\nThe Steam registration is removed. Game files stay on disk.`)) return;
+      if (!(await confirmDialog({
+        title: "Remove from library",
+        message: `Remove ${game.title} from your library?\n\nThe Steam registration is removed. Game files stay on disk.`,
+        confirmLabel: "Remove",
+        danger: true,
+      }))) return;
       const stop = busy(remove, "Removing…");
       try {
         await invoke("remove_managed_game", { gameId: game.id });
@@ -716,6 +952,7 @@ async function chooseDownloadDrive(game) {
     <p class="download-drive-meta" id="download-drive-meta">Checking download size…</p>
     <div class="modal-actions"><button id="download-drive-cancel">Cancel</button><button class="primary" id="download-drive-start" disabled>Download</button></div></div>`;
   document.body.appendChild(backdrop);
+  registerDialog(backdrop);
   const close = () => backdrop.remove();
   const select = backdrop.querySelector("#download-drive-select");
   const meta = backdrop.querySelector("#download-drive-meta");
@@ -1073,6 +1310,7 @@ function openManagedGameOptions(game) {
     </div>
   </div>`;
   document.body.appendChild(backdrop);
+  registerDialog(backdrop);
   const pane = backdrop.querySelector("#game-settings-pane");
   let latestGame = game;
   const close = () => { backdrop.remove(); renderManagedMode(); };
@@ -1207,7 +1445,7 @@ function openManagedGameOptions(game) {
       }).catch((error) => { logNode.textContent = String(error); });
       pane.querySelector("#gs-log-copy").onclick = () => { void copyToClipboard(logNode.textContent || "", "Log"); };
       pane.querySelector("#gs-log-clear").onclick = async () => {
-        if (!window.confirm("Clear this game's previous diagnostic logs?")) return;
+        if (!(await confirmDialog({ title: "Clear logs", message: "Clear this game's previous diagnostic logs?", confirmLabel: "Clear", danger: true }))) return;
         try {
           const removed = await invoke("clear_managed_game_logs", { gameId: game.id });
           showToast(`Cleared ${removed} log${removed === 1 ? "" : "s"}`);
@@ -1313,6 +1551,7 @@ function openManagedGameOptions(game) {
           backdrop.className = "modal-backdrop";
           backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Move install folder</h2><button class="modal-close" id="move-close">×</button></div><p class="pane-note">Choose a registered drive. Existing files are moved; no copy is left behind.</p><div class="drive-choices">${drives.map((drive) => `<label class="drive-choice"><input type="radio" name="move-drive" value="${escape(drive.id)}"><span class="drive-choice-copy"><strong>${escape(drive.label || drive.id)}</strong><small>${escape(drive.root)}</small></span></label>`).join("")}</div><div class="modal-actions"><button id="move-cancel">Cancel</button><button class="primary" id="move-confirm" disabled>Move</button></div></div>`;
           document.body.appendChild(backdrop);
+          registerDialog(backdrop);
           const confirm = backdrop.querySelector("#move-confirm");
           backdrop.querySelector("#move-close").onclick = () => backdrop.remove();
           backdrop.querySelector("#move-cancel").onclick = () => backdrop.remove();
@@ -1332,7 +1571,7 @@ function openManagedGameOptions(game) {
           };
         };
         pane.querySelector("#files-unlink").onclick = async () => {
-          if (!window.confirm("Unlink this game? The library entry and Steam registration are removed; all game files stay on disk.")) return;
+          if (!(await confirmDialog({ title: "Unlink game", message: "Unlink this game? The library entry and Steam registration are removed; all game files stay on disk.", confirmLabel: "Unlink", danger: true }))) return;
           try {
             await invoke("remove_managed_game", { gameId: game.id });
             close();
@@ -1341,8 +1580,8 @@ function openManagedGameOptions(game) {
           } catch (error) { showToast(String(error), true); }
         };
         pane.querySelector("#files-uninstall").onclick = async () => {
-          if (!window.confirm("Uninstall this game? The entire game folder is permanently deleted.")) return;
-          if (!window.confirm(`Delete ${latestGame.title}'s installed files permanently? This cannot be undone.`)) return;
+          if (!(await confirmDialog({ title: "Uninstall game", message: "Uninstall this game? The entire game folder is permanently deleted.", confirmLabel: "Uninstall", danger: true }))) return;
+          if (!(await confirmDialog({ title: "Delete installed files", message: `Delete ${latestGame.title}'s installed files permanently? This cannot be undone.`, confirmLabel: "Delete", danger: true }))) return;
           try {
             await invoke("uninstall_managed_game", { gameId: game.id });
             close();
@@ -1436,8 +1675,8 @@ function openManagedGameOptions(game) {
         invoke("set_managed_fixes_enabled", { gameId: game.id, enabled: !status.enabled }),
         !status.enabled ? "Fixes enabled" : "Fixes disabled");
       for (const id of ["#fix-remove", "#fix-delete"]) {
-        pane.querySelector(id).onclick = (event) => {
-          if (!window.confirm("Remove all fixes for this game? Files are deleted from the fixes folder; installed game files are unchanged.")) return;
+        pane.querySelector(id).onclick = async (event) => {
+          if (!(await confirmDialog({ title: "Remove fixes", message: "Remove all fixes for this game? Files are deleted from the fixes folder; installed game files are unchanged.", confirmLabel: "Remove", danger: true }))) return;
           void run(event.currentTarget, () => invoke("remove_managed_fixes", { gameId: game.id }),
             (result) => `Removed ${result.files} fix file${result.files === 1 ? "" : "s"}`);
         };
@@ -1715,8 +1954,11 @@ function navigationSurface() {
 }
 
 function visibleModal() {
+  const entry = dialogTop();
+  if (entry) return entry.backdrop;
   return [...document.querySelectorAll(".modal-backdrop")]
-    .find((node) => !node.classList.contains("hidden")) || null;
+    .find((node) => !node.classList.contains("hidden")
+      && !node.classList.contains("dialog-minimized")) || null;
 }
 
 function navigationControls() {
@@ -1725,9 +1967,11 @@ function navigationControls() {
   const modal = visibleModal();
   const root = dialog && !dialog.classList.contains("hidden")
     ? dialog
-    : settings && !settings.classList.contains("hidden")
-      ? settings
-      : modal || document;
+    : modal
+      ? modal
+      : settings && !settings.classList.contains("hidden")
+        ? settings
+        : document;
   return [...root.querySelectorAll("button, input, select, textarea, a[href], [tabindex='0']")]
     .filter((node) => !node.disabled
       && node.getClientRects().length > 0
@@ -2206,8 +2450,7 @@ function dispatchNavigation(action, fromGamepad = false) {
   const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
   if (action === "back") {
     if (typing) {
-      const modal = visibleModal();
-      if (modal) { modal.remove(); return; }
+      if (closeTopDialog()) return;
       document.activeElement.blur();
       if (!document.body.classList.contains("settings-open")) {
         const nav = activeNavControl();
@@ -2215,10 +2458,9 @@ function dispatchNavigation(action, fromGamepad = false) {
       }
       return;
     }
+    if (closeTopDialog()) return;
     if (profileDialogOpen()) { closeProfileDialog(); return; }
     if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
-    const modal = visibleModal();
-    if (modal) { modal.remove(); return; }
     if (appView === "store-game") { setView("store", { focus: "restore" }); return; }
     if (appView === "game") { setView(gameDetailOrigin, { focus: "restore" }); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");
@@ -2358,6 +2600,16 @@ function profileDialogOpen() {
 
 function closeProfileDialog() {
   if (!profileDialog) return;
+  const entry = dialogEntryFor(profileDialog);
+  if (entry) {
+    entry.minimized = false;
+    if (entry.dockButton) {
+      entry.dockButton.remove();
+      entry.dockButton = null;
+    }
+    cleanupDialog(entry);
+  }
+  profileDialog.classList.remove("dialog-minimized");
   profileDialog.classList.add("hidden");
   if (navState.focused && profileDialog.contains(navState.focused)) {
     navState.focused.classList.remove("nav-focus");
@@ -2371,6 +2623,16 @@ async function openProfileDialog() {
   document.querySelector("#profile-email").textContent =
     profile?.email || (profile?.authenticated ? "Signed in" : "Signed out");
   document.querySelector("#profile-base").textContent = profile?.base_url || "";
+  const entry = registerDialog(profileDialog, { title: "Account" });
+  if (entry) {
+    entry.minimized = false;
+    entry.backdrop.classList.remove("dialog-minimized");
+    if (entry.dockButton) {
+      entry.dockButton.remove();
+      entry.dockButton = null;
+    }
+    raiseDialog(entry);
+  }
   profileDialog.classList.remove("hidden");
   focusControl(document.querySelector("#profile-logout"));
 }
@@ -2398,7 +2660,12 @@ function applyFullscreenState(fullscreen) {
   }
   if (fullscreen) {
     const modal = document.querySelector(".game-settings-modal");
-    if (modal) modal.closest(".modal-backdrop")?.remove();
+    const backdrop = modal?.closest(".modal-backdrop");
+    if (backdrop) {
+      const entry = dialogEntryFor(backdrop);
+      if (entry) dismissDialog(entry);
+      else backdrop.remove();
+    }
   }
   const button = document.querySelector("#window-mode");
   if (button) {
@@ -2455,15 +2722,16 @@ function openFullscreenOptions() {
     </div>
   </div>`;
   document.body.appendChild(backdrop);
+  registerDialog(backdrop);
   const close = () => backdrop.remove();
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   backdrop.querySelector("#fullscreen-reboot").onclick = async () => {
-    if (!window.confirm("Reboot the system? Save any work in other applications first.")) return;
+    if (!(await confirmDialog({ title: "Reboot system", message: "Reboot the system? Save any work in other applications first.", confirmLabel: "Reboot", danger: true }))) return;
     try { await invoke("reboot_system"); } catch (error) { showToast(String(error), true); }
   };
   backdrop.querySelector("#fullscreen-shutdown").onclick = async () => {
-    if (!window.confirm("Shut down the system? Save any work in other applications first.")) return;
+    if (!(await confirmDialog({ title: "Shut down system", message: "Shut down the system? Save any work in other applications first.", confirmLabel: "Shut down", danger: true }))) return;
     try { await invoke("shutdown_system"); } catch (error) { showToast(String(error), true); }
   };
   backdrop.querySelector("#fullscreen-exit").onclick = () => {
@@ -2709,6 +2977,7 @@ function showLaunchChooser(game, targets) {
     backdrop.className = "modal-backdrop";
     backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Choose launcher</h2><button class="modal-close" aria-label="Close">×</button></div><p class="muted">More than one launch target is configured for ${escape(game.name)}.</p><div class="launch-choice-list"></div><div class="modal-actions"><button class="secondary" id="launch-choice-cancel">Cancel</button></div></div>`;
     document.body.appendChild(backdrop);
+    registerDialog(backdrop);
     const list = backdrop.querySelector(".launch-choice-list");
     for (const target of targets) {
       const button = document.createElement("button");
@@ -2769,6 +3038,7 @@ function showLaunchEditor(game, target, onSaved, executableOverride = "") {
     <div class="modal-actions"><button id="launch-cancel">Cancel</button><button class="primary" id="launch-save">Save</button></div>
   </div>`;
   document.body.appendChild(backdrop);
+  registerDialog(backdrop);
   const statusNode = backdrop.querySelector("#launch-editor-status");
   const setStatus = (message, error = false) => { statusNode.textContent = message; statusNode.classList.toggle("error", error); };
   const close = () => backdrop.remove();
@@ -2840,7 +3110,7 @@ function renderLaunchOptionsPanel(panel, game, current) {
   }
   for (const button of panel.querySelectorAll("[data-delete]")) {
     button.onclick = async () => {
-      if (!window.confirm("Delete this launch option?")) return;
+      if (!(await confirmDialog({ title: "Delete launch option", message: "Delete this launch option?", confirmLabel: "Delete", danger: true }))) return;
       const stop = busy(button, "Deleting…");
       try {
         const result = await invoke("remove_launch_target", { appid: game.appid, id: button.dataset.delete });
@@ -2963,7 +3233,7 @@ function renderGeneralPanel(panel, game) {
     <div class="status">${game.managed ? "Removing this entry deletes the Lua, appmanifest, manifests, and managed symlink. Game content is left intact." : "This game is not managed by SteamTron."}</div>`;
   const removeLibrary = panel.querySelector("#remove-library");
   if (removeLibrary && game.managed) removeLibrary.onclick = async () => {
-    if (!window.confirm(`Remove ${game.name} from the Steam library?`)) return;
+    if (!(await confirmDialog({ title: "Remove Steam library entry", message: `Remove ${game.name} from the Steam library?`, confirmLabel: "Remove", danger: true }))) return;
     const stop = busy(removeLibrary, "Removing…");
     try {
       const result = await invoke("remove_game", { appid: game.appid });
@@ -3050,7 +3320,7 @@ function renderFixesPanel(panel, game, current) {
   };
   invoke("windows_security_supported").then((supported) => { if (supported) loadSecurity(); }).catch(() => {});
   securityApply.onclick = async () => {
-    if (!window.confirm(`Add scoped Microsoft Defender exclusions for ${game.name}? This does not disable antivirus. It requires Windows admin approval.`)) return;
+    if (!(await confirmDialog({ title: "Add Windows Security exclusions", message: `Add scoped Microsoft Defender exclusions for ${game.name}? This does not disable antivirus. It requires Windows admin approval.`, confirmLabel: "Add" }))) return;
     const stop = busy(securityApply, "Adding…");
     try {
       await invoke("windows_security_apply", { appid: game.appid, includeGame: true });
@@ -3060,7 +3330,7 @@ function renderFixesPanel(panel, game, current) {
     finally { stop(); }
   };
   securityRemove.onclick = async () => {
-    if (!window.confirm(`Remove the Windows Security exclusions for ${game.name}?`)) return;
+    if (!(await confirmDialog({ title: "Remove Windows Security exclusions", message: `Remove the Windows Security exclusions for ${game.name}?`, confirmLabel: "Remove", danger: true }))) return;
     const stop = busy(securityRemove, "Removing…");
     try {
       await invoke("windows_security_remove", { appid: game.appid });
@@ -3158,7 +3428,7 @@ function renderFixesPanel(panel, game, current) {
     catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#remove").onclick = async () => {
-    if (!window.confirm("Remove this fixes entry and delete its fixes folder from disk?")) return;
+    if (!(await confirmDialog({ title: "Remove fixes entry", message: "Remove this fixes entry and delete its fixes folder from disk?", confirmLabel: "Remove", danger: true }))) return;
     const button = panel.querySelector("#remove");
     if (!await ensureSteamClosed("remove fixes")) return;
     const stop = busy(button, "Removing fixes…");
@@ -3353,7 +3623,7 @@ async function loadDoctor(target = null) {
   host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><div class="update-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button></div></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
   host.querySelector("#doctor-refresh").onclick = () => loadDoctor(host);
   host.querySelector("#doctor-repair").onclick = async () => {
-    if (!window.confirm("Repair will install SLSsteam. Start Steam manually afterward. Continue?")) return;
+    if (!(await confirmDialog({ title: "Repair Steam integration", message: "Repair will install SLSsteam. Start Steam manually afterward. Continue?", confirmLabel: "Repair" }))) return;
     const button = host.querySelector("#doctor-repair");
     const stop = busy(button, "Repairing…");
     try {
@@ -3410,7 +3680,60 @@ function settingsPage() {
   return document.querySelector("#settings-page");
 }
 
+let settingsDockButton = null;
+
+function clearSettingsDock() {
+  if (settingsDockButton) {
+    settingsDockButton.remove();
+    settingsDockButton = null;
+  }
+}
+
+function minimizeSettingsPage() {
+  const page = settingsPage();
+  if (!page || page.classList.contains("hidden")) return;
+  page.classList.add("hidden");
+  document.body.classList.remove("settings-open");
+  clearSettingsDock();
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "dialog-dock-item";
+  button.title = "Restore Settings";
+  button.innerHTML = '<span class="dialog-dock-icon" aria-hidden="true">▢</span><span class="dialog-dock-title">Settings</span>';
+  button.onclick = () => { void restoreSettingsPage(); };
+  dialogDockNode().appendChild(button);
+  settingsDockButton = button;
+  if (navState.focused) {
+    navState.focused.classList.remove("nav-focus");
+    navState.focused = null;
+  }
+  focusControl(button);
+}
+
+async function restoreSettingsPage() {
+  const page = settingsPage();
+  if (!page) return;
+  clearSettingsDock();
+  document.body.classList.add("settings-open");
+  page.classList.remove("hidden");
+  await renderSettingsPage();
+  const activeTab = page.querySelector(".settings-tab.active");
+  if (activeTab) focusControl(activeTab);
+}
+
+function toggleSettingsMaximize() {
+  const page = settingsPage();
+  if (!page) return;
+  const maximized = page.classList.toggle("settings-maximized");
+  const button = document.querySelector("#settings-maximize");
+  if (button) {
+    button.title = maximized ? "Restore down" : "Maximize";
+    button.setAttribute("aria-label", `${maximized ? "Restore down" : "Maximize"} settings`);
+  }
+}
+
 async function openSettingsPage() {
+  clearSettingsDock();
   document.body.classList.add("settings-open");
   settingsPage().classList.remove("hidden");
   await renderSettingsPage();
@@ -3420,9 +3743,18 @@ async function openSettingsPage() {
 
 function closeSettingsPage() {
   stopProtonInstallPolling();
+  clearSettingsDock();
   const page = settingsPage();
-  if (page) page.classList.add("hidden");
+  if (page) {
+    page.classList.add("hidden");
+    page.classList.remove("settings-maximized");
+  }
   document.body.classList.remove("settings-open");
+  const maximize = document.querySelector("#settings-maximize");
+  if (maximize) {
+    maximize.title = "Maximize";
+    maximize.setAttribute("aria-label", "Maximize settings");
+  }
   if (navState.focused) navState.focused.classList.remove("nav-focus");
   navState.focused = null;
 }
@@ -3517,7 +3849,7 @@ async function renderGeneralSettings(host) {
     } catch (error) { stop(); showToast(String(error), true); }
   };
   host.querySelector("#setting-restore").onclick = async (event) => {
-    if (!window.confirm("Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest and fixes files may be overwritten.")) return;
+    if (!(await confirmDialog({ title: "Restore metadata", message: "Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest and fixes files may be overwritten.", confirmLabel: "Restore" }))) return;
     const stop = busy(event.target, "Restoring…");
     try {
       const result = await invoke("restore_backup");
@@ -3543,7 +3875,7 @@ async function renderGeneralSettings(host) {
     catch (error) { showToast(String(error), true); }
   };
   host.querySelector("#setting-clear-logs").onclick = async (event) => {
-    if (!window.confirm("Clear all diagnostic logs? Active logs are kept.")) return;
+    if (!(await confirmDialog({ title: "Clear diagnostic logs", message: "Clear all diagnostic logs? Active logs are kept.", confirmLabel: "Clear", danger: true }))) return;
     const stop = busy(event.target, "Clearing…");
     try {
       const result = await invoke("clear_diagnostics");
@@ -3563,6 +3895,7 @@ async function renderGeneralSettings(host) {
       <div class="modal-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button><button id="doctor-dismiss">Close</button></div>
     </div>`;
     document.body.appendChild(backdrop);
+    registerDialog(backdrop);
     const close = () => backdrop.remove();
     backdrop.querySelector("#doctor-close").onclick = close;
     backdrop.querySelector("#doctor-dismiss").onclick = close;
@@ -3618,8 +3951,9 @@ async function renderGeneralSettings(host) {
           return `<div class="settings-row"><div class="row-text"><strong>${escape(check.title)}</strong><span>${escape(check.detail)}</span></div><div class="row-control">${action}${settingsStatusBadge(check.status)}</div></div>`;
         }).join("") || '<div class="settings-row"><div class="row-text"><span>No checks reported.</span></div></div>';
         for (const button of results.querySelectorAll("[data-doctor-repair]")) {
-          button.onclick = () => {
-            if (button.dataset.doctorConfirm && !window.confirm("This repair can install or change Steam components. Continue?")) return;
+          button.onclick = async () => {
+            if (button.dataset.doctorConfirm
+              && !(await confirmDialog({ title: "Repair Steam components", message: "This repair can install or change Steam components. Continue?", confirmLabel: "Repair" }))) return;
             void runRepair(button, button.dataset.doctorRepair);
           };
         }
@@ -3630,8 +3964,8 @@ async function renderGeneralSettings(host) {
     };
 
     backdrop.querySelector("#doctor-refresh").onclick = () => { void runChecks(); };
-    backdrop.querySelector("#doctor-repair").onclick = () => {
-      if (!window.confirm("Repair SteamTron's Steam integration? This can install SLSsteam. Start Steam manually afterward.")) return;
+    backdrop.querySelector("#doctor-repair").onclick = async () => {
+      if (!(await confirmDialog({ title: "Repair SteamTron integration", message: "Repair SteamTron's Steam integration? This can install SLSsteam. Start Steam manually afterward.", confirmLabel: "Repair" }))) return;
       void runRepair(backdrop.querySelector("#doctor-repair"), "repair_steam_library");
     };
     await runChecks();
@@ -3650,6 +3984,7 @@ async function showAddDriveDialog() {
     <div class="update-actions"><button id="drive-refresh">Refresh drives</button></div>
   </div>`;
   document.body.appendChild(backdrop);
+  registerDialog(backdrop);
   const choices = backdrop.querySelector("#drive-choices");
   const add = backdrop.querySelector("#drive-add");
   let selected = null;
@@ -3769,7 +4104,7 @@ async function renderStorageSettings(host) {
   }
   for (const button of host.querySelectorAll("[data-remove-drive]")) {
     button.onclick = async () => {
-      if (!window.confirm("Remove this drive registration? Only the registration is removed. Games, saves and folders stay on the drive.")) return;
+      if (!(await confirmDialog({ title: "Remove drive", message: "Remove this drive registration? Only the registration is removed. Games, saves and folders stay on the drive.", confirmLabel: "Remove", danger: true }))) return;
       try {
         await invoke("remove_library_drive", { id: button.dataset.removeDrive });
         await load();
@@ -3788,7 +4123,7 @@ async function renderStorageSettings(host) {
     } catch (error) { stop(); showToast(String(error), true); }
   };
   host.querySelector("#setting-import-library").onclick = async (event) => {
-    if (!window.confirm("Import this library file? It replaces the current drives, games and settings. Game content and saves are not moved.")) return;
+    if (!(await confirmDialog({ title: "Import library", message: "Import this library file? It replaces the current drives, games and settings. Game content and saves are not moved.", confirmLabel: "Import" }))) return;
     const stop = busy(event.target, "Importing…");
     try {
       const result = await invoke("import_library_file");
@@ -3934,7 +4269,7 @@ async function renderProtonSettings(host) {
       button.onclick = async () => {
         const release = releases.find((entry) => entry.installed_path === button.dataset.protonRemove);
         if (!release) return;
-        if (!window.confirm(`Uninstall ${release.tag}? The downloaded Proton files will be deleted.`)) return;
+        if (!(await confirmDialog({ title: "Uninstall Proton release", message: `Uninstall ${release.tag}? The downloaded Proton files will be deleted.`, confirmLabel: "Uninstall", danger: true }))) return;
         const stop = busy(button, "Uninstalling…");
         try {
           await invoke("uninstall_proton_release", { path: button.dataset.protonRemove });
@@ -4082,6 +4417,8 @@ for (const tab of document.querySelectorAll("[data-settings-tab]")) {
   };
 }
 document.querySelector("#settings-close").onclick = closeSettingsPage;
+document.querySelector("#settings-minimize").onclick = minimizeSettingsPage;
+document.querySelector("#settings-maximize").onclick = toggleSettingsMaximize;
 
 let storeQuery = "";
 let storeGenre = "";
@@ -4183,6 +4520,7 @@ function openAddProgress(title) {
     <div class="add-progress-actions" id="add-progress-actions"></div>
   </div>`;
   document.body.appendChild(backdrop);
+  registerDialog(backdrop);
   const spinner = backdrop.querySelector("#add-progress-spinner");
   const status = backdrop.querySelector("#add-progress-status");
   const actions = backdrop.querySelector("#add-progress-actions");
@@ -4658,6 +4996,7 @@ function showAddGame() {
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Add game</h2><button class="modal-close" id="add-close" aria-label="Close">×</button></div><p class="muted">Search the Steam catalogue by game name, App ID, or Steam URL. Select the exact result before adding.</p><label for="add-search">Search</label><div class="search-row"><input id="add-search" placeholder="Game name, 3468650, or Steam URL"><button id="add-search-button">Search</button></div><div class="search-results"></div><div class="selected-game" style="display:none"></div><div class="modal-status"></div><div class="security-option" id="add-security-option" hidden><label><input type="checkbox" id="add-security"> Add a Windows Security exception before fixes</label><div class="muted">Adds scoped Microsoft Defender exclusions for SteamTron's fix, upper-layer, and mounted-overlay paths, plus the game folder. It does not disable antivirus. Requires Windows admin approval.</div></div><div class="modal-actions" id="add-actions" hidden><button id="add-import" disabled>Import ZIP/Lua for selected game</button><button id="add-submit" class="primary" disabled>Add selected game</button></div></div>`;
   document.body.appendChild(backdrop);
+  registerDialog(backdrop);
   const queryInput = backdrop.querySelector("#add-search");
   const searchButton = backdrop.querySelector("#add-search-button");
   const resultsNode = backdrop.querySelector(".search-results");
@@ -4776,8 +5115,19 @@ document.querySelector("#nav-home").onclick = () => setView("home", { focus: "re
 document.querySelector("#nav-store").onclick = () => setView("store", { focus: "restore" });
 window.addEventListener("focus", async () => {
   if (!managedShell()) return;
+  const active = document.activeElement;
+  const detailHadFocus = detailEl.contains(active);
   await refreshManagedRunning();
-  if (appView === "library" || appView === "home" || appView === "game") renderManagedMode();
+  if (appView === "library" || appView === "home" || appView === "game") {
+    const focusLost = !active || active === document.body || !document.contains(active);
+    const focusUnchanged = document.activeElement === active;
+    renderManagedMode();
+    if (focusUnchanged && (detailHadFocus || focusLost)
+      && !visibleModal()
+      && !document.querySelector("#settings-page:not(.hidden)")) {
+      focusRouteOnEntry(appView, "restore");
+    }
+  }
 });
 
 let runningPollBusy = false;

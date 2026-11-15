@@ -95,6 +95,30 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .modal-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
 .modal-close { background:transparent; border:0; color:#8fa3b8; font-size:24px; line-height:1; padding:0 4px; }
 .modal-close:hover { color:#fff; }
+
+/* Unified dialog windows: every modal shares the same chrome. */
+.dialog-window { position:relative; }
+.dialog-head { position:relative; display:flex; align-items:center; gap:12px; }
+.dialog-head h2 { flex:1; min-width:0; margin:0; }
+.dialog-controls { display:flex; align-items:center; gap:2px; margin-left:auto; flex:0 0 auto; }
+.dialog-control { width:28px; height:26px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--muted); font:inherit; font-size:14px; line-height:1; display:grid; place-items:center; cursor:pointer; }
+.dialog-control:hover { background:#26384a; color:var(--text); }
+.dialog-control.dialog-close { font-size:20px; }
+.dialog-control svg { width:12px; height:12px; display:block; }
+.dialog-maximized { width:calc(100vw - 64px) !important; max-width:none !important; height:calc(100vh - 120px) !important; max-height:none !important; overflow:auto; }
+.game-settings-modal.dialog-maximized { overflow:hidden; }
+.game-settings-head { justify-content:flex-start; }
+.game-settings-head h2 { flex:1; text-align:center; }
+.game-settings-head .modal-close { position:static; transform:none; }
+.dialog-confirm { width:min(360px, calc(100vw - 32px)); }
+.dialog-confirm-body { margin-top:10px; color:var(--muted); font-size:14px; line-height:1.45; white-space:pre-line; }
+.dialog-minimized { display:none !important; }
+.dialog-dock { position:fixed; left:16px; bottom:16px; z-index:400; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.dialog-dock:empty { display:none; }
+.dialog-dock-item { max-width:320px; padding:8px 12px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-raised); color:var(--text); display:flex; align-items:center; gap:8px; box-shadow:0 10px 30px #000a; }
+.dialog-dock-item:hover { border-color:var(--accent); }
+.dialog-dock-icon { color:var(--accent); font-size:12px; }
+.dialog-dock-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .modal-actions[hidden] { display:none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 button.loading { cursor:progress; opacity:.85; }
@@ -348,10 +372,15 @@ button.primary:hover { filter:brightness(1.06); }
 
 
 /* Settings page (UmuTron-style full-screen overlay) */
-.settings-page { position:fixed; inset:0; z-index:150; display:flex; flex-direction:column; background:#0b1017; }
+.settings-page { position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); width:min(1100px, 94vw); height:min(760px, 88vh); z-index:150; display:flex; flex-direction:column; background:#0b1017; border:1px solid var(--border-strong); border-radius:12px; box-shadow:0 30px 100px #000c; overflow:hidden; }
+.settings-page.settings-maximized { top:0; left:0; transform:none; width:100vw; height:100vh; border-radius:0; }
+.settings-window-title { color:var(--text); font-size:13px; font-weight:600; letter-spacing:.04em; }
+.settings-window-controls { display:flex; align-items:center; gap:2px; }
+.settings-window-controls .settings-close { width:28px; height:26px; border:0; border-radius:6px; font-size:20px; }
+.settings-topbar .dialog-control { color:var(--muted); }
+.settings-topbar .dialog-control:hover { background:#26384a; color:var(--text); }
 .settings-page.hidden { display:none; }
 .settings-topbar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:12px 22px; border-bottom:1px solid var(--border); background:#0e131a; }
-.settings-search-icon { width:42px; height:42px; display:grid; place-items:center; border-radius:10px; border:1px solid var(--border); color:var(--muted); font-size:20px; }
 .settings-tabs { display:flex; gap:4px; }
 .settings-tab { border:0; background:transparent; color:var(--muted); padding:11px 18px; border-radius:9px; font-size:14px; }
 .settings-tab:hover { background:var(--surface-raised); }
