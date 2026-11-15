@@ -57,6 +57,11 @@ engine. Users never install UmuTron just to download or verify a game.
   `smd download <lua> --list --json` produced the expected depot JSON.
 - SMD JSON events (`started`, `output` with completed/total bytes,
   `depot_complete`, `complete`, `error`) match the parser's handling.
+- Runtime provisioning test with an empty `STEAMTRON_DATA_HOME`: the app
+  created `<data>/steamtron/tools/smd` (93,931,664 bytes, mode 0755) with the
+  pinned SHA-256 `e8819e62...3021c2` without user interaction.
+- Installed binary SHA-256:
+  `62b95ec5a19948d8536d8d5b5ee86f635549be7ebbcc36ecd41094c802cd5c86`.
 
 ## Decisions and risks
 
