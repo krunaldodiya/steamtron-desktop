@@ -14,10 +14,9 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use steamtron_core::config::Config;
-use steamtron_core::library::{drive_root_for, game_layout, managed_lua_path, Library};
+use steamtron_core::library::{managed_lua_path, Library};
 use steamtron_core::steam;
 
-use steamtron_core::fixes::{fixes_root, fixes_path};
 use crate::LibraryError;
 
 const MANIFEST: &str = "steamtron-backup.json";
@@ -127,15 +126,7 @@ pub fn export_backup(path: &Path, appids: Option<&BTreeSet<String>>) -> Result<B
         let lua = lua_path.and_then(|path| fs::read(path).ok());
         let game = installed.get(&appid);
         let appmanifest = game.map(|game| game.manifest.as_path());
-        let managed_fixes = library_game
-            .and_then(|game| drive_root_for(&game.installation.root))
-            .and_then(|drive| library_game.and_then(|game| game_layout(&drive, game).ok()))
-            .map(|layout| layout.fixes)
-            .filter(|path| path.is_dir());
         let config_entry = config.as_ref().and_then(|config| config.entry(&appid));
-        let steam_fixes = config_entry.map(|entry| entry.fixes.as_path());
-        let fixes = managed_fixes.as_deref().or(steam_fixes);
-        let has_fixes = fixes.is_some_and(|path| path.is_dir());
         let title = library_game
             .map(|game| game.title.clone())
             .or_else(|| game.map(|game| game.name.clone()))
@@ -147,7 +138,7 @@ pub fn export_backup(path: &Path, appids: Option<&BTreeSet<String>>) -> Result<B
             title,
             enabled: config_entry.is_some_and(|entry| entry.enabled),
             launch_option_disabled: config_entry.is_some_and(|entry| entry.launch_option_disabled),
-            has_fixes,
+            has_fixes: false,
         });
         if let Some(lua) = lua {
             add(&mut writer, &format!("lua/{appid}.lua"), &lua, &mut files, &mut bytes)?;
@@ -156,9 +147,6 @@ pub fn export_backup(path: &Path, appids: Option<&BTreeSet<String>>) -> Result<B
             if let Ok(data) = fs::read(manifest) {
                 add(&mut writer, &format!("appmanifests/appmanifest_{appid}.acf"), &data, &mut files, &mut bytes)?;
             }
-        }
-        if let Some(fixes) = fixes.filter(|path| path.is_dir()) {
-            add_fixes(&mut writer, &appid, fixes, &mut files, &mut bytes)?;
         }
     }
 
@@ -177,47 +165,6 @@ pub fn export_backup(path: &Path, appids: Option<&BTreeSet<String>>) -> Result<B
         files,
         bytes,
     })
-}
-
-fn add_fixes(
-    writer: &mut ZipWriter<fs::File>,
-    appid: &str,
-    root: &Path,
-    files: &mut usize,
-    bytes: &mut u64,
-) -> Result<(), LibraryError> {
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(path) = pending.pop() {
-        let entries = fs::read_dir(&path).map_err(|error| LibraryError::io(&path, error))?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|error| LibraryError::io(&path, error))?;
-            if metadata.file_type().is_symlink() {
-                continue;
-            }
-            if metadata.is_dir() {
-                pending.push(path);
-                continue;
-            }
-            if !metadata.is_file() {
-                continue;
-            }
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|error| LibraryError::Archive(error.to_string()))?;
-            let name = format!("fixes/{appid}/{}", relative.to_string_lossy().replace('\\', "/"));
-            let data = fs::read(&path).map_err(|error| LibraryError::io(&path, error))?;
-            let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-            writer.start_file(name, options).map_err(LibraryError::Zip)?;
-            writer.write_all(&data).map_err(|error| LibraryError::io(&path, error))?;
-            *files += 1;
-            *bytes = bytes.saturating_add(data.len() as u64);
-            if *files > MAX_FILES || *bytes > MAX_ARCHIVE {
-                return Err(LibraryError::Archive("Backup size limit exceeded.".into()));
-            }
-        }
-    }
-    Ok(())
 }
 
 pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
@@ -284,7 +231,6 @@ pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
     let allowed: BTreeSet<&str> = manifest.games.iter().map(|game| game.appid.as_str()).collect();
     let mut lua_files = 0;
     let mut appmanifests = 0;
-    let mut fixes_count = 0;
     let mut warnings = Vec::new();
     for (name, data) in files {
         let parts: Vec<&str> = name.split('/').collect();
@@ -316,40 +262,15 @@ pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
             } else {
                 warnings.push(format!("appmanifest for App {appid} was skipped: Steam is not installed."));
             }
-        } else if let Some(rest) = name.strip_prefix("fixes/") {
-            let (appid, relative) = rest.split_once('/').ok_or_else(|| LibraryError::Archive("Invalid fixes entry.".into()))?;
-            if !allowed.contains(appid) { return Err(LibraryError::Archive("Unexpected fixes App ID.".into())); }
-            let game = appid.parse::<u32>().ok().and_then(|id| library.as_ref()?.game_by_app_id(id));
-            let local = game
-                .and_then(|game| drive_root_for(&game.installation.root))
-                .and_then(|drive| game.and_then(|game| game_layout(&drive, game).ok()))
-                .map(|layout| layout.fixes);
-            let target = local.unwrap_or_else(|| fixes_path(appid).unwrap_or_else(|_| fixes_root().join(appid)));
-            let destination = target.join(safe_relative(relative)?);
-            if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?; }
-            atomic_write(&destination, &data)?;
-        }
-    }
-    if let Some(mut config) = Config::load().ok() {
-        for game in &manifest.games {
-            let target = fixes_root().join(&game.appid);
-            if game.has_fixes && target.is_dir() {
-                let entry = config
-                    .upsert(&game.appid, &target, game.enabled)
-                    .map_err(|error| LibraryError::Archive(error.to_string()))?;
-                if entry.launch_option_disabled != game.launch_option_disabled {
-                    config.set_launch_option_disabled(&game.appid, game.launch_option_disabled)
-                        .map_err(|error| LibraryError::Archive(error.to_string()))?;
-                }
-                fixes_count += 1;
-            }
+        } else if name.starts_with("fixes/") {
+            warnings.push(format!("Fixes entry {name} was skipped: fixes are covered by per-game backups."));
         }
     }
     Ok(RestoreSummary {
         games: manifest.games.len(),
         lua_files,
         appmanifests,
-        fixes: fixes_count,
+        fixes: 0,
         library: library_imported,
         warnings,
     })
@@ -376,6 +297,3 @@ fn safe_name(name: &str) -> Result<String, LibraryError> {
     Ok(parts.join("/"))
 }
 
-fn safe_relative(name: &str) -> Result<PathBuf, LibraryError> {
-    Ok(PathBuf::from(safe_name(name)?))
-}
