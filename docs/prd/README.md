@@ -56,3 +56,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0029](0029-ddm-engine.md) | Use DepotDownloaderMod instead of SMD native engine | done | 2026-11-15 |
 | [0030](0030-operation-manager.md) | Shared operation manager for backup, restore, and verification | done | 2026-11-15 |
 | [0031](0031-store-retry.md) | Retry Store requests with a fresh client | done | 2026-11-15 |
+| [0032](0032-direct-verify.md) | Verify with cached manifests through DepotDownloaderMod | active | 2026-11-15 |

@@ -3938,6 +3938,171 @@ fn save_folders(game: &steamtron_core::library::Game) -> Option<Vec<(String, std
     if result.is_empty() { None } else { Some(result) }
 }
 
+fn parse_lua_metadata(lua: &str) -> (Vec<(String, String)>, String) {
+    let mut depots = Vec::new();
+    let mut keys = String::new();
+    for line in lua.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("setManifestid(") {
+            let mut parts = rest.splitn(2, ',');
+            let depot = parts.next().unwrap_or("").trim().to_owned();
+            let manifest_part = parts.next().unwrap_or("").trim();
+            if let Some(start) = manifest_part.find('"') {
+                if let Some(end) = manifest_part[start + 1..].find('"') {
+                    let manifest = manifest_part[start + 1..start + 1 + end].to_owned();
+                    if !depot.is_empty() && !manifest.is_empty() {
+                        depots.push((depot, manifest));
+                    }
+                }
+            }
+        } else if let Some(rest) = line.strip_prefix("addappid(") {
+            let mut parts = rest.splitn(2, ',');
+            let depot = parts.next().unwrap_or("").trim();
+            let tail = parts.next().unwrap_or("");
+            if let Some(start) = tail.find('"') {
+                if let Some(end) = tail[start + 1..].find('"') {
+                    let key = &tail[start + 1..start + 1 + end];
+                    if !depot.is_empty() && key.len() == 64 {
+                        keys.push_str(&format!("{depot};{key}\n"));
+                    }
+                }
+            }
+        }
+    }
+    (depots, keys)
+}
+
+fn depot_downloader_path() -> Option<PathBuf> {
+    let stable = steamtron_core::paths::layout().tools().join("DepotDownloaderMod");
+    if stable.is_file() {
+        return Some(stable);
+    }
+    let temp = std::env::temp_dir()
+        .join("SteamManifestDownloader")
+        .join("DepotDownloaderMod")
+        .join("DepotDownloaderMod");
+    if !temp.is_file() {
+        return None;
+    }
+    let _ = std::fs::copy(&temp, &stable);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&stable, std::fs::Permissions::from_mode(0o755));
+    }
+    stable.is_file().then_some(stable)
+}
+
+fn ensure_verify_metadata(
+    app_id: u32,
+    lua_path: &Path,
+    root: &Path,
+) -> Result<Vec<(String, String)>, String> {
+    let lua = std::fs::read_to_string(lua_path).map_err(|error| format!("{}: {error}", lua_path.display()))?;
+    let (depots, keys) = parse_lua_metadata(&lua);
+    if depots.is_empty() {
+        return Ok(depots);
+    }
+    std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    if !keys.is_empty() {
+        std::fs::write(root.join("steam.keys"), keys).map_err(|error| error.to_string())?;
+    }
+    let missing = |pair: &(String, String)| !root.join(format!("{}_{}.manifest", pair.0, pair.1)).is_file();
+    if depots.iter().any(missing) {
+        let cached = steamtron_core::paths::layout().manifests();
+        for (depot, manifest) in &depots {
+            let name = format!("{depot}_{manifest}.manifest");
+            let destination = root.join(&name);
+            if destination.is_file() {
+                continue;
+            }
+            let source = cached.join(&name);
+            if source.is_file() {
+                std::fs::copy(&source, &destination).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    if depots.iter().any(missing) {
+        let bundle = steamtron_library::download_bundle(&app_id.to_string())
+            .map_err(|error| format!("Could not fetch depot manifests: {error}"))?;
+        for (name, bytes) in &bundle.manifests {
+            let safe = Path::new(name).file_name().and_then(|value| value.to_str()).unwrap_or("manifest");
+            std::fs::write(root.join(safe), bytes).map_err(|error| error.to_string())?;
+        }
+    }
+    if let Some((depot, manifest)) = depots.iter().find(|pair| missing(pair)) {
+        return Err(format!(
+            "Depot metadata for {depot}_{manifest}.manifest is unavailable from the manifest source."
+        ));
+    }
+    Ok(depots)
+}
+
+fn run_ddm_verify(
+    app: &tauri::AppHandle,
+    game_id: &str,
+    root: &Path,
+    ddm: &Path,
+    depots: &[(String, String)],
+    log: &Path,
+    control: &OperationControl,
+) -> Result<PathBuf, String> {
+    use std::io::{BufRead, BufReader, Write};
+    let stderr_path = log.with_extension("stderr.log");
+    let mut output = std::fs::File::create(log).map_err(|error| error.to_string())?;
+    let mut stderr = std::fs::OpenOptions::new().create(true).append(true).open(&stderr_path).map_err(|error| error.to_string())?;
+    let mut last_emit = std::time::Instant::now();
+    for (index, (depot, manifest)) in depots.iter().enumerate() {
+        operation_check(control)?;
+        let manifest_file = format!("{depot}_{manifest}.manifest");
+        let mut command = std::process::Command::new(ddm);
+        command
+            .current_dir(root)
+            .args(["-app", &game_id, "-depot", depot, "-manifest", manifest, "-depotkeys", "steam.keys", "-manifestfile", &manifest_file, "-dir", ".", "-max-downloads", "8", "-verify-all"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::from(stderr.try_clone().map_err(|error| error.to_string())?));
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command.spawn().map_err(|error| format!("could not start DepotDownloaderMod: {error}"))?;
+        if let Ok(mut pid) = control.pid.lock() {
+            *pid = Some(child.id());
+        }
+        let stdout = child.stdout.take().ok_or("DepotDownloaderMod stdout unavailable")?;
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let mut file_percent = 0.0f64;
+        while control.cancelled.load(Ordering::SeqCst) == false && reader.read_line(&mut line).unwrap_or(0) > 0 {
+            let _ = write!(output, "{line}");
+            if let Some(position) = line.find('%') {
+                if let Ok(percent) = line[..position].trim().parse::<f64>() {
+                    file_percent = percent.clamp(0.0, 100.0);
+                }
+            }
+            if last_emit.elapsed() >= std::time::Duration::from_millis(250) {
+                let percent = (index as f64 + file_percent / 100.0) / depots.len() as f64 * 100.0;
+                emit_operation_at(app, "verify", game_id, "check", "running", "Checking files against depot manifests…", percent);
+                last_emit = std::time::Instant::now();
+            }
+            line.clear();
+        }
+        if control.cancelled.load(Ordering::SeqCst) {
+            let _ = std::process::Command::new("kill").args(["-CONT", &format!("-{}", child.id())]).status();
+            let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{}", child.id())]).status();
+        }
+        let status = child.wait().map_err(|error| error.to_string())?;
+        if !status.success() && !control.cancelled.load(Ordering::SeqCst) {
+            return Err(format!("DepotDownloaderMod failed while verifying depot {depot}."));
+        }
+        let percent = (index + 1) as f64 / depots.len() as f64 * 100.0;
+        emit_operation_at(app, "verify", game_id, "check", "running", "Checking files against depot manifests…", percent);
+    }
+    Ok(log.to_path_buf())
+}
+
 #[tauri::command]
 async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
@@ -3968,6 +4133,30 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
     let logs = steamtron_core::paths::layout().diagnostics_for(&game_id);
     std::fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
     let log = logs.join(format!("verify-{}.log", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0)));
+    if let Some(ddm) = depot_downloader_path() {
+        emit_operation_at(&app, "verify", &game_id, "check", "running", "Preparing depot metadata…", 0.0);
+        let lua_path = lua.clone();
+        let root_path = root.clone();
+        let metadata = tauri::async_runtime::spawn_blocking(move || ensure_verify_metadata(app_id, &lua_path, &root_path))
+            .await
+            .map_err(|error| format!("manifest preparation failed: {error}"))??;
+        if !metadata.is_empty() {
+            let control = register_operation("verify", &game_id);
+            let emit_app = app.clone();
+            let emit_game = game_id.clone();
+            let root_path = root.clone();
+            let log_path = log.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                run_ddm_verify(&emit_app, &emit_game, &root_path, &ddm, &metadata, &log_path, &control)
+            })
+            .await;
+            unregister_operation("verify", &game_id);
+            let log_path = result
+                .map_err(|error| format!("verification task failed: {error}"))??;
+            emit_operation_at(&app, "verify", &game_id, "done", "done", "Verification complete", 100.0);
+            return Ok(serde_json::json!({ "verified": true, "log": log_path.display().to_string() }));
+        }
+    }
     emit_operation_at(&app, "verify", &game_id, "check", "running", "Checking files against depot manifests…", 0.0);
     let emit_app = app.clone();
     let emit_game = game_id.clone();
