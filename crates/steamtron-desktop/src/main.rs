@@ -1490,28 +1490,6 @@ fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, 
     Ok(Some(path.display().to_string()))
 }
 
-#[tauri::command]
-fn set_enabled(appid: String, enabled: bool) -> Result<String, String> {
-    require_auth()?;
-    require_steam_stopped()?;
-    let mut config = Config::load().map_err(|error| error.to_string())?;
-    let Some(entry) = config.entry(&appid) else {
-        return Err("No fixes configured for this game.".into());
-    };
-    let fixes = entry.fixes.clone();
-    config
-        .upsert(&appid, fixes, enabled)
-        .map_err(|error| error.to_string())?;
-    config
-        .set_launch_option_disabled(&appid, !enabled)
-        .map_err(|error| error.to_string())?;
-    configure_launch_option(&appid, enabled)?;
-    Ok(if enabled {
-        "Fixes enabled and Steam launch option set. Start Steam manually.".into()
-    } else {
-        "Fixes disabled and Steam launch option cleared. Start Steam manually.".into()
-    })
-}
 
 #[tauri::command]
 fn apply_launch_option(appid: String, enabled: bool) -> Result<String, String> {
@@ -1914,7 +1892,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .map_err(|error| error.to_string())?;
     let fixes = managed_fixes_dir(&game);
     let use_overlay =
-        game.fixes_enabled && fixes.as_ref().is_some_and(|path| dir_has_entries(path));
+        fixes.as_ref().is_some_and(|path| dir_has_entries(path));
     let command = if use_overlay {
         let fixes_path = fixes.as_ref().expect("checked above").clone();
         let appid = game
@@ -2335,21 +2313,6 @@ fn managed_fixes_status(game_id: String) -> Result<serde_json::Value, String> {
     }))
 }
 
-#[tauri::command]
-fn set_managed_fixes_enabled(game_id: String, enabled: bool) -> Result<serde_json::Value, String> {
-    use steamtron_core::library::Library;
-
-    require_auth()?;
-    let mut library = Library::load().map_err(|error| error.to_string())?;
-    let mut game = library
-        .game(&game_id)
-        .cloned()
-        .ok_or_else(|| format!("unknown game {game_id}"))?;
-    game.fixes_enabled = enabled;
-    library.upsert_game(game).map_err(|error| error.to_string())?;
-    library.save().map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({ "enabled": enabled }))
-}
 
 #[tauri::command]
 fn export_managed_fixes(game_id: String) -> Result<Option<String>, String> {
@@ -4705,7 +4668,6 @@ fn main() {
             use_fixes_folder,
             open_fixes_folder,
             export_fixes,
-            set_enabled,
             apply_launch_option,
             remove_fixes,
             library_snapshot,
@@ -4773,7 +4735,6 @@ fn main() {
             stop_managed,
             managed_fixes,
             managed_fixes_status,
-            set_managed_fixes_enabled,
             export_managed_fixes,
             apply_managed_goldberg,
             remove_managed_goldberg,

@@ -1616,18 +1616,13 @@ function openManagedGameOptions(game) {
         return;
       }
       const present = status.files > 0;
-      const overlay = status.enabled ? "Enabled" : "Disabled";
       pane.innerHTML = `<h3>Fixes</h3>
-        <p class="pane-note">Import, export, enable, or remove per-game fixes. Enabled fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
+        <p class="pane-note">Import, export, or remove per-game fixes. Fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
         <div class="fix-action-row"><button class="primary" id="fix-import">Import fixes ZIP…</button><button id="fix-export"${present ? "" : " disabled"}>Export fixes ZIP…</button></div>
         <section class="fix-section"><h4>Current fixes location</h4>
           <p class="fix-path">${status.path ? escape(status.path) : "No fixes folder yet."}</p>
           <p class="fix-meta">${present ? `${status.files} file${status.files === 1 ? "" : "s"} · ${formatBytes(status.bytes)}` : "No fixes installed."}</p>
           <div class="fix-action-row"><button id="fix-open"${present ? "" : " disabled"}>Open fixes folder</button><button id="fix-remove" class="danger"${present ? "" : " disabled"}>Remove fixes</button></div>
-        </section>
-        <section class="fix-section"><h4>SteamTron launch overlay</h4>
-          <p class="pane-note">${present ? `${overlay}. SteamTron applies these fixes at Play; game-created files persist in a private layer.` : "No fixes are configured for this game."}</p>
-          <div class="fix-action-row"><button id="fix-toggle"${present ? "" : " disabled"}>${status.enabled ? "Disable fixes" : "Enable fixes"}</button></div>
         </section>
         <section class="fix-section"><h4>GoldBerg emulator</h4>
           <p class="pane-note">Replaces this game's Steam library with the GoldBerg emulator and generates its interface list from the original library. The emulator release is downloaded once and shared by every game; the installed game files are never changed.</p>
@@ -1670,9 +1665,6 @@ function openManagedGameOptions(game) {
         try { await invoke("open_path", { path: status.path }); }
         catch (error) { showToast(String(error), true); }
       };
-      pane.querySelector("#fix-toggle").onclick = (event) => run(event.currentTarget, () =>
-        invoke("set_managed_fixes_enabled", { gameId: game.id, enabled: !status.enabled }),
-        !status.enabled ? "Fixes enabled" : "Fixes disabled");
       pane.querySelector("#fix-remove").onclick = async (event) => {
         if (!(await confirmDialog({ title: "Remove fixes", message: "Remove all fixes for this game? Files are deleted from the fixes folder; installed game files are unchanged.", confirmLabel: "Remove", danger: true }))) return;
         void run(event.currentTarget, () => invoke("remove_managed_fixes", { gameId: game.id }),
@@ -1685,8 +1677,9 @@ function openManagedGameOptions(game) {
       pane.querySelector("#fix-goldberg-remove").onclick = (event) => run(event.currentTarget,
         () => invoke("remove_managed_goldberg", { gameId: game.id }), "GoldBerg removed");
       pane.querySelector("#fix-steamless-apply").onclick = (event) => {
-        showToast("Applying Steamless — first use downloads the tool.");
-        void run(event.currentTarget, () => invoke("apply_managed_steamless", { gameId: game.id }), "Steamless applied");
+        showToast("Applying Steamless…");
+        void run(event.currentTarget, () => invoke("apply_managed_steamless", { gameId: game.id }),
+          (result) => result.message || "Steamless applied");
       };
       pane.querySelector("#fix-steamless-remove").onclick = (event) => run(event.currentTarget,
         () => invoke("remove_managed_steamless", { gameId: game.id }), "Steamless removed");
@@ -3252,12 +3245,11 @@ function renderFixesPanel(panel, game, current) {
     <div class="fixes-section">
       <div class="row"><div class="label">Steam launch option</div><div class="value">${current?.launch_option_set ? "Set" : "Not set"}</div></div>
       <div class="actions">
-        <button id="toggle" ${hasFixes ? "" : "disabled"}>${current?.enabled ? "Disable fixes" : "Enable fixes"}</button>
         <button class="danger" id="remove" ${hasFixes ? "" : "disabled"}>Remove fixes entry</button>
         <button id="launch-option" ${hasFixes ? "" : "disabled"}>${current?.launch_option_set ? "Clear launch option" : "Set launch option"}</button>
       </div>
     </div>
-    <div class="status${hasFixes && current.enabled && !current.launch_option_set ? " error" : ""}">${current?.launch_option_error ? escape(current.launch_option_error) : hasFixes ? (current.enabled && !current.launch_option_set ? "Fixes are enabled, but the Steam launch option is not set. Click Set launch option, then fully restart Steam." : current.enabled ? "Fixes enabled." : "Fixes installed but disabled.") : "No fixes installed. Launch options are available independently."}</div>`;
+    <div class="status${hasFixes && !current.launch_option_set ? " error" : ""}">${current?.launch_option_error ? escape(current.launch_option_error) : hasFixes ? (current.launch_option_set ? "Fixes installed." : "The Steam launch option is not set. Click Set launch option, then fully restart Steam.") : "No fixes installed. Launch options are available independently."}</div>`;
   const securityBlock = panel.querySelector("#security-block");
   const securityValue = panel.querySelector("#security-value");
   const securityStatus = panel.querySelector("#security-status");
@@ -3377,23 +3369,6 @@ function renderFixesPanel(panel, game, current) {
     try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid, title: game.name }); status(result ? `Exported ${result}` : "Export cancelled."); }
     catch (error) { status(String(error), true); }
     finally { stop(); }
-  };
-  panel.querySelector("#toggle").onclick = async () => {
-    const button = panel.querySelector("#toggle");
-    if (!await ensureSteamClosed(current.enabled ? "disable fixes" : "enable fixes")) return;
-    const stop = busy(button, current.enabled ? "Disabling…" : "Enabling…");
-    try {
-      const message = await invoke("set_enabled", { appid: game.appid, enabled: !current.enabled });
-      await loadFixes();
-      markRestartRequired(`${game.name} fixes changed. Restart Steam to apply.`);
-      stop();
-      renderDetail(game, "fixes");
-      status(message);
-    } catch (error) {
-      stop();
-      try { await loadFixes(); renderDetail(game, "fixes"); } catch {}
-      status(String(error), true);
-    }
   };
   panel.querySelector("#launch-option").onclick = async () => {
     const button = panel.querySelector("#launch-option");

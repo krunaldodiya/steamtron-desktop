@@ -25,7 +25,7 @@ steamtron-doctor = { path = "../steamtron-doctor" }
 steamtron-auth = { path = "../steamtron-auth" }
 steamtron-library = { path = "../steamtron-library" }
 anyhow = "1"
-libsteamless = "0.1"
+steamless-core = { git = "https://github.com/staernid/steamless-rs", rev = "5886222dfdbb4f707c9dfa2fd37510297b7147d7" }
 sevenz-rust = "0.6.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]

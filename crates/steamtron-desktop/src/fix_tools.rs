@@ -446,28 +446,35 @@ pub fn apply_steamless(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_j
     }
     let mut files = Vec::new();
     let mut results = Vec::new();
+    let mut errors = Vec::new();
     for source in launchers {
         let relative = source.strip_prefix(&game.installation.root).map_err(|_| "launcher is outside the game folder".to_string())?;
         let destination = fixes.join(relative);
         if destination.exists() {
+            files.push(relative.to_string_lossy().into_owned());
             results.push(format!("{}: existing", relative.display()));
             continue;
         }
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
         fs::copy(&source, &destination).map_err(|error| error.to_string())?;
-        let protected = libsteamless::is_steamstub_path(&destination).unwrap_or(false);
-        if !protected {
+        let data = fs::read(&destination).map_err(|error| error.to_string())?;
+        let pe = match steamless_core::pe::PeFile::parse(&data) {
+            Ok(pe) => pe,
+            Err(error) => {
+                let _ = fs::remove_file(&destination);
+                errors.push(format!("{}: {error}", relative.display()));
+                results.push(format!("{}: {error}", relative.display()));
+                continue;
+            }
+        };
+        let registry = steamless_core::unpackers::UnpackerRegistry::new();
+        let Some(unpacker) = registry.find_unpacker(&pe) else {
             let _ = fs::remove_file(&destination);
             results.push(format!("{}: not SteamStub-packed", relative.display()));
             continue;
-        }
-        let options = libsteamless::SteamlessOptions::default();
-        let process = libsteamless::process_file(
-            &destination.to_string_lossy(),
-            &options,
-            &|_, _| {},
-        );
+        };
         let unpacked = destination.with_extension("unpacked.exe");
+        let process = unpacker.unpack(&pe, &unpacked.to_string_lossy());
         if process.is_ok() && unpacked.is_file() {
             let _ = fs::remove_file(&destination);
             fs::rename(&unpacked, &destination).map_err(|error| error.to_string())?;
@@ -480,17 +487,31 @@ pub fn apply_steamless(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_j
                 Ok(()) => "no unpacked output was produced".to_string(),
                 Err(error) => error.to_string(),
             };
+            errors.push(format!("{}: {error}", relative.display()));
             results.push(format!("{}: {error}", relative.display()));
         }
     }
     if files.is_empty() {
-        return Err("Steamless could not unpack any launcher.".into());
+        if !errors.is_empty() {
+            return Err(format!("Steamless could not unpack any launcher: {}", errors.join("; ")));
+        }
+        return Ok(serde_json::json!({
+            "files": [],
+            "results": results,
+            "applied": false,
+            "message": "No SteamStub protection was found in the registered launchers; nothing to unpack."
+        }));
     }
     write_manifest(&fixes.join(STEAMLESS_MANIFEST), &files)?;
     game.fixes_enabled = true;
     library.upsert_game(game).map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({ "files": files, "results": results }))
+    Ok(serde_json::json!({
+        "files": files,
+        "results": results,
+        "applied": true,
+        "message": format!("Unpacked {} launcher{}.", files.len(), if files.len() == 1 { "" } else { "s" })
+    }))
 }
 
 pub fn remove_steamless(game_id: &str) -> Result<serde_json::Value, String> {
