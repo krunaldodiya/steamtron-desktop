@@ -1349,6 +1349,8 @@ function openOperationManager(options = {}) {
   const pauseButton = backdrop.querySelector("#operation-pause");
   const cancelButton = backdrop.querySelector("#operation-cancel");
   const actions = backdrop.querySelector("#operation-actions");
+  // Verification is an all-or-nothing integrity pass: let it finish or cancel.
+  if (operation === "verify") pauseButton.classList.add("hidden");
   const closeButton = backdrop.querySelector(".modal-close");
   let unlisten = null;
   let resolveReady;

@@ -53,10 +53,9 @@ present-participle label.
 - R10: An inline 0–100% bar appears under each action, matching download's
   inline bar.
 - R11: The inline bar shows the backend stage and final message, then hides.
-- R12: Backup, restore, and verify expose Pause/Resume and Cancel beside the
-  progress bar, like downloads.
-- R13: Backup/restore pause cooperatively between archive/extraction entries;
-  verify pauses/resumes the SMD process group with signals.
+- R12: Backup and restore expose Pause/Resume and Cancel beside the progress
+  bar. Verify exposes Cancel only; it must run to completion or be cancelled.
+- R13: Backup/restore pause cooperatively between archive/extraction entries.
 - R14: Cancel stops the worker, removes a partial backup archive, and reports
   Cancelled without being overwritten by a failure.
 
