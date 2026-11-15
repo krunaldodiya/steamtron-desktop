@@ -1,6 +1,6 @@
 # Retry Store requests with a fresh client
 
-- Status: active
+- Status: done
 - Date: 2026-11-15
 - Areas: `crates/steamtron-desktop/src/main.rs`
 
@@ -40,6 +40,8 @@ failure retries with a fresh client and surfaces a user-readable message.
 - `curl` with the saved token returned HTTP 200 and 841 bytes.
 - A standalone reqwest 0.12 client returned HTTP 200.
 - `cargo check` passed.
+- After the retry change, the installed app's Store search for `cricket` returned
+  results normally.
 
 ## Decisions and risks
 
