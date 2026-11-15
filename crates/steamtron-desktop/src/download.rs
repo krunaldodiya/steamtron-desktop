@@ -441,6 +441,19 @@ fn monitor(
                             stage_message = format!("Downloading · {reported_percent:.0}%");
                         }
                     }
+                    if let Some(depot) = value.get("depotId").and_then(|depot| depot.as_str()) {
+                        if let Some(position) = line.find("Downloaded ") {
+                            if let Some(bytes) = line[position + 11..]
+                                .split_whitespace()
+                                .next()
+                                .and_then(|value| value.parse::<u64>().ok())
+                            {
+                                depot_bytes.insert(depot.to_owned(), bytes);
+                                depot_totals.insert(depot.to_owned(), bytes);
+                                total = depot_totals.values().sum();
+                            }
+                        }
+                    }
                 }
             }
             Some("depot_complete") => {
@@ -449,6 +462,9 @@ fn monitor(
                 if let Some(depot) = value.get("depotId").and_then(|depot| depot.as_str()) {
                     if !depot_finished.iter().any(|id| id == depot) {
                         depot_finished.push(depot.to_owned());
+                    }
+                    if let Some(bytes) = depot_bytes.get(depot).copied() {
+                        depot_totals.entry(depot.to_owned()).or_insert(bytes);
                     }
                 }
                 stage_message = "Finalizing depot…".into();
@@ -478,7 +494,11 @@ fn monitor(
                 let results_ok = value
                     .get("results")
                     .and_then(|results| results.as_array())
-                    .map(|results| results.iter().all(|result| result.get("error").is_none()))
+                    .map(|results| {
+                        results.iter().all(|result| {
+                            result.get("error").map_or(true, serde_json::Value::is_null)
+                        })
+                    })
                     .unwrap_or(true);
                 completion_ok = Some(
                     outcome != "failed"
@@ -537,15 +557,20 @@ fn monitor(
                     } else {
                         "pending"
                     };
+                    let depot_percent = if depot_total > 0 {
+                        (depot_completed as f64 / depot_total as f64 * 100.0).min(100.0)
+                    } else if status == "done" {
+                        100.0
+                    } else if status == "downloading" {
+                        reported_percent
+                    } else {
+                        0.0
+                    };
                     DepotProgress {
                         depot_id: id.clone(),
                         completed: depot_completed,
                         total: depot_total,
-                        percent: if depot_total > 0 {
-                            (depot_completed as f64 / depot_total as f64 * 100.0).min(100.0)
-                        } else {
-                            0.0
-                        },
+                        percent: depot_percent,
                         status: status.into(),
                     }
                 })

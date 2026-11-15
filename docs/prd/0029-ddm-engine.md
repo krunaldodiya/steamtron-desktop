@@ -41,6 +41,7 @@ the existing Lua/manifest flow, progress events, pause/resume, and persistence.
 ## Acceptance criteria
 
 - [ ] The Binding of Isaac downloads real bytes and completes with DDM.
+- [ ] A successful DDM result with `"error": null` is treated as success.
 - [ ] The manager shows progress and the final installed state.
 - [ ] Pause/resume/cancel and app-exit reconnect still work.
 
@@ -54,6 +55,9 @@ the existing Lua/manifest flow, progress events, pause/resume, and persistence.
   `Download complete. 1/1 depots downloaded successfully.` in ~14 seconds.
 - Native engine on the same manifest stalled at `awaiting completion` with no
   data.
+- App DDM run reached 100% but was marked failed: SMD's completion result uses
+  `"error": null`, and `Option::is_none()` on the present JSON key returned
+  false. Completion now accepts a null error, and completed depots report 100%.
 
 ## Decisions and risks
 
