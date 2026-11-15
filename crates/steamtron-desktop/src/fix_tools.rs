@@ -3,9 +3,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
-use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -15,7 +13,6 @@ pub const GSE_TAG: &str = "2026_02_16";
 const GSE_ASSET: &str = "emu-win-release.7z";
 const GSE_SHA256: &str = "cdcee5f8a01b837205aba4d0c6867da98975c74d4f767da60b1724c318cdc2e4";
 const GSE_URL: &str = "https://github.com/alex47exe/gse_fork/releases/download/2026_02_16/emu-win-release.7z";
-const STEAMLESS_URL: &str = "https://codeload.github.com/krunaldodiya/steamless-linux/tar.gz/refs/heads/main";
 const GOLDBERG_MANIFEST: &str = ".steamtron-goldberg.json";
 const STEAMLESS_MANIFEST: &str = ".steamtron-steamless.json";
 
@@ -70,18 +67,6 @@ fn download(url: &str, path: &Path, expected: Option<&str>, limit: u64) -> Resul
     Ok(())
 }
 
-fn seven_zip() -> Option<PathBuf> {
-    let bundled = steamtron_core::paths::layout().seven_zip();
-    if bundled.is_file() {
-        return Some(bundled);
-    }
-    let name = if cfg!(windows) { "7z.exe" } else { "7z" };
-    std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|directory| directory.join(name))
-            .find(|candidate| candidate.is_file())
-    })
-}
 
 fn ensure_goldberg_assets(progress: &dyn Fn(&str)) -> Result<PathBuf, String> {
     let root = steamtron_core::paths::layout().goldberg(GSE_TAG);
@@ -100,17 +85,11 @@ fn ensure_goldberg_assets(progress: &dyn Fn(&str)) -> Result<PathBuf, String> {
         return Err(error);
     }
     progress("Extracting GoldBerg assets…");
-    let seven = seven_zip().ok_or_else(|| "7-Zip is required to extract GoldBerg".to_string())?;
-    let status = Command::new(&seven)
-        .args(["x", "-y", &format!("-o{}", staging.join("out").display()), &archive.display().to_string()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|error| error.to_string())?;
-    if !status.success() {
+    let out = staging.join("out");
+    fs::create_dir_all(&out).map_err(|error| error.to_string())?;
+    if let Err(error) = sevenz_rust::decompress_file(&archive, &out) {
         let _ = fs::remove_dir_all(&staging);
-        return Err("the GoldBerg release could not be extracted".into());
+        return Err(format!("the GoldBerg release could not be extracted: {error}"));
     }
     let mut found = None;
     for entry in walk(&staging.join("out"), 0)? {
@@ -445,55 +424,16 @@ pub fn remove_goldberg(game_id: &str) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "removed": removed }))
 }
 
-fn ensure_steamless_assets(progress: &dyn Fn(&str)) -> Result<PathBuf, String> {
-    let root = steamtron_core::paths::layout().steamless();
-    if root.join("steamless").is_file() && root.join("Steamless.CLI.exe").is_file() {
-        return Ok(root);
-    }
-    progress("Downloading Steamless…");
-    let parent = root.parent().ok_or_else(|| "invalid Steamless cache path".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let staging = parent.join(format!(".steamless-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&staging);
-    fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
-    let archive = staging.join("steamless.tar.gz");
-    download(STEAMLESS_URL, &archive, None, 64 * 1024 * 1024)?;
-    tar::Archive::new(GzDecoder::new(fs::File::open(&archive).map_err(|error| error.to_string())?))
-        .unpack(&staging)
-        .map_err(|error| format!("Steamless archive is invalid: {error}"))?;
-    let mut found = None;
-    for path in walk(&staging, 0)? {
-        if path.file_name().and_then(|value| value.to_str()) == Some("steamless") {
-            if path.parent().map(|parent| parent.join("Steamless.CLI.exe").is_file()).unwrap_or(false) {
-                found = path.parent().map(Path::to_path_buf);
-                break;
-            }
-        }
-    }
-    let Some(found) = found else {
-        let _ = fs::remove_dir_all(&staging);
-        return Err("the Steamless download does not contain the expected tool".into());
-    };
-    if root.exists() { fs::remove_dir_all(&root).map_err(|error| error.to_string())?; }
-    fs::rename(&found, &root).map_err(|error| error.to_string())?;
-    let _ = fs::remove_dir_all(&staging);
-    Ok(root)
-}
-
 pub fn steamless_applied(game: &Game) -> bool {
     let Ok(fixes) = fixes_dir(game) else { return false };
     !read_manifest(&fixes.join(STEAMLESS_MANIFEST)).is_empty()
 }
 
 pub fn apply_steamless(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_json::Value, String> {
-    if std::env::var_os("PATH").map(|path| std::env::split_paths(&path).any(|dir| dir.join("wine").is_file())).unwrap_or(false) == false {
-        return Err("Steamless requires Wine. Install Wine and try again.".into());
-    }
     let mut library = Library::load().map_err(|error| error.to_string())?;
     let mut game = library.game(game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     let fixes = fixes_dir(&game)?;
     fs::create_dir_all(&fixes).map_err(|error| error.to_string())?;
-    let tool = ensure_steamless_assets(progress)?;
     progress("Unpacking registered launchers…");
     let mut launchers = Vec::new();
     for target in &game.launch_targets {
@@ -515,21 +455,32 @@ pub fn apply_steamless(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_j
         }
         if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
         fs::copy(&source, &destination).map_err(|error| error.to_string())?;
-        let status = Command::new(tool.join("steamless"))
-            .args(["--inplace", &destination.display().to_string()])
-            .current_dir(&tool)
-            .env("STEAMLESS_HOME", &tool)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .status().map_err(|error| error.to_string())?;
-        let unpacked = destination.with_file_name(format!("{}.unpacked.exe", destination.file_name().unwrap_or_default().to_string_lossy()));
-        if status.success() && unpacked.is_file() {
+        let protected = libsteamless::is_steamstub_path(&destination).unwrap_or(false);
+        if !protected {
+            let _ = fs::remove_file(&destination);
+            results.push(format!("{}: not SteamStub-packed", relative.display()));
+            continue;
+        }
+        let options = libsteamless::SteamlessOptions::default();
+        let process = libsteamless::process_file(
+            &destination.to_string_lossy(),
+            &options,
+            &|_, _| {},
+        );
+        let unpacked = destination.with_extension("unpacked.exe");
+        if process.is_ok() && unpacked.is_file() {
+            let _ = fs::remove_file(&destination);
             fs::rename(&unpacked, &destination).map_err(|error| error.to_string())?;
             files.push(relative.to_string_lossy().into_owned());
             results.push(format!("{}: unpacked", relative.display()));
         } else {
             let _ = fs::remove_file(&destination);
             let _ = fs::remove_file(&unpacked);
-            results.push(format!("{}: skipped", relative.display()));
+            let error = match process {
+                Ok(()) => "no unpacked output was produced".to_string(),
+                Err(error) => error.to_string(),
+            };
+            results.push(format!("{}: {error}", relative.display()));
         }
     }
     if files.is_empty() {

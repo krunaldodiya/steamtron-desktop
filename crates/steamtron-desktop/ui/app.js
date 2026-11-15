@@ -1627,7 +1627,7 @@ function openManagedGameOptions(game) {
         </section>
         <section class="fix-section"><h4>SteamTron launch overlay</h4>
           <p class="pane-note">${present ? `${overlay}. SteamTron applies these fixes at Play; game-created files persist in a private layer.` : "No fixes are configured for this game."}</p>
-          <div class="fix-action-row"><button id="fix-toggle"${present ? "" : " disabled"}>${status.enabled ? "Disable fixes" : "Enable fixes"}</button><button id="fix-delete" class="danger"${present ? "" : " disabled"}>Remove fixes</button></div>
+          <div class="fix-action-row"><button id="fix-toggle"${present ? "" : " disabled"}>${status.enabled ? "Disable fixes" : "Enable fixes"}</button></div>
         </section>
         <section class="fix-section"><h4>GoldBerg emulator</h4>
           <p class="pane-note">Replaces this game's Steam library with the GoldBerg emulator and generates its interface list from the original library. The emulator release is downloaded once and shared by every game; the installed game files are never changed.</p>
@@ -1635,8 +1635,8 @@ function openManagedGameOptions(game) {
           <div class="fix-action-row"><button id="fix-goldberg-apply">Apply GoldBerg</button><button id="fix-goldberg-remove" class="danger"${status.goldberg ? "" : " disabled"}>Remove GoldBerg</button></div>
         </section>
         <section class="fix-section"><h4>Steamless</h4>
-          <p class="pane-note">Copies each registered launcher into this fixes folder with its exact structure and removes Steam DRM (SteamStub) from that copy. The steamless-linux tool is downloaded once and shared by every game; the installed game files are never changed.</p>
-          <p class="fix-meta">${status.steamless ? "Steamless is applied to this fixes folder." : "Steamless is not applied. The tool is downloaded and verified on first use."}</p>
+          <p class="pane-note">Copies each registered launcher into this fixes folder with its exact structure and removes SteamStub DRM from that copy using SteamTron's built-in unpacker. No Wine or external tool is required. The installed game files are never changed.</p>
+          <p class="fix-meta">${status.steamless ? "Steamless is applied to this fixes folder." : "Steamless is not applied. The built-in unpacker runs locally."}</p>
           <div class="fix-action-row"><button id="fix-steamless-apply">Apply Steamless</button><button id="fix-steamless-remove" class="danger"${status.steamless ? "" : " disabled"}>Remove Steamless</button></div>
         </section>`;
 
@@ -1673,13 +1673,11 @@ function openManagedGameOptions(game) {
       pane.querySelector("#fix-toggle").onclick = (event) => run(event.currentTarget, () =>
         invoke("set_managed_fixes_enabled", { gameId: game.id, enabled: !status.enabled }),
         !status.enabled ? "Fixes enabled" : "Fixes disabled");
-      for (const id of ["#fix-remove", "#fix-delete"]) {
-        pane.querySelector(id).onclick = async (event) => {
-          if (!(await confirmDialog({ title: "Remove fixes", message: "Remove all fixes for this game? Files are deleted from the fixes folder; installed game files are unchanged.", confirmLabel: "Remove", danger: true }))) return;
-          void run(event.currentTarget, () => invoke("remove_managed_fixes", { gameId: game.id }),
-            (result) => `Removed ${result.files} fix file${result.files === 1 ? "" : "s"}`);
-        };
-      }
+      pane.querySelector("#fix-remove").onclick = async (event) => {
+        if (!(await confirmDialog({ title: "Remove fixes", message: "Remove all fixes for this game? Files are deleted from the fixes folder; installed game files are unchanged.", confirmLabel: "Remove", danger: true }))) return;
+        void run(event.currentTarget, () => invoke("remove_managed_fixes", { gameId: game.id }),
+          (result) => `Removed ${result.files} fix file${result.files === 1 ? "" : "s"}`);
+      };
       pane.querySelector("#fix-goldberg-apply").onclick = (event) => {
         showToast("Applying GoldBerg — first use downloads the emulator assets.");
         void run(event.currentTarget, () => invoke("apply_managed_goldberg", { gameId: game.id }), "GoldBerg applied");
