@@ -233,7 +233,14 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
     let mut state = {
         let Ok(mut states) = states().lock() else { return };
         let Some(state) = states.get_mut(game_id) else { return };
-        state.status = if success { "done".into() } else { "error".into() };
+        let cancelled = state.status == "cancelled";
+        state.status = if cancelled {
+            "cancelled".into()
+        } else if success {
+            "done".into()
+        } else {
+            "error".into()
+        };
         if success {
             state.percent = 100.0;
             state.completed = state.total;
@@ -284,8 +291,12 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
         }
         state.message = "Download complete".into();
     } else {
-        // A failed first download leaves smd's preallocated, possibly sparse
-        // files. Do not let them masquerade as an installed game.
+        if state.status == "cancelled" {
+            state.message = "Download cancelled".into();
+        }
+        // A failed or cancelled first download leaves smd's preallocated,
+        // possibly sparse files. Do not let them masquerade as an installed
+        // game.
         let managed_root = steamtron_core::paths::layout()
             .home()
             .parent()
@@ -307,8 +318,21 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
     let _ = app.emit("download-complete", serde_json::json!({
         "gameId": game_id,
         "success": success,
+        "cancelled": state.status == "cancelled",
         "message": state.message,
     }));
+}
+
+fn regenerate_lua(game: &steamtron_core::library::Game) -> Result<PathBuf, String> {
+    let app_id = game
+        .metadata_app_id
+        .ok_or_else(|| "this game has no Steam App ID".to_string())?;
+    let bundle = steamtron_library::download_bundle(&app_id.to_string()).map_err(|error| {
+        format!("The Lua manifest is missing and could not be regenerated: {error}. Re-add the game first.")
+    })?;
+    steamtron_library::managed::write_managed_lua(game, &bundle.lua)
+        .map(|(_, path)| path)
+        .map_err(|error| format!("The Lua manifest could not be saved: {error}"))
 }
 
 pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
@@ -339,12 +363,17 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     let lua = if let Some(path) = local_lua {
         path
     } else if let Ok(steam_root) = steamtron_core::steam::steam_root() {
-        steam_root.join("config/stplug-in").join(format!("{app_id}.lua"))
+        let steam_lua = steam_root.join("config/stplug-in").join(format!("{app_id}.lua"));
+        if steam_lua.is_file() {
+            steam_lua
+        } else {
+            regenerate_lua(game)?
+        }
     } else {
-        return Err("The Lua manifest is missing. Re-add the game first.".into());
+        regenerate_lua(game)?
     };
     if !lua.is_file() {
-        return Err("The Lua manifest is missing. Re-add the game first.".into());
+        return Err("The Lua manifest is missing and could not be regenerated. Re-add the game first.".into());
     }
     let cache = steamtron_core::paths::layout().cache_dir().join("smd");
     configure_smd(&cache.join("data"))?;
@@ -386,6 +415,23 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     let stderr_log = log_file.try_clone().map_err(|error| error.to_string())?;
     let return_game_id = game_id.clone();
     let return_log = log_path.display().to_string();
+    let queued = DownloadState {
+        game_id: game_id.clone(),
+        status: "queued".into(),
+        percent: 0.0,
+        completed: 0,
+        total: 0,
+        speed: 0.0,
+        message: "Starting smd…".into(),
+        log: return_log.clone(),
+    };
+    if let Ok(mut states) = states().lock() {
+        states.insert(game_id.clone(), queued.clone());
+    }
+    if let Ok(mut active) = active().lock() {
+        active.insert(game_id.clone(), pid);
+    }
+    publish(&app, &queued);
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader, Write};
         let mut err_out = stderr_log;
@@ -398,7 +444,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             }
         });
 
-        let state = DownloadState {
+        let mut state = DownloadState {
             game_id: game_id.clone(),
             status: "downloading".into(),
             percent: 0.0,
@@ -409,10 +455,13 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             log: log_path.display().to_string(),
         };
         if let Ok(mut states) = states().lock() {
+            if let Some(existing) = states.get(&game_id) {
+                if existing.status != "queued" {
+                    state.status = existing.status.clone();
+                    state.message = existing.message.clone();
+                }
+            }
             states.insert(game_id.clone(), state.clone());
-        }
-        if let Ok(mut active) = active().lock() {
-            active.insert(game_id.clone(), pid);
         }
         publish(&app, &state);
 
@@ -563,17 +612,21 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                         state.percent = if total > 0 { percent } else { reported_percent };
                         state.completed = completed;
                         state.total = total;
-                        state.speed = speed;
-                        state.status = "downloading".into();
-                        state.message = if completed == 0 {
-                            if reported_percent > 0.0 {
-                                format!("Downloading · {reported_percent:.0}%")
-                            } else {
-                                stage_message.clone()
-                            }
+                        if matches!(state.status.as_str(), "paused" | "cancelled") {
+                            state.speed = 0.0;
                         } else {
-                            format!("Downloading · {}", elapsed_text(started.elapsed()))
-                        };
+                            state.speed = speed;
+                            state.status = "downloading".into();
+                            state.message = if completed == 0 {
+                                if reported_percent > 0.0 {
+                                    format!("Downloading · {reported_percent:.0}%")
+                                } else {
+                                    stage_message.clone()
+                                }
+                            } else {
+                                format!("Downloading · {}", elapsed_text(started.elapsed()))
+                            };
+                        }
                         publish(&app, state);
                     }
                 }
@@ -596,6 +649,73 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     })
 }
 
+pub fn pause(game_id: &str) -> Result<(), String> {
+    let pid = active()
+        .lock()
+        .map_err(|_| "download state lock failed".to_string())?
+        .get(game_id)
+        .copied()
+        .ok_or_else(|| "this game is not downloading".to_string())?;
+    #[cfg(unix)]
+    {
+        let status = Command::new("kill")
+            .args(["-STOP", &format!("-{pid}")])
+            .status()
+            .map_err(|error| format!("could not pause the downloader: {error}"))?;
+        if !status.success() {
+            return Err("the downloader process is no longer running".into());
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        return Err("Pausing downloads is not supported on this platform.".into());
+    }
+    #[allow(unreachable_code)]
+    {
+        if let Ok(mut states) = states().lock() {
+            if let Some(state) = states.get_mut(game_id) {
+                state.status = "paused".into();
+                state.message = "Download paused".into();
+                state.speed = 0.0;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn resume(game_id: &str) -> Result<(), String> {
+    let pid = active()
+        .lock()
+        .map_err(|_| "download state lock failed".to_string())?
+        .get(game_id)
+        .copied()
+        .ok_or_else(|| "this game is not downloading".to_string())?;
+    #[cfg(unix)]
+    {
+        let status = Command::new("kill")
+            .args(["-CONT", &format!("-{pid}")])
+            .status()
+            .map_err(|error| format!("could not resume the downloader: {error}"))?;
+        if !status.success() {
+            return Err("the downloader process is no longer running".into());
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        return Err("Pausing downloads is not supported on this platform.".into());
+    }
+    #[allow(unreachable_code)]
+    {
+        if let Ok(mut states) = states().lock() {
+            if let Some(state) = states.get_mut(game_id) {
+                state.status = "downloading".into();
+                state.message = "Resuming download…".into();
+            }
+        }
+        Ok(())
+    }
+}
+
 fn elapsed_text(duration: Duration) -> String {
     let seconds = duration.as_secs();
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
@@ -610,6 +730,8 @@ pub fn cancel(game_id: &str) -> Result<(), String> {
         .ok_or_else(|| "this game is not downloading".to_string())?;
     #[cfg(unix)]
     {
+        // A paused process ignores SIGTERM until it is continued.
+        let _ = Command::new("kill").args(["-CONT", &format!("-{pid}")]).status();
         let _ = Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
     }
     #[cfg(not(unix))]
@@ -626,5 +748,118 @@ pub fn cancel(game_id: &str) -> Result<(), String> {
 }
 
 pub fn status(game_id: &str) -> Option<DownloadState> {
-    states().lock().ok()?.get(game_id).cloned()
+    let running = active()
+        .lock()
+        .ok()
+        .is_some_and(|active| active.contains_key(game_id));
+    let mut states = states().lock().ok()?;
+    let state = states.get_mut(game_id)?;
+    if !running && !matches!(state.status.as_str(), "done" | "error" | "cancelled") {
+        state.status = "error".into();
+        state.message = "Download stopped unexpectedly. Start it again.".into();
+        state.speed = 0.0;
+    }
+    Some(state.clone())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+
+    fn seed(game_id: &str, pid: u32, status: &str) {
+        active().lock().unwrap().insert(game_id.into(), pid);
+        states().lock().unwrap().insert(
+            game_id.into(),
+            DownloadState {
+                game_id: game_id.into(),
+                status: status.into(),
+                percent: 0.0,
+                completed: 0,
+                total: 0,
+                speed: 0.0,
+                message: String::new(),
+                log: String::new(),
+            },
+        );
+    }
+
+    fn cleanup(game_id: &str) {
+        active().lock().unwrap().remove(game_id);
+        states().lock().unwrap().remove(game_id);
+    }
+
+    fn process_state(pid: u32) -> char {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| stat.rsplit(')').next()?.split_whitespace().next()?.chars().next())
+            .unwrap_or('?')
+    }
+
+    #[test]
+    fn pause_and_resume_stop_and_continue_the_process_group() {
+        let game_id = "test-pause-resume";
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        seed(game_id, pid, "downloading");
+        pause(game_id).unwrap();
+        assert_eq!(status(game_id).unwrap().status, "paused");
+        assert_eq!(process_state(pid), 'T');
+        resume(game_id).unwrap();
+        assert_eq!(status(game_id).unwrap().status, "downloading");
+        assert_ne!(process_state(pid), 'T');
+        let _ = child.kill();
+        let _ = child.wait();
+        cleanup(game_id);
+    }
+
+    #[test]
+    fn cancel_terminates_a_paused_download() {
+        let game_id = "test-cancel-paused";
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        seed(game_id, pid, "downloading");
+        pause(game_id).unwrap();
+        cancel(game_id).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if child.try_wait().ok().flatten().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(child.try_wait().ok().flatten().is_some(), "paused downloader did not exit");
+        assert_eq!(status(game_id).unwrap().status, "cancelled");
+        cleanup(game_id);
+    }
+
+    #[test]
+    fn status_marks_a_download_without_a_process_as_failed() {
+        let game_id = "test-stale-status";
+        states().lock().unwrap().insert(
+            game_id.into(),
+            DownloadState {
+                game_id: game_id.into(),
+                status: "downloading".into(),
+                percent: 5.0,
+                completed: 1,
+                total: 20,
+                speed: 1.0,
+                message: "Preparing depot downloads…".into(),
+                log: String::new(),
+            },
+        );
+        let state = status(game_id).unwrap();
+        assert_eq!(state.status, "error");
+        assert!(state.message.contains("no longer") || state.message.contains("stopped"));
+        cleanup(game_id);
+    }
 }

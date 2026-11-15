@@ -656,5 +656,9 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-inline-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:7px; color:var(--muted); font-size:12px; }
 .download-inline-meta button { padding:5px 10px; font-size:11px; }
 .download-drive-modal #download-drive-select { width:100%; margin:14px 0 10px; }
+.download-manager-modal { min-width:min(520px, 86vw); }
+.download-manager-modal .download-inline-track { margin:12px 0 8px; }
+.download-manager-status { margin:10px 0 0; font-weight:600; }
+.download-manager-modal #download-manager-meta { margin-bottom:2px; }
 .download-drive-meta { color:var(--muted); font-size:12px; margin:4px 0 14px; }
 .download-drive-meta.error { color:#ff9b9b; }

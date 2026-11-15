@@ -1,0 +1,97 @@
+# Reopenable download manager with pause, resume, and cancel
+
+- Status: done
+- Date: 2026-11-15
+- Areas: `crates/steamtron-desktop/src/download.rs`,
+  `crates/steamtron-desktop/src/main.rs`,
+  `crates/steamtron-desktop/ui/app.js`
+
+## Problem
+
+Starting a managed download replaces the Download button with a disabled
+"Downloading" button. Once the drive picker closes there is no control surface:
+the inline progress bar cannot be opened, and the user cannot pause, resume, or
+cancel. If the downloader exits without emitting a terminal event, the stale
+in-memory state keeps the button permanently disabled, so the game appears stuck
+at "Preparing depot downloads…" and the download cannot be retried.
+
+A start failure such as a missing Lua manifest also left the in-memory
+"starting" entry behind, so the detail page could stay on Downloading instead of
+returning to Download.
+
+## Goal
+
+The Downloading button opens a download manager that shows progress and offers
+Pause/Resume and Cancel. Stale or failed downloads return to a retryable Download
+button, and a cancelled download removes its partial files.
+
+## Non-goals
+
+- Resuming a download after the SteamTron process exits.
+- Changing SMD's download or verification behavior.
+- Reimplementing the detached download worker.
+
+## Requirements
+
+- R1: The Downloading button is enabled and opens a download manager.
+- R2: The manager shows percent, completed/total bytes, speed, ETA, and the
+  current stage message; it updates without closing.
+- R3: Pause sends `SIGSTOP` to the downloader process group; Resume sends
+  `SIGCONT`. The state reports `paused` and keeps partial files.
+- R4: Cancel terminates the downloader, removes partial game files, and returns
+  the detail page to Download.
+- R5: `managed_download_status` reports `error` when a non-terminal state has no
+  live downloader, so the UI can clear a stale Downloading state.
+- R6: A failed `start_managed_download` clears the in-memory starting state and
+  re-renders the Download button.
+- R7: Closing the manager does not cancel the download; progress stays available
+  from the Downloading button.
+- R8: Removing a game from the library cancels its active download.
+- R9: If a managed game's local Lua manifest is missing, start regenerates it
+  from the signed-in manifest API before falling back to the re-add error.
+
+## Acceptance criteria
+
+- [ ] Downloading opens a manager with progress and Pause/Resume and Cancel.
+- [ ] Pause freezes the downloader; Resume continues it from the same files.
+- [ ] Cancel removes partial content and shows Download again.
+- [ ] A dead downloader becomes an error state and a retryable Download button.
+- [ ] A start error (for example a missing Lua manifest) shows the error and
+  leaves Download available.
+- [ ] Closing the manager leaves the download running.
+- [ ] Removing a game during its download stops the downloader.
+- [ ] A missing local Lua manifest is regenerated when the manifest source is
+  available.
+
+## Verification
+
+- `cargo check -p steamtron-desktop` passed.
+- `cargo test -p steamtron-desktop --bin steamtron-desktop download::tests`
+  passed 3/3: pause sends `SIGSTOP` and resume sends `SIGCONT` to the process
+  group; cancel terminates a paused process; a non-terminal state without a
+  process becomes `error`.
+- JSDOM download-manager harness passed: Downloading opened the manager,
+  progress rendered, Pause/Resume invoked their commands and updated the label,
+  closing kept the download, and Cancel removed the manager and restored the
+  Download button.
+- Existing navigation suites still pass.
+
+## Decisions and risks
+
+- Pause/Resume uses process signals rather than an SMD protocol command. It
+  depends on the Unix process group created for the child. On non-Unix platforms
+  Pause/Resume returns an explicit unsupported error; Cancel remains available.
+- A paused SMD process holds its network connections frozen; long pauses can let
+  the CDN connection time out. Resume relies on SMD's chunk retries.
+- Cancelling removes the managed game root, matching the existing failed-download
+  cleanup. SMD checkpoints in its cache are left in place.
+- Removing a game entry now cancels an active download first, so the downloader
+  cannot keep writing after the entry is gone.
+- A missing Lua manifest is regenerated from the signed-in API; if that fails the
+  user still gets the explicit re-add error.
+
+## Links
+
+- Related PRD: `docs/prd/0022-smd-downloader.md`
+- Implementation: `crates/steamtron-desktop/src/download.rs`,
+  `crates/steamtron-desktop/ui/app.js`

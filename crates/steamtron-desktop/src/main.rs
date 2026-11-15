@@ -4138,6 +4138,9 @@ async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, Strin
     {
         return Err("Stop the game before removing it from the library.".into());
     }
+    // Removing the entry while its content is downloading would orphan the
+    // downloader and leave a stale Downloading state in the open window.
+    let _ = download::cancel(&game_id);
     let mut library = Library::load().map_err(|error| error.to_string())?;
     let game = library
         .game(&game_id)
@@ -4401,6 +4404,16 @@ async fn start_managed_download(app: tauri::AppHandle, game_id: String) -> Resul
 #[tauri::command]
 fn cancel_managed_download(game_id: String) -> Result<(), String> {
     download::cancel(&game_id)
+}
+
+#[tauri::command]
+fn pause_managed_download(game_id: String) -> Result<(), String> {
+    download::pause(&game_id)
+}
+
+#[tauri::command]
+fn resume_managed_download(game_id: String) -> Result<(), String> {
+    download::resume(&game_id)
 }
 
 #[tauri::command]
@@ -4694,6 +4707,8 @@ fn main() {
             start_managed_download,
             prepare_managed_download,
             cancel_managed_download,
+            pause_managed_download,
+            resume_managed_download,
             managed_download_status,
             clear_managed_game_logs,
             proton_tier,
