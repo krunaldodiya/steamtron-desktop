@@ -3742,6 +3742,9 @@ async function renderStorageSettings(host) {
       ${rows || '<div class="settings-row"><div class="row-text"><span>No drives registered yet.</span></div></div>'}
       <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted partition. No folder or game file is created.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
     </div></section>
+    <section class="settings-section"><h2>Library backup</h2><p>Save the whole library index — drives, games and settings — as JSON, or restore it after reinstalling. Game content, prefixes and saves are not included and stay on their drives.</p><div class="settings-card">
+      <div class="settings-row"><div class="row-text"><strong>Library file</strong><span>Export or import <code>library.json</code>. Import replaces the current drives, games and settings; the previous file is kept as <code>library.json.bak</code>.</span></div><div class="row-control settings-inline"><button id="setting-export-library">Export…</button><button id="setting-import-library">Import…</button></div></div>
+    </div></section>
     <section class="settings-section"><h2>Game backups</h2><p>Restore a portable SteamTron game backup to a registered game or create its library entry automatically.</p><div class="settings-card">
       <div class="settings-row"><div class="row-text"><strong>Restore game backup</strong><span>Adds the game to your library automatically if it is not already present.</span></div><div class="row-control"><button id="setting-restore-game" class="primary">Restore…</button></div></div>
     </div></section>
@@ -3777,6 +3780,27 @@ async function renderStorageSettings(host) {
       } catch (error) { showToast(String(error), true); }
     };
   }
+  host.querySelector("#setting-export-library").onclick = async (event) => {
+    const stop = busy(event.target, "Exporting…");
+    try {
+      const result = await invoke("export_library_file");
+      stop();
+      if (!result) { showToast("Library export cancelled."); return; }
+      showToast(`Library exported: ${result.path} (${result.games} games, ${result.drives} drives)`);
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  host.querySelector("#setting-import-library").onclick = async (event) => {
+    if (!window.confirm("Import this library file? It replaces the current drives, games and settings. Game content and saves are not moved.")) return;
+    const stop = busy(event.target, "Importing…");
+    try {
+      const result = await invoke("import_library_file");
+      stop();
+      if (!result) { showToast("Library import cancelled."); return; }
+      await load();
+      await renderSettingsPage();
+      showToast(`Library imported: ${result.games} games, ${result.drives} drives. Previous file kept as library.json.bak.`);
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
   host.querySelector("#setting-restore-game").onclick = async (event) => {
     const stop = busy(event.target, "Restoring…");
     try {

@@ -15,6 +15,10 @@ mod security;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
+use steamtron_core::library::{
+    export_library_file as export_library_document, import_library_file as import_library_document,
+    LibraryFileSummary,
+};
 use steamtron_core::steam;
 use steamtron_register::{platform_backend, RegistrationBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
@@ -714,6 +718,41 @@ async fn restore_backup() -> Result<Option<backup::RestoreSummary>, String> {
     })
     .await
     .map_err(|error| format!("Restore task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn export_library_file() -> Result<Option<LibraryFileSummary>, String> {
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Save SteamTron library")
+        .set_file_name("steamtron-library.json")
+        .add_filter("SteamTron library", &["json"])
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        export_library_document(&path).map(Some).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Library export task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn import_library_file() -> Result<Option<LibraryFileSummary>, String> {
+    require_auth()?;
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Choose a SteamTron library file")
+        .add_filter("SteamTron library", &["json"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        import_library_document(&path).map(Some).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Library import task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -4452,6 +4491,8 @@ fn main() {
             backend_status,
             export_backup,
             restore_backup,
+            export_library_file,
+            import_library_file,
             game_artwork,
             search_games,
             add_game,

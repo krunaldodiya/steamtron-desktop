@@ -560,6 +560,79 @@ pub fn write_atomic(path: &Path, content: &[u8]) -> Result<(), LibraryError> {
     }
 }
 
+const MAX_LIBRARY_FILE: u64 = 64 * 1024 * 1024;
+
+#[derive(Debug, Serialize)]
+pub struct LibraryFileSummary {
+    pub path: String,
+    pub games: usize,
+    pub drives: usize,
+    pub bytes: u64,
+}
+
+/// Copy the whole library document to `destination` without changing it.
+pub fn export_library_file(destination: &Path) -> Result<LibraryFileSummary, LibraryError> {
+    export_library_file_from(&Library::default_path(), destination)
+}
+
+fn export_library_file_from(source: &Path, destination: &Path) -> Result<LibraryFileSummary, LibraryError> {
+    let library = Library::open(source)?;
+    if !source.is_file() {
+        return Err(LibraryError::Invalid("No library file to export yet.".into()));
+    }
+    let data = fs::read(source).map_err(|error| LibraryError::io(source, error))?;
+    write_atomic(destination, &data)?;
+    Ok(LibraryFileSummary {
+        path: destination.display().to_string(),
+        games: library.games().len(),
+        drives: library.drives().len(),
+        bytes: data.len() as u64,
+    })
+}
+
+/// Validate a library document and make it the active library. The current
+/// document is kept next to it as `library.json.bak` before the replacement.
+pub fn import_library_file(source: &Path) -> Result<LibraryFileSummary, LibraryError> {
+    import_library_file_to(source, &Library::default_path())
+}
+
+fn import_library_file_to(source: &Path, destination: &Path) -> Result<LibraryFileSummary, LibraryError> {
+    if !source.is_file() {
+        return Err(LibraryError::Invalid(
+            "Choose a SteamTron library JSON file.".into(),
+        ));
+    }
+    let size = fs::metadata(source)
+        .map_err(|error| LibraryError::io(source, error))?
+        .len();
+    if size > MAX_LIBRARY_FILE {
+        return Err(LibraryError::Invalid("Library file is too large.".into()));
+    }
+    let data = fs::read(source).map_err(|error| LibraryError::io(source, error))?;
+    let document: Document = serde_json::from_slice(&data).map_err(|error| LibraryError::Json {
+        path: source.to_path_buf(),
+        source: error,
+    })?;
+    if document.version != LIBRARY_VERSION {
+        return Err(LibraryError::Invalid(format!(
+            "unsupported library version {} (expected {LIBRARY_VERSION})",
+            document.version
+        )));
+    }
+    validate(&document.settings, &document.drives, &document.games)?;
+    if destination.is_file() {
+        let backup = destination.with_extension("json.bak");
+        fs::copy(destination, &backup).map_err(|error| LibraryError::io(&backup, error))?;
+    }
+    write_atomic(destination, &data)?;
+    Ok(LibraryFileSummary {
+        path: destination.display().to_string(),
+        games: document.games.len(),
+        drives: document.drives.len(),
+        bytes: data.len() as u64,
+    })
+}
+
 fn valid_key(key: &str) -> bool {
     !key.is_empty()
         && key.len() <= 40
@@ -910,6 +983,59 @@ mod tests {
         assert_eq!(reopened.drives().len(), 1);
         assert_eq!(reopened.games()[0].title, "Sample");
         assert!(!path.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn exports_and_imports_the_library_document() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("backup/library.json");
+        let destination = temp.path().join("data/library.json");
+        let mut library = Library::open(&source).unwrap();
+        library.add_drive(temp.path(), "Temp", true).unwrap();
+        library
+            .upsert_game(sample_game("game-1", "Sample", temp.path().join("game")))
+            .unwrap();
+        library.save().unwrap();
+
+        let exported = export_library_file_from(&source, &destination).unwrap();
+        assert_eq!(exported.games, 1);
+        assert_eq!(exported.drives, 1);
+        assert_eq!(fs::read(&source).unwrap(), fs::read(&destination).unwrap());
+
+        // Change the active document, then restore the exported bytes.
+        let mut changed = Library::open(&destination).unwrap();
+        changed
+            .upsert_game(sample_game("game-2", "Other", temp.path().join("other")))
+            .unwrap();
+        changed.save().unwrap();
+        let changed_bytes = fs::read(&destination).unwrap();
+
+        let imported = import_library_file_to(&source, &destination).unwrap();
+        assert_eq!(imported.games, 1);
+        assert_eq!(fs::read(&source).unwrap(), fs::read(&destination).unwrap());
+        assert_eq!(
+            fs::read(destination.with_extension("json.bak")).unwrap(),
+            changed_bytes
+        );
+    }
+
+    #[test]
+    fn invalid_import_leaves_the_active_library_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("bad.json");
+        let destination = temp.path().join("data/library.json");
+        let mut library = Library::open(&destination).unwrap();
+        library.add_drive(temp.path(), "Temp", true).unwrap();
+        library.save().unwrap();
+        let before = fs::read(&destination).unwrap();
+
+        fs::write(&source, b"{ not json").unwrap();
+        assert!(import_library_file_to(&source, &destination).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), before);
+
+        fs::write(&source, br#"{"version":999,"settings":{},"drives":[],"games":[]}"#).unwrap();
+        assert!(import_library_file_to(&source, &destination).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), before);
     }
 
     #[test]

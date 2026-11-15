@@ -36,3 +36,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0009](0009-store-card-open.md) | Open Store cards without waiting for the detail request | done | 2026-11-15 |
 | [0010](0010-chip-focus-ring.md) | One focus ring on pill chips | done | 2026-11-15 |
 | [0011](0011-fullscreen-escape.md) | Fullscreen Escape matches desktop back behavior | done | 2026-11-15 |
+| [0012](0012-library-backup.md) | Library index backup and restore | done | 2026-11-15 |
