@@ -747,11 +747,33 @@ pub fn cancel(game_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        Command::new("kill")
+            .args(["-0", &format!("-{pid}")])
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
 pub fn status(game_id: &str) -> Option<DownloadState> {
-    let running = active()
-        .lock()
-        .ok()
-        .is_some_and(|active| active.contains_key(game_id));
+    let pid = {
+        let mut active = active().lock().ok()?;
+        let pid = active.get(game_id).copied();
+        if pid.is_some_and(|pid| !process_alive(pid)) {
+            active.remove(game_id);
+        }
+        pid
+    };
+    let running = pid.is_some_and(process_alive);
     let mut states = states().lock().ok()?;
     let state = states.get_mut(game_id)?;
     if !running && !matches!(state.status.as_str(), "done" | "error" | "cancelled") {
@@ -838,6 +860,14 @@ mod tests {
         }
         assert!(child.try_wait().ok().flatten().is_some(), "paused downloader did not exit");
         assert_eq!(status(game_id).unwrap().status, "cancelled");
+        cleanup(game_id);
+    }
+
+    #[test]
+    fn status_marks_a_download_with_a_dead_pid_as_failed() {
+        let game_id = "test-dead-pid";
+        seed(game_id, u32::MAX, "downloading");
+        assert_eq!(status(game_id).unwrap().status, "error");
         cleanup(game_id);
     }
 

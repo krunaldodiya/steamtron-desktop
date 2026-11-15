@@ -41,7 +41,8 @@ button, and a cancelled download removes its partial files.
 - R4: Cancel terminates the downloader, removes partial game files, and returns
   the detail page to Download.
 - R5: `managed_download_status` reports `error` when a non-terminal state has no
-  live downloader, so the UI can clear a stale Downloading state.
+  live downloader, including a recorded PID that no longer exists. The UI can
+  then clear a stale Downloading state.
 - R6: A failed `start_managed_download` clears the in-memory starting state and
   re-renders the Download button.
 - R7: Closing the manager does not cancel the download; progress stays available
@@ -67,9 +68,9 @@ button, and a cancelled download removes its partial files.
 
 - `cargo check -p steamtron-desktop` passed.
 - `cargo test -p steamtron-desktop --bin steamtron-desktop download::tests`
-  passed 3/3: pause sends `SIGSTOP` and resume sends `SIGCONT` to the process
+  passed 4/4: pause sends `SIGSTOP` and resume sends `SIGCONT` to the process
   group; cancel terminates a paused process; a non-terminal state without a
-  process becomes `error`.
+  process, or with a dead PID, becomes `error`.
 - JSDOM download-manager harness passed: Downloading opened the manager,
   progress rendered, Pause/Resume invoked their commands and updated the label,
   closing kept the download, and Cancel removed the manager and restored the
