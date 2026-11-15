@@ -53,3 +53,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0026](0026-hero-scroll.md) | Full hero reveal and smooth focus scrolling | done | 2026-11-15 |
 | [0027](0027-background-downloads.md) | Downloads continue after SteamTron exits | active | 2026-11-15 |
 | [0028](0028-smd-manifest-fallback.md) | SMD manifest fallback completes in verbose mode | active | 2026-11-15 |
+| [0029](0029-ddm-engine.md) | Use DepotDownloaderMod instead of SMD native engine | active | 2026-11-15 |

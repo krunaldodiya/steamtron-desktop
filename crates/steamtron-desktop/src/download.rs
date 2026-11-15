@@ -187,9 +187,10 @@ pub(crate) fn configure_smd(data_dir: &Path) -> Result<(), String> {
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
-    // Use SMD's native Rust engine: no .NET runtime, chunk-level retries,
-    // CRC/SHA verification, and resumable checkpoints.
-    settings.insert("use_native_downloader".into(), serde_json::Value::Bool(true));
+    // SMD's native Rust engine can stall at "chunk task queue built" after the
+    // Steam manifest-code fallback. DepotDownloaderMod (the engine SMD ships)
+    // completes the same anonymous download quickly and is the stable path.
+    settings.insert("use_native_downloader".into(), serde_json::Value::Bool(false));
     let payload = serde_json::to_vec_pretty(&settings).map_err(|error| error.to_string())?;
     let temporary = path.with_extension("json.steamtron.tmp");
     std::fs::write(&temporary, payload).map_err(|error| error.to_string())?;
