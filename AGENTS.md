@@ -33,13 +33,8 @@ preference for batching commits or keeping a clean history.
   `git rev-list --count origin/main..HEAD` prints `0`.
 - If the push fails, say so explicitly and retry; never report success while
   the commits are local-only.
-- Interim snapshots of unfinished work go to `autosave/<host>`
-  (`~/.local/bin/git-autosync.sh`, timer `git-autosync.timer`); they are a
-  safety net, not a substitute for real commits.
-- Autosave branches are snapshots, not feature branches. Never open or merge a
-  pull request from `autosave/<host>`. Once the real work is committed on
-  `main` and pushed, delete stale `origin/autosave/<host>` branches so GitHub
-  does not offer to merge them.
+- Commit and push manually; there is no autosave timing service. Never create
+  or push `autosave/*` branches.
 
 ## Rebuild and install after every change — mandatory
 
