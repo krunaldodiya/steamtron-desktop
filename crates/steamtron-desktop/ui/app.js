@@ -5101,6 +5101,7 @@ document.querySelector("#nav-library").onclick = () => setView("library", { focu
 document.querySelector("#nav-home").onclick = () => setView("home", { focus: "restore" });
 document.querySelector("#nav-store").onclick = () => setView("store", { focus: "restore" });
 window.addEventListener("focus", async () => {
+  restoreMinimizedWindow();
   if (!managedShell()) return;
   const active = document.activeElement;
   const detailHadFocus = detailEl.contains(active);
@@ -5115,7 +5116,6 @@ window.addEventListener("focus", async () => {
       focusRouteOnEntry(appView, "restore");
     }
   }
-  restoreMinimizedWindow();
 });
 
 let runningPollBusy = false;
