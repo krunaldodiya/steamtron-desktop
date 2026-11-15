@@ -93,19 +93,9 @@ function busy(button, label) {
 }
 
 const dialogWindows = [];
+const minimizedDialogs = [];
 let dialogZ = 300;
 let dialogSeq = 0;
-
-function dialogDockNode() {
-  let dock = document.querySelector("#dialog-dock");
-  if (!dock) {
-    dock = document.createElement("div");
-    dock.id = "dialog-dock";
-    dock.className = "dialog-dock";
-    document.body.appendChild(dock);
-  }
-  return dock;
-}
 
 function dialogTitleOf(modal) {
   const node = modal.querySelector(".modal-head h2, .game-settings-head h2, h2");
@@ -126,8 +116,8 @@ function cleanupDialog(entry) {
   entry.observer?.disconnect();
   const index = dialogWindows.indexOf(entry);
   if (index >= 0) dialogWindows.splice(index, 1);
-  if (entry.dockButton) entry.dockButton.remove();
-  entry.dockButton = null;
+  const minimized = minimizedDialogs.indexOf(entry);
+  if (minimized >= 0) minimizedDialogs.splice(minimized, 1);
 }
 
 function dialogTop() {
@@ -161,31 +151,39 @@ function minimizeDialog(entry) {
   if (!entry || entry.minimized) return;
   entry.minimized = true;
   entry.backdrop.classList.add("dialog-minimized");
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "dialog-dock-item";
-  button.title = `Restore ${entry.title}`;
-  button.innerHTML = `<span class="dialog-dock-icon" aria-hidden="true">▢</span><span class="dialog-dock-title">${escape(entry.title)}</span>`;
-  button.onclick = () => restoreDialog(entry);
-  dialogDockNode().appendChild(button);
-  entry.dockButton = button;
+  minimizedDialogs.push(entry);
   if (navState.focused && entry.backdrop.contains(navState.focused)) {
     navState.focused.classList.remove("nav-focus");
     navState.focused = null;
   }
-  focusControl(button);
+  document.activeElement?.blur?.();
+  invoke("minimize_window").catch(() => restoreDialog(entry));
 }
 
 function restoreDialog(entry) {
   if (!entry || !document.body.contains(entry.backdrop)) return;
   entry.minimized = false;
   entry.backdrop.classList.remove("dialog-minimized", "hidden");
-  if (entry.dockButton) {
-    entry.dockButton.remove();
-    entry.dockButton = null;
-  }
+  const index = minimizedDialogs.indexOf(entry);
+  if (index >= 0) minimizedDialogs.splice(index, 1);
   raiseDialog(entry);
   focusFirstDialogControl(entry);
+}
+
+function restoreMinimizedWindow() {
+  while (minimizedDialogs.length) {
+    const entry = minimizedDialogs.pop();
+    if (entry && document.body.contains(entry.backdrop)) {
+      restoreDialog(entry);
+      return true;
+    }
+  }
+  if (settingsMinimized) {
+    settingsMinimized = false;
+    void restoreSettingsPage();
+    return true;
+  }
+  return false;
 }
 
 function toggleDialogMaximize(entry) {
@@ -3680,40 +3678,29 @@ function settingsPage() {
   return document.querySelector("#settings-page");
 }
 
-let settingsDockButton = null;
-
-function clearSettingsDock() {
-  if (settingsDockButton) {
-    settingsDockButton.remove();
-    settingsDockButton = null;
-  }
-}
+let settingsMinimized = false;
 
 function minimizeSettingsPage() {
   const page = settingsPage();
   if (!page || page.classList.contains("hidden")) return;
   page.classList.add("hidden");
   document.body.classList.remove("settings-open");
-  clearSettingsDock();
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "dialog-dock-item";
-  button.title = "Restore Settings";
-  button.innerHTML = '<span class="dialog-dock-icon" aria-hidden="true">▢</span><span class="dialog-dock-title">Settings</span>';
-  button.onclick = () => { void restoreSettingsPage(); };
-  dialogDockNode().appendChild(button);
-  settingsDockButton = button;
+  settingsMinimized = true;
   if (navState.focused) {
     navState.focused.classList.remove("nav-focus");
     navState.focused = null;
   }
-  focusControl(button);
+  document.activeElement?.blur?.();
+  invoke("minimize_window").catch(() => {
+    settingsMinimized = false;
+    void restoreSettingsPage();
+  });
 }
 
 async function restoreSettingsPage() {
   const page = settingsPage();
   if (!page) return;
-  clearSettingsDock();
+  settingsMinimized = false;
   document.body.classList.add("settings-open");
   page.classList.remove("hidden");
   await renderSettingsPage();
@@ -3733,7 +3720,7 @@ function toggleSettingsMaximize() {
 }
 
 async function openSettingsPage() {
-  clearSettingsDock();
+  settingsMinimized = false;
   document.body.classList.add("settings-open");
   settingsPage().classList.remove("hidden");
   await renderSettingsPage();
@@ -3743,7 +3730,7 @@ async function openSettingsPage() {
 
 function closeSettingsPage() {
   stopProtonInstallPolling();
-  clearSettingsDock();
+  settingsMinimized = false;
   const page = settingsPage();
   if (page) {
     page.classList.add("hidden");
@@ -5128,6 +5115,7 @@ window.addEventListener("focus", async () => {
       focusRouteOnEntry(appView, "restore");
     }
   }
+  restoreMinimizedWindow();
 });
 
 let runningPollBusy = false;

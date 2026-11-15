@@ -1,6 +1,6 @@
 # Unified dialog windows
 
-- Status: active
+- Status: done
 - Date: 2026-11-15
 - Areas: `crates/steamtron-desktop/ui/app.js`, `crates/steamtron-desktop/ui/style.css`, `crates/steamtron-desktop/ui/index.html`
 
@@ -16,10 +16,11 @@ controls.
 ## Goal
 
 Every in-app dialog shares one window shell: title, minimize, maximize, and
-close on the right; windowed by default; minimize parks the dialog in an
-in-app dock and preserves its state; maximize expands it. Confirms are compact
-custom windows. The settings surface uses the same window controls and has no
-decorative search icon.
+close on the right; windowed by default; minimize sends the app window to the
+desktop taskbar/dock and preserves the dialog state; clicking the app icon
+restores the minimized surface on the next window focus; maximize expands it.
+Confirms are compact custom windows. The settings surface uses the same window
+controls and has no decorative search icon.
 
 ## Non-goals
 
@@ -35,8 +36,11 @@ decorative search icon.
   at the right of its header: minimize, maximize, close.
 - R2: Default presentation is windowed. Maximize fills the usable window;
   minimize hides the dialog without destroying its DOM or state.
-- R3: Minimized dialogs appear in an in-app dock; clicking an entry restores
-  the same dialog and relaunches its focus.
+- R3: Minimize sends the main app window to the desktop taskbar/dock. The next
+  app-window focus restores the minimized dialog (or Settings) and its focus.
+  No in-app dock is rendered.
+- R3a: If more than one surface was minimized, each app-window focus restores
+  the next one in last-in-first-out order.
 - R4: All 24 `window.confirm` prompts are replaced by one custom confirm
   dialog. Its default width is **360px**, visibly smaller than other dialogs.
 - R5: The settings surface becomes a windowed panel with the same controls;
@@ -50,8 +54,9 @@ decorative search icon.
 
 - [x] A custom dialog shows minimize, maximize, and close controls, in that
   order, on the right.
-- [x] Minimize hides the dialog, adds a dock entry, and the dock restores the
-  same dialog.
+- [x] Minimize hides the dialog, calls `minimize_window`, and the next
+  app-window focus restores the same dialog.
+- [x] No in-app dialog dock is rendered.
 - [x] Maximize expands the dialog to the usable window area.
 - [x] A confirm is 360px wide and uses the same window shell.
 - [x] Settings opens windowed, can minimize/maximize, and has no search glyph.
@@ -62,19 +67,24 @@ decorative search icon.
 
 - `node --check crates/steamtron-desktop/ui/app.js` passed.
 - jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 69 checks,
-  including dialog controls, confirm window shell, dock restore, maximize,
-  Game Settings chrome, settings window controls, and Escape.
+  including dialog controls, confirm window shell, app-icon minimize/refocus,
+  maximize, Game Settings chrome, settings window controls, and Escape.
 - Base navigation suite `test.mjs` passed 33/33; auth suite `auth-test.mjs`
   passed 13/13.
 - `grep -n "window.confirm" crates/steamtron-desktop/ui/app.js` returns no
   matches.
+- Headless Chrome fixtures verified the header control spacing/order for
+  standard, add-drive, add-progress, doctor, Game Settings, and Account
+  dialogs, plus the settings window and compact confirm.
 - Release build completed and the installed binary hash matched the build.
 
 ## Decisions and risks
 
-- The minimization target is an in-app dialog dock rather than separate OS
-  windows; this keeps the single-window console layout and preserves dialog
-  state.
+- Dialogs are still DOM windows inside the single SteamTron app window. True
+  per-dialog OS taskbar entries would require each dialog to be a separate
+  Tauri window with cross-window state; that is not part of this change.
+  Minimize therefore minimizes the app window and restores the pending dialog
+  on refocus.
 - Existing dialog bodies and handlers are kept; the manager adds the shared
   shell and stack behavior, lowering migration risk.
 - Nested dialogs are tracked in open order, so the newest dialog owns focus and

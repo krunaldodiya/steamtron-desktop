@@ -100,7 +100,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .dialog-window { position:relative; }
 .dialog-head { position:relative; display:flex; align-items:center; gap:12px; }
 .dialog-head h2 { flex:1; min-width:0; margin:0; }
-.dialog-controls { display:flex; align-items:center; gap:2px; margin-left:auto; flex:0 0 auto; }
+.dialog-controls { display:flex; align-items:center; gap:4px; margin-left:auto; flex:0 0 auto; }
 .dialog-control { width:28px; height:26px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--muted); font:inherit; font-size:14px; line-height:1; display:grid; place-items:center; cursor:pointer; }
 .dialog-control:hover { background:#26384a; color:var(--text); }
 .dialog-control.dialog-close { font-size:20px; }
@@ -113,12 +113,6 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .dialog-confirm { width:min(360px, calc(100vw - 32px)); }
 .dialog-confirm-body { margin-top:10px; color:var(--muted); font-size:14px; line-height:1.45; white-space:pre-line; }
 .dialog-minimized { display:none !important; }
-.dialog-dock { position:fixed; left:16px; bottom:16px; z-index:400; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
-.dialog-dock:empty { display:none; }
-.dialog-dock-item { max-width:320px; padding:8px 12px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-raised); color:var(--text); display:flex; align-items:center; gap:8px; box-shadow:0 10px 30px #000a; }
-.dialog-dock-item:hover { border-color:var(--accent); }
-.dialog-dock-icon { color:var(--accent); font-size:12px; }
-.dialog-dock-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
 .modal-actions[hidden] { display:none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 button.loading { cursor:progress; opacity:.85; }
@@ -560,7 +554,7 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .game-settings-modal { width:min(1080px, 94vw); height:min(720px, 88vh); padding:0; display:flex; flex-direction:column; overflow:hidden; }
 .game-settings-head { position:relative; display:flex; align-items:center; justify-content:center; padding:14px 20px; border-bottom:1px solid var(--border); flex:0 0 auto; }
 .game-settings-head h2 { font-size:15px; }
-.game-settings-head .modal-close { position:absolute; right:12px; top:50%; transform:translateY(-50%); }
+.game-settings-head .modal-close { position:static; right:auto; top:auto; transform:none; }
 .game-settings-body { display:flex; flex:1; min-height:0; }
 .game-settings-nav { width:200px; flex:0 0 auto; padding:16px 12px; border-right:1px solid var(--border); display:flex; flex-direction:column; gap:4px; overflow:auto; }
 .game-settings-tab { text-align:left; padding:10px 14px; border:0; border-radius:8px; background:transparent; color:var(--muted); font-size:14px; }
