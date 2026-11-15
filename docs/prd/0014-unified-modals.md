@@ -61,9 +61,9 @@ decorative search icon.
 ## Verification
 
 - `node --check crates/steamtron-desktop/ui/app.js` passed.
-- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 67 checks,
+- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 69 checks,
   including dialog controls, confirm window shell, dock restore, maximize,
-  settings window controls, and Escape.
+  Game Settings chrome, settings window controls, and Escape.
 - Base navigation suite `test.mjs` passed 33/33; auth suite `auth-test.mjs`
   passed 13/13.
 - `grep -n "window.confirm" crates/steamtron-desktop/ui/app.js` returns no
