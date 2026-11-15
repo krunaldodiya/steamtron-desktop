@@ -680,6 +680,9 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-meta { margin:0 0 2px; color:var(--muted); font-size:12px; min-height:16px; }
 .operation-modal { width:min(1100px, 94vw); height:min(760px, 88vh); display:flex; flex-direction:column; }
 .operation-modal .download-next-list { max-height:none; flex:1; }
+.operation-inline { margin-top:8px; }
+.operation-inline.indeterminate .download-inline-track span { width:35%; animation:operation-progress 1.2s ease-in-out infinite; }
+.operation-inline.error .download-inline-meta-text { color:var(--error); }
 .operation-bar.indeterminate span { width:35%; animation:operation-progress 1.2s ease-in-out infinite; }
 .operation-bar:not(.indeterminate) span { animation:none; }
 @keyframes operation-progress {

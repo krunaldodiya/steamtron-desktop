@@ -45,6 +45,11 @@ step list that advances from the backend.
   it finishes in the background.
 - R8: Download manager retains its depot list and icon controls inside the same
   large shell.
+- R9: Backup, verify, and restore buttons switch to present-participle labels
+  while running (`Backing up…`, `Verifying…`, `Restoring…`) and revert after.
+- R10: Each action shows an inline indeterminate progress bar under its button,
+  matching download's inline bar; the bar shows the backend stage and final
+  message, then hides.
 
 ## Acceptance criteria
 
@@ -54,6 +59,8 @@ step list that advances from the backend.
 - [ ] Verify progresses through check/repair/finish steps.
 - [ ] A failure remains visible in the manager.
 - [ ] Closing the manager does not cancel the backend task.
+- [ ] Buttons change to running labels and back.
+- [ ] Inline progress appears under backup, verify, and restore actions.
 
 ## Verification
 
@@ -62,6 +69,9 @@ step list that advances from the backend.
 - JSDOM operation harness passed: manager opens, four stat cells and three steps
   render, stage event marks the prior step done, completion sets the bar
   determinate and status Complete, close removes the window.
+- JSDOM inline harness passed: the verify button switches to "Verifying files
+  integrity…", the inline bar appears, receives the stage, returns the button to
+  its idle label, and shows the completion message.
 - Existing navigation suites still pass.
 - Release built and installed; the download/operation windows use the same
   1100×760 shell as global Settings.

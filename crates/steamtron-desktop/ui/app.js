@@ -1236,6 +1236,77 @@ function openDownloadManager(game) {
 }
 
 
+const OPERATION_LABELS = {
+  backup: ["Backing up game files…", "Back up game files…"],
+  verify: ["Verifying files integrity…", "Verify files integrity"],
+  restore: ["Restoring game backup…", "Restore…"],
+};
+const operationInlineTimers = new WeakMap();
+
+function operationInlineNodes(operation, gameId = "") {
+  return [...document.querySelectorAll(`[data-operation-inline="${operation}"]`)].filter((node) => {
+    const scoped = node.dataset.operationGame || "";
+    return !scoped || !gameId || scoped === gameId;
+  });
+}
+
+function setOperationButton(operation, running) {
+  const button = document.querySelector(`[data-operation-button="${operation}"]`);
+  if (!button) return;
+  const labels = OPERATION_LABELS[operation];
+  if (!labels) return;
+  button.textContent = running ? labels[0] : labels[1];
+  button.disabled = running;
+}
+
+function setOperationInline(operation, gameId, message, status) {
+  for (const node of operationInlineNodes(operation, gameId)) {
+    const timer = operationInlineTimers.get(node);
+    if (timer) clearTimeout(timer);
+    const track = node.querySelector(".download-inline-track");
+    const text = node.querySelector(".operation-inline-text");
+    node.classList.remove("hidden", "indeterminate", "error");
+    if (status === "done") {
+      node.classList.remove("indeterminate");
+      if (track) track.querySelector("span").style.width = "100%";
+      if (text) text.textContent = message || "Complete";
+      operationInlineTimers.set(node, setTimeout(() => node.classList.add("hidden"), 3500));
+      setOperationButton(operation, false);
+    } else if (status === "error") {
+      node.classList.remove("indeterminate");
+      node.classList.add("error");
+      if (text) text.textContent = message || "Failed";
+      setOperationButton(operation, false);
+    } else {
+      node.classList.add("indeterminate");
+      if (track) track.querySelector("span").style.width = "35%";
+      if (text) text.textContent = message || "Starting…";
+      setOperationButton(operation, true);
+    }
+  }
+}
+
+function beginOperation(operation, gameId) {
+  setOperationInline(operation, gameId, "Starting…", "running");
+  setOperationButton(operation, true);
+}
+
+function finishOperation(operation, gameId, message) {
+  setOperationInline(operation, gameId, message || "Complete", "done");
+}
+
+function failOperation(operation, gameId, message) {
+  setOperationInline(operation, gameId, String(message), "error");
+}
+
+function cancelOperation(operation, gameId) {
+  for (const node of operationInlineNodes(operation, gameId)) {
+    node.classList.add("hidden");
+    node.classList.remove("indeterminate");
+  }
+  setOperationButton(operation, false);
+}
+
 const OPERATION_STEPS = {
   backup: [
     ["prepare", "Collect game files"],
@@ -1385,6 +1456,11 @@ if (window.__TAURI__?.event?.listen) {
   });
   window.__TAURI__.event.listen("download-progress", (event) => {
     applyDownloadEvent(event.payload || {});
+  });
+  window.__TAURI__.event.listen("operation-progress", (event) => {
+    const payload = event.payload || {};
+    if (!payload.operation) return;
+    setOperationInline(payload.operation, payload.gameId || "", payload.message || "Working…", payload.status || "running");
   });
   window.__TAURI__.event.listen("download-complete", async (event) => {
     const payload = event.payload || {};
@@ -1840,8 +1916,8 @@ function openManagedGameOptions(game) {
         const linked = latestGame.installation?.mode === "linked";
         pane.innerHTML = `<h3>Installed Files</h3>
           <div class="files-card files-size-card"><strong>Size of installation: ${formatBytes(size)} (${escape(name)})</strong><button id="files-browse">Browse…</button></div>
-          <div class="files-card"><p class="pane-note">Create a backup of the installed files to restore this game in the future.</p><button class="files-wide" id="files-backup">Back up game files…</button></div>
-          <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify">Verify files integrity</button><p class="files-status" id="files-status"></p></div>
+          <div class="files-card"><p class="pane-note">Create a backup of the installed files to restore this game in the future.</p><button class="files-wide" id="files-backup" data-operation-button="backup">Back up game files…</button><div class="operation-inline hidden" data-operation-inline="backup" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div></div>
+          <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify" data-operation-button="verify">Verify files integrity</button><div class="operation-inline hidden" data-operation-inline="verify" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div><p class="files-status" id="files-status"></p></div>
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
           <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
@@ -1878,13 +1954,15 @@ function openManagedGameOptions(game) {
             gameId: game.id,
             gameName: latestGame.title,
           });
+          beginOperation("backup", game.id);
           await operation.ready;
           try {
             const result = await invoke("backup_managed_game", { gameId: game.id });
-            if (!result) { operation.close(); showToast("Backup cancelled."); return; }
+            if (!result) { cancelOperation("backup", game.id); operation.close(); showToast("Backup cancelled."); return; }
+            finishOperation("backup", game.id, `Backup written to ${result.path}`);
             operation.complete(`Backup written to ${result.path}`);
             showToast(`Backup written to ${result.path}`);
-          } catch (error) { operation.fail(String(error)); }
+          } catch (error) { failOperation("backup", game.id, String(error)); operation.fail(String(error)); }
         };
         pane.querySelector("#files-verify").onclick = async () => {
           const operation = openOperationManager({
@@ -1893,9 +1971,11 @@ function openManagedGameOptions(game) {
             gameId: game.id,
             gameName: latestGame.title,
           });
+          beginOperation("verify", game.id);
           await operation.ready;
           try {
             await invoke("verify_managed_files", { gameId: game.id });
+            finishOperation("verify", game.id, "Verification complete");
             operation.complete("Verification complete. Missing or damaged files were repaired.");
             status.textContent = "Verification complete. Missing or damaged files were repaired.";
             status.classList.remove("error");
@@ -1903,6 +1983,7 @@ function openManagedGameOptions(game) {
             const next = await invoke("managed_game_size", { gameId: game.id }).catch(() => size);
             pane.querySelector(".files-size-card strong").textContent = `Size of installation: ${formatBytes(next)} (${name})`;
           } catch (error) {
+            failOperation("verify", game.id, String(error));
             operation.fail(String(error));
             status.textContent = String(error);
             status.classList.add("error");
@@ -4450,7 +4531,8 @@ async function renderStorageSettings(host) {
       <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted partition. No folder or game file is created.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
     </div></section>
     <section class="settings-section"><h2>Game backups</h2><p>Restore a portable SteamTron game backup to a registered game or create its library entry automatically.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Restore game backup</strong><span>Adds the game to your library automatically if it is not already present.</span></div><div class="row-control"><button id="setting-restore-game" class="primary">Restore…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Restore game backup</strong><span>Adds the game to your library automatically if it is not already present.</span></div><div class="row-control"><button id="setting-restore-game" class="primary" data-operation-button="restore">Restore…</button></div></div>
+      <div class="operation-inline hidden" data-operation-inline="restore"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div>
     </div></section>
     <section class="settings-section"><h2>Data folder</h2><p>Library index, tools, diagnostics and launch state for this installation.</p><div class="settings-card">
       ${settingsRow("SteamTron data", dataDir || "Unavailable", `<button id="setting-open-data">Open folder</button>`)}
@@ -4490,16 +4572,18 @@ async function renderStorageSettings(host) {
       title: "Restoring game backup",
       gameName: "Choose a backup file",
     });
+    beginOperation("restore", "");
     await operation.ready;
     try {
       const result = await invoke("restore_game_backup");
-      if (!result) { operation.close(); showToast("Restore cancelled."); return; }
+      if (!result) { cancelOperation("restore", ""); operation.close(); showToast("Restore cancelled."); return; }
+      finishOperation("restore", "", `Restored ${result.title || "game"}`);
       operation.complete(`Restored ${result.title || "game"} to ${result.root}`);
       managedLibrary = result.library;
       await load();
       await renderSettingsPage();
       showToast(`Restored ${result.title || "game"} to ${result.root}`);
-    } catch (error) { operation.fail(String(error)); }
+    } catch (error) { failOperation("restore", "", String(error)); operation.fail(String(error)); }
   };
   host.querySelector("#setting-refresh-drives").onclick = () => { void renderSettingsPage(); };
   host.querySelector("#setting-add-drive").onclick = () => { void showAddDriveDialog(); };
