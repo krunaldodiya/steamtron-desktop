@@ -34,9 +34,12 @@ button, and a cancelled download removes its partial files.
 ## Requirements
 
 - R1: The Downloading button is enabled and opens a download manager.
-- R2: The manager uses the broad download-modal layout with a progress bar,
-  current stage message, and stat cells for progress, downloaded bytes, total
-  size, average speed, and ETA. It updates without closing.
+- R2: The manager uses a large broad download-modal layout with a progress bar,
+  current stage message, and five stat cells in one row for progress, downloaded
+  bytes, total size, average speed, and ETA. It updates without closing.
+- R2a: Pause/Resume and Cancel are icon-only buttons immediately after the
+  progress bar. The manager has no bottom Close button; the top-right window
+  close is the only close control.
 - R3: Pause sends `SIGSTOP` to the downloader process group; Resume sends
   `SIGCONT`. The state reports `paused` and keeps partial files.
 - R4: Cancel terminates the downloader, removes partial game files, and returns
@@ -54,8 +57,8 @@ button, and a cancelled download removes its partial files.
 
 ## Acceptance criteria
 
-- [ ] Downloading opens a manager with the broad stats layout, progress bar,
-  stage text, Pause/Resume, and Cancel.
+- [ ] Downloading opens a large manager with the five stats in one row, progress
+  bar, and icon-only Pause/Resume and Cancel controls.
 - [ ] Pause freezes the downloader; Resume continues it from the same files.
 - [ ] Cancel removes partial content and shows Download again.
 - [ ] A dead downloader becomes an error state and a retryable Download button.
@@ -73,10 +76,10 @@ button, and a cancelled download removes its partial files.
   passed 4/4: pause sends `SIGSTOP` and resume sends `SIGCONT` to the process
   group; cancel terminates a paused process; a non-terminal state without a
   process, or with a dead PID, becomes `error`.
-- JSDOM download-manager harness passed: Downloading opened the broad manager,
-  progress/average speed/ETA rendered, Pause/Resume invoked their commands and
-  updated the label, closing kept the download, and Cancel showed the cancelled
-  state before closing and restoring the Download button.
+- JSDOM download-manager harness passed: Downloading opened the large manager,
+  progress/average speed/ETA rendered, Pause/Resume icon controls invoked their
+  commands, closing kept the download, and Cancel showed the cancelled state
+  before the top-right close restored the Download button.
 - Existing navigation suites still pass.
 
 ## Decisions and risks

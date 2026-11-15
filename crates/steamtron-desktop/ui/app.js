@@ -1076,6 +1076,10 @@ function openDownloadManager(game) {
   backdrop.innerHTML = `<div class="modal download-modal" id="download-manager"><div class="modal-head"><h2>Downloading · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <p class="download-stage" id="download-manager-stage">Preparing download…</p>
     <div class="download-bar"><span id="download-manager-fill"></span></div>
+    <div class="download-actions-inline" id="download-manager-actions">
+      <button class="game-icon-button" id="download-manager-pause" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
+      <button class="game-icon-button download-cancel-icon" id="download-manager-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+    </div>
     <div class="download-stats">
       <div class="download-stat"><span>Progress</span><strong id="download-manager-percent">—</strong></div>
       <div class="download-stat"><span>Downloaded</span><strong id="download-manager-completed">—</strong></div>
@@ -1083,8 +1087,7 @@ function openDownloadManager(game) {
       <div class="download-stat"><span>Average speed</span><strong id="download-manager-speed">—</strong></div>
       <div class="download-stat"><span>ETA</span><strong id="download-manager-eta">—</strong></div>
     </div>
-    <p class="download-meta" id="download-manager-meta">Keep SteamTron open while the download runs.</p>
-    <div class="modal-actions"><button id="download-manager-pause">Pause</button><button class="danger" id="download-manager-cancel">Cancel</button><button class="primary hidden" id="download-manager-done">Close</button></div></div>`;
+    <p class="download-meta" id="download-manager-meta">Keep SteamTron open while the download runs.</p></div>`;
   document.body.appendChild(backdrop);
   registerDialog(backdrop, { title: `Downloading ${game.title}` });
   const fill = backdrop.querySelector("#download-manager-fill");
@@ -1097,7 +1100,7 @@ function openDownloadManager(game) {
   const meta = backdrop.querySelector("#download-manager-meta");
   const pauseButton = backdrop.querySelector("#download-manager-pause");
   const cancelButton = backdrop.querySelector("#download-manager-cancel");
-  const doneButton = backdrop.querySelector("#download-manager-done");
+  const actionsRow = backdrop.querySelector("#download-manager-actions");
   let timer = null;
   let closed = false;
   let terminal = false;
@@ -1130,12 +1133,15 @@ function openDownloadManager(game) {
       : terminal
         ? state.status === "cancelled" ? "Download cancelled. Partial game files were removed." : state.status === "error" ? "See the diagnostic log for details." : "Download complete."
         : "Keep SteamTron open while the download runs. Closing this window does not cancel it.";
-    pauseButton.classList.toggle("hidden", terminal);
-    cancelButton.classList.toggle("hidden", terminal);
-    doneButton.classList.toggle("hidden", !terminal);
-    doneButton.classList.toggle("primary", terminal);
+    actionsRow.classList.toggle("hidden", terminal);
     if (!terminal) {
-      pauseButton.textContent = state.status === "paused" ? "Resume" : "Pause";
+      const paused = state.status === "paused";
+      const label = paused ? "Resume" : "Pause";
+      pauseButton.innerHTML = paused
+        ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>'
+        : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg>';
+      pauseButton.title = label;
+      pauseButton.setAttribute("aria-label", label);
       pauseButton.disabled = !["downloading", "paused"].includes(state.status);
       cancelButton.disabled = false;
     }
@@ -1173,7 +1179,6 @@ function openDownloadManager(game) {
     }
   };
   backdrop.querySelector(".modal-close").onclick = close;
-  doneButton.onclick = close;
   pauseButton.onclick = async () => {
     const state = managedDownloads.get(game.id);
     const stop = busy(pauseButton, state?.status === "paused" ? "Resuming…" : "Pausing…");
