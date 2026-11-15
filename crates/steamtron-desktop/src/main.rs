@@ -1342,7 +1342,13 @@ fn play_steam_game(appid: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn stop_game(appid: String) -> Result<(), String> {
+async fn stop_game(appid: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || stop_game_blocking(appid))
+        .await
+        .map_err(|error| format!("stop task failed: {error}"))?
+}
+
+fn stop_game_blocking(appid: String) -> Result<(), String> {
     require_auth()?;
     let mut games = running_games().lock().map_err(|_| "Game state lock failed.")?;
     let tracked = games.remove(&appid);
@@ -2154,7 +2160,13 @@ fn pid_exists(pid: u32) -> bool {
 }
 
 #[tauri::command]
-fn stop_managed(game_id: String) -> Result<(), String> {
+async fn stop_managed(game_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || stop_managed_blocking(game_id))
+        .await
+        .map_err(|error| format!("stop task failed: {error}"))?
+}
+
+fn stop_managed_blocking(game_id: String) -> Result<(), String> {
     use steamtron_core::library::Library;
 
     let tracked = managed_runs()
@@ -2177,7 +2189,7 @@ fn stop_managed(game_id: String) -> Result<(), String> {
     pids.dedup();
     #[cfg(target_os = "linux")]
     if pids.is_empty() {
-        return Err("This game is not running.".into());
+        return Ok(());
     }
     #[cfg(target_os = "linux")]
     {
@@ -2186,7 +2198,7 @@ fn stop_managed(game_id: String) -> Result<(), String> {
                 signal_pid(process, libc::SIGTERM);
             }
         }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
             let alive = pids.iter().any(|pid| pid_exists(*pid))
                 || game.as_ref().is_some_and(|game| !game_process_pids(game).is_empty());
@@ -2200,6 +2212,7 @@ fn stop_managed(game_id: String) -> Result<(), String> {
                 signal_pid(process, libc::SIGKILL);
             }
         }
+        std::thread::sleep(std::time::Duration::from_millis(300));
         managed_runs()
             .lock()
             .map_err(|_| "Game state lock failed.".to_string())?
