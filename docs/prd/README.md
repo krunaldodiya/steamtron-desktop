@@ -51,3 +51,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0024](0024-download-manager.md) | Reopenable download manager with pause, resume, and cancel | done | 2026-11-15 |
 | [0025](0025-uninstall-keeps-library.md) | Uninstall removes game files without removing the library entry | done | 2026-11-15 |
 | [0026](0026-hero-scroll.md) | Full hero reveal and smooth focus scrolling | done | 2026-11-15 |
+| [0027](0027-background-downloads.md) | Downloads continue after SteamTron exits | active | 2026-11-15 |

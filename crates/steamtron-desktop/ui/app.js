@@ -1075,10 +1075,12 @@ function openDownloadManager(game) {
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal download-modal" id="download-manager"><div class="modal-head"><h2>Downloading · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <p class="download-stage" id="download-manager-stage">Preparing download…</p>
-    <div class="download-bar"><span id="download-manager-fill"></span></div>
-    <div class="download-actions-inline" id="download-manager-actions">
-      <button class="game-icon-button" id="download-manager-pause" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
-      <button class="game-icon-button download-cancel-icon" id="download-manager-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+    <div class="download-progress-row">
+      <div class="download-bar"><span id="download-manager-fill"></span></div>
+      <div class="download-actions-inline" id="download-manager-actions">
+        <button class="game-icon-button" id="download-manager-pause" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
+        <button class="game-icon-button download-cancel-icon" id="download-manager-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
     </div>
     <div class="download-depots hidden" id="download-manager-depots">
       <div class="download-bar"><span id="download-manager-depot-fill"></span></div>
@@ -1091,7 +1093,11 @@ function openDownloadManager(game) {
       <div class="download-stat"><span>Average speed</span><strong id="download-manager-speed">—</strong></div>
       <div class="download-stat"><span>ETA</span><strong id="download-manager-eta">—</strong></div>
     </div>
-    <p class="download-meta" id="download-manager-meta">Keep SteamTron open while the download runs.</p></div>`;
+    <section class="download-next hidden" id="download-manager-next">
+      <div class="download-next-head"><h3>Content groups</h3><span id="download-manager-next-count"></span></div>
+      <div class="download-next-list" id="download-manager-depots-list"></div>
+    </section>
+    </div>`;
   document.body.appendChild(backdrop);
   registerDialog(backdrop, { title: `Downloading ${game.title}` });
   const fill = backdrop.querySelector("#download-manager-fill");
@@ -1104,7 +1110,9 @@ function openDownloadManager(game) {
   const depotsBox = backdrop.querySelector("#download-manager-depots");
   const depotFill = backdrop.querySelector("#download-manager-depot-fill");
   const depotLabel = backdrop.querySelector("#download-manager-depot-label");
-  const meta = backdrop.querySelector("#download-manager-meta");
+  const nextSection = backdrop.querySelector("#download-manager-next");
+  const nextCount = backdrop.querySelector("#download-manager-next-count");
+  const depotList = backdrop.querySelector("#download-manager-depots-list");
   const pauseButton = backdrop.querySelector("#download-manager-pause");
   const cancelButton = backdrop.querySelector("#download-manager-cancel");
   const actionsRow = backdrop.querySelector("#download-manager-actions");
@@ -1151,18 +1159,31 @@ function openDownloadManager(game) {
         ? `Installing files · ${depotsDone} / ${depotsTotal} depots`
         : `Files · depot ${depotsCurrent || 1} of ${depotsTotal}`;
     }
-    meta.textContent = state.status === "paused"
-      ? "The downloader is paused; partial files are kept."
-      : terminal
-        ? state.status === "cancelled" ? "Download cancelled. Partial game files were removed." : state.status === "error" ? "See the diagnostic log for details." : "Download complete."
-        : "Keep SteamTron open while the download runs. Closing this window does not cancel it.";
+    const depots = Array.isArray(state.depots) ? state.depots : [];
+    nextSection.classList.toggle("hidden", depots.length === 0);
+    if (depots.length) {
+      const finished = depots.filter((depot) => depot.status === "done").length;
+      nextCount.textContent = `${finished} / ${depots.length} complete`;
+      depotList.innerHTML = depots.map((depot) => {
+        const percent = Math.max(0, Math.min(100, Number(depot.percent) || 0));
+        const label = depot.status === "done" ? "Done" : depot.status === "downloading" ? "Downloading" : "Waiting";
+        const size = Number(depot.total) > 0
+          ? `${formatBytes(Number(depot.completed) || 0)} / ${formatBytes(Number(depot.total))}`
+          : Number(depot.completed) > 0 ? formatBytes(Number(depot.completed)) : "";
+        return `<div class="download-depot-row ${escape(depot.status || "pending")}">
+          <div class="download-depot-head"><span>Depot ${escape(depot.depotId)}</span><small>${label}</small></div>
+          <div class="download-depot-track"><span style="width:${percent}%"></span></div>
+          <div class="download-depot-meta"><span>${percent.toFixed(1)}%</span><span>${size}</span></div>
+        </div>`;
+      }).join("");
+    }
     actionsRow.classList.toggle("hidden", terminal);
     if (!terminal) {
       const paused = state.status === "paused";
       const label = paused ? "Resume" : "Pause";
       pauseButton.innerHTML = paused
-        ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>'
-        : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg>';
+        ? '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>'
+        : '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg>';
       pauseButton.title = label;
       pauseButton.setAttribute("aria-label", label);
       pauseButton.disabled = !["downloading", "paused"].includes(state.status);

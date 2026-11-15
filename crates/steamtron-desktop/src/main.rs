@@ -4641,6 +4641,7 @@ fn main() {
             std::thread::spawn(|| {
                 let _ = download::resolve_smd();
             });
+            download::restore(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

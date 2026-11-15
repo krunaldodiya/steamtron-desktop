@@ -38,11 +38,12 @@ button, and a cancelled download removes its partial files.
   a progress bar, current stage message, depot/install progress, and five stat
   cells in one row for progress, downloaded bytes, total size, average speed,
   and ETA. It updates without closing.
-- R2a: Pause/Resume and Cancel are icon-only buttons immediately after the
-  progress bar. The manager has no bottom Close button; the top-right window
-  close is the only close control.
-- R2b: Depot progress is shown when SMD reports a depot count, matching
-  UmuTron's data/install bar split.
+- R2a: Pause/Resume and Cancel are small icon-only controls on the right side of
+  the overall progress bar, sized to sit at the bar's height.
+- R2b: The bottom section lists every content group/depot with its own progress
+  bar, bytes, and status. It is not an explanatory text block.
+- R2c: The manager has no bottom Close button; the top-right window close is
+  the only close control. The informative text block is removed.
 - R2c: A live download with no output for 20 seconds reports its stalled time
   in the manager instead of appearing frozen.
 - R3: Pause sends `SIGSTOP` to the downloader process group; Resume sends
@@ -63,7 +64,8 @@ button, and a cancelled download removes its partial files.
 ## Acceptance criteria
 
 - [ ] Downloading opens a large manager with the five stats in one row, progress
-  bar, depot progress, and icon-only Pause/Resume and Cancel controls.
+  bar, small right-side icon controls, and one row per depot with its own
+  progress.
 - [ ] A stalled live download shows the elapsed no-progress time.
 - [ ] Pause freezes the downloader; Resume continues it from the same files.
 - [ ] Cancel removes partial content and shows Download again.
@@ -83,9 +85,10 @@ button, and a cancelled download removes its partial files.
   group; cancel terminates a paused process; a non-terminal state without a
   process, or with a dead PID, becomes `error`.
 - JSDOM download-manager harness passed: Downloading opened the large manager,
-  progress/average speed/ETA/depot progress rendered, Pause/Resume icon controls
-  invoked their commands, closing kept the download, and Cancel showed the
-  cancelled state before the top-right close restored the Download button.
+  progress/average speed/ETA/depot progress rendered, the content-group list
+  rendered, Pause/Resume icon controls invoked their commands, closing kept the
+  download, and Cancel showed the cancelled state before the top-right close
+  restored the Download button.
 - Rust test `status_reports_a_live_download_with_no_recent_output_as_stalled`
   passed: a live process with 30s of no output reports 29+ stalled seconds.
 - Existing navigation suites still pass.
