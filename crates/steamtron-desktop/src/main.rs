@@ -3753,11 +3753,11 @@ async fn verify_managed_files(game_id: String) -> Result<serde_json::Value, Stri
         .ok_or_else(|| "The Lua manifest is missing. Regenerate manifests or re-add the game first.".to_string())?;
     let cache = steamtron_core::paths::layout().cache_dir().join("smd");
     let smd_lua = download::smd_lua(app_id, &lua, &cache)?;
-    let smd = download::resolve_smd()?;
     let logs = steamtron_core::paths::layout().diagnostics_for(&game_id);
     std::fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
     let log = logs.join(format!("verify-{}.log", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0)));
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let smd = download::resolve_smd()?;
         let output = std::process::Command::new(&smd)
             .arg("--data-dir")
             .arg(cache.join("data"))
@@ -4429,8 +4429,10 @@ fn prepare_managed_download(game_id: String, drive_id: String) -> Result<serde_j
 }
 
 #[tauri::command]
-fn start_managed_download(app: tauri::AppHandle, game_id: String) -> Result<download::DownloadState, String> {
-    download::start(app, game_id)
+async fn start_managed_download(app: tauri::AppHandle, game_id: String) -> Result<download::DownloadState, String> {
+    tauri::async_runtime::spawn_blocking(move || download::start(app, game_id))
+        .await
+        .map_err(|error| format!("download task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -4644,6 +4646,9 @@ fn main() {
                 let _ = window.maximize();
             }
             setup_tray(app)?;
+            std::thread::spawn(|| {
+                let _ = download::resolve_smd();
+            });
             Ok(())
         })
         .on_window_event(|window, event| {

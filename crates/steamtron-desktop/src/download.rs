@@ -5,6 +5,7 @@
 //! the same tool and normalize the app line so smd installs one platform.
 
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -40,21 +41,109 @@ fn publish(app: &AppHandle, state: &DownloadState) {
     let _ = app.emit("download-progress", state.clone());
 }
 
+const SMD_VERSION: &str = "1.5.0";
+
+#[cfg(target_os = "linux")]
+const SMD_URL: &str =
+    "https://github.com/mcbabel/Steam-Manifest-Downloader/releases/download/v1.5.0/Steam-Manifest-Downloader-Terminal_1.5.0_linux-x64";
+#[cfg(target_os = "linux")]
+const SMD_SHA256: &str = "e8819e62b65a9c83d6f71d6369006c3f5ccbaa61d479b5636d97314c0f3021c2";
+
+#[cfg(target_os = "windows")]
+const SMD_URL: &str =
+    "https://github.com/mcbabel/Steam-Manifest-Downloader/releases/download/v1.5.0/Steam-Manifest-Downloader-Terminal_1.5.0_windows-x64.exe";
+#[cfg(target_os = "windows")]
+const SMD_SHA256: &str = "7cb56e33f18d0eff8a4dec5edffd8d4f16c41fcfce2605ba783133a0e4cfa138";
+
+fn smd_name() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "smd.exe"
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "smd"
+    }
+}
+
+fn provision_smd() -> Result<PathBuf, String> {
+    use sha2::{Digest, Sha256};
+
+    let directory = steamtron_core::paths::layout().tools();
+    std::fs::create_dir_all(&directory).map_err(|error| format!("{}: {error}", directory.display()))?;
+    let destination = directory.join(smd_name());
+    if destination.is_file() {
+        return Ok(destination);
+    }
+    let temporary = directory.join(format!(".{}.{}.download", smd_name(), std::process::id()));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(900))
+        .build()
+        .map_err(|error| format!("could not create the SMD download client: {error}"))?;
+    let mut response = client
+        .get(SMD_URL)
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .map_err(|error| format!("could not download SMD {SMD_VERSION}: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("SMD download returned HTTP {}", response.status()));
+    }
+    let mut file = std::fs::File::create(&temporary)
+        .map_err(|error| format!("{}: {error}", temporary.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = response
+            .read(&mut buffer)
+            .map_err(|error| format!("SMD download failed: {error}"))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+        file.write_all(&buffer[..count])
+            .map_err(|error| format!("{}: {error}", temporary.display()))?;
+    }
+    file.sync_all().map_err(|error| format!("{}: {error}", temporary.display()))?;
+    drop(file);
+    let digest = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    if digest != SMD_SHA256 {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(format!(
+            "SMD {SMD_VERSION} failed its integrity check (expected {SMD_SHA256}, got {digest})"
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("{}: {error}", temporary.display()))?;
+    }
+    if destination.is_file() {
+        let _ = std::fs::remove_file(&temporary);
+        return Ok(destination);
+    }
+    std::fs::rename(&temporary, &destination)
+        .map_err(|error| format!("{}: {error}", destination.display()))?;
+    Ok(destination)
+}
+
 pub(crate) fn resolve_smd() -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Some(value) = std::env::var_os("STEAMTRON_SMD") {
         candidates.push(PathBuf::from(value));
     }
-    candidates.push(steamtron_core::paths::layout().tools().join("smd"));
+    candidates.push(steamtron_core::paths::layout().tools().join(smd_name()));
     if let Some(path) = std::env::var_os("PATH") {
         for directory in std::env::split_paths(&path) {
-            candidates.push(directory.join("smd"));
+            candidates.push(directory.join(smd_name()));
         }
     }
-    candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| "smd was not found. Install UmuTron or set STEAMTRON_SMD.".to_string())
+    if let Some(found) = candidates.into_iter().find(|candidate| candidate.is_file()) {
+        return Ok(found);
+    }
+    provision_smd().map_err(|error| {
+        format!("The game downloader (SMD {SMD_VERSION}) is not available and could not be prepared: {error}")
+    })
 }
 
 pub(crate) fn configure_smd(data_dir: &Path) -> Result<(), String> {
@@ -65,10 +154,9 @@ pub(crate) fn configure_smd(data_dir: &Path) -> Result<(), String> {
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
-    // The bundled native chunk downloader rejects this provider's manifest
-    // shape (ZIP container magic); DepotDownloader is the reliable backend and
-    // is what UmuTron uses.
-    settings.insert("use_native_downloader".into(), serde_json::Value::Bool(false));
+    // Use SMD's native Rust engine: no .NET runtime, chunk-level retries,
+    // CRC/SHA verification, and resumable checkpoints.
+    settings.insert("use_native_downloader".into(), serde_json::Value::Bool(true));
     let payload = serde_json::to_vec_pretty(&settings).map_err(|error| error.to_string())?;
     let temporary = path.with_extension("json.steamtron.tmp");
     std::fs::write(&temporary, payload).map_err(|error| error.to_string())?;

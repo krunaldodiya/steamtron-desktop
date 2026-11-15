@@ -46,3 +46,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0019](0019-consolidated-backup.md) | One consolidated library backup | done | 2026-11-15 |
 | [0020](0020-proton-defaults.md) | Proton and prefix defaults without Steam | done | 2026-11-15 |
 | [0021](0021-stop-hang.md) | Stop game without freezing the window | done | 2026-11-15 |
+| [0022](0022-smd-downloader.md) | Self-provisioned SMD downloader | done | 2026-11-15 |
