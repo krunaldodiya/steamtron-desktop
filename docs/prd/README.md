@@ -57,3 +57,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0030](0030-operation-manager.md) | Shared operation manager for backup, restore, and verification | done | 2026-11-15 |
 | [0031](0031-store-retry.md) | Retry Store requests with a fresh client | done | 2026-11-15 |
 | [0032](0032-direct-verify.md) | Verify with cached manifests through DepotDownloaderMod | active | 2026-11-15 |
+| [0033](0033-portable-backup.md) | Portable backup folders (format 2) | active | 2026-11-15 |

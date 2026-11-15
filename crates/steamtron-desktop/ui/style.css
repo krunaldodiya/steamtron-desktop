@@ -673,7 +673,7 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-depot-meta { display:flex; justify-content:space-between; gap:10px; margin-top:4px; color:var(--muted); font-size:11px; }
 .download-actions-inline .game-icon-button { width:20px; height:20px; min-width:20px; padding:0; border-radius:6px; }
 .download-cancel-icon:hover { border-color:var(--error); color:var(--error); }
-.download-stats { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:8px; margin:0 0 14px; }
+.download-stats { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:8px; margin:0 0 14px; }
 .download-stat { padding:10px 12px; border:1px solid var(--border); border-radius:9px; background:var(--surface); min-width:0; }
 .download-stat span { display:block; margin-bottom:4px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
 .download-stat strong { display:block; color:var(--text); font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -682,6 +682,9 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .operation-modal .download-progress-row { margin-bottom:0; }
 .operation-percent { min-width:44px; text-align:right; color:var(--text); font-size:13px; }
 .operation-inline { margin-top:8px; }
+.operation-inline-progress { display:flex; align-items:center; gap:7px; }
+.operation-inline-progress .download-inline-track { flex:1; }
+.operation-inline-progress .game-icon-button { width:20px; height:20px; min-width:20px; padding:0; border-radius:6px; }
 .operation-inline.error .download-inline-meta-text { color:var(--error); }
 .download-drive-meta { color:var(--muted); font-size:12px; margin:4px 0 14px; }
 .download-drive-meta.error { color:#ff9b9b; }

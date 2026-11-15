@@ -1088,6 +1088,7 @@ function openDownloadManager(game) {
       <div class="download-stat"><span>Total size</span><strong id="download-manager-total">—</strong></div>
       <div class="download-stat"><span>Average speed</span><strong id="download-manager-speed">—</strong></div>
       <div class="download-stat"><span>ETA</span><strong id="download-manager-eta">—</strong></div>
+      <div class="download-stat"><span>Time spent</span><strong id="download-manager-elapsed">—</strong></div>
     </div>
     <section class="download-next hidden" id="download-manager-next">
       <div class="download-next-head"><h3>Content groups</h3><span id="download-manager-next-count"></span></div>
@@ -1134,6 +1135,7 @@ function openDownloadManager(game) {
     totalNode.textContent = total ? formatBytes(total) : "Calculating…";
     speedNode.textContent = speed > 0 ? `${formatBytes(speed)}/s` : "—";
     etaNode.textContent = eta || "—";
+    elapsedNode.textContent = formatSeconds(state.elapsedSeconds || 0);
     const stalled = Number(state.stalledSeconds) || 0;
     const stalledNow = state.status === "downloading" && stalled >= 20;
     stage.textContent = stalledNow
@@ -1242,6 +1244,8 @@ const OPERATION_LABELS = {
   restore: ["Restoring game backup…", "Restore…"],
 };
 const operationInlineTimers = new WeakMap();
+const inlineOperations = new Set();
+const cancelledInline = new Set();
 
 function operationInlineNodes(operation, gameId = "") {
   return [...document.querySelectorAll(`[data-operation-inline="${operation}"]`)].filter((node) => {
@@ -1327,39 +1331,59 @@ function ensureOperationManager(operation, gameId, options) {
   return manager;
 }
 
+function formatSeconds(seconds) {
+  const value = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (value >= 3600) return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
+  return `${Math.floor(value / 60)}m ${value % 60}s`;
+}
+
 function openOperationManager(options = {}) {
   const operation = options.operation || "operation";
   const title = options.title || "Working";
+  const rich = operation === "backup" || operation === "restore";
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal download-modal operation-modal" id="operation-manager"><div class="modal-head"><h2>${escape(title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <p class="download-stage" id="operation-stage">Starting…</p>
     <div class="download-progress-row"><div class="download-bar operation-bar"><span></span></div><strong class="operation-percent" id="operation-percent">0%</strong>
       <div class="download-actions-inline" id="operation-actions">
-        <button class="game-icon-button" id="operation-pause" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
         <button class="game-icon-button download-cancel-icon" id="operation-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
       </div>
     </div>
+    ${rich ? `<div class="download-stats operation-stats">
+      <div class="download-stat"><span>Progress</span><strong id="operation-percent-stat">0%</strong></div>
+      <div class="download-stat"><span>Transferred</span><strong id="operation-completed">—</strong></div>
+      <div class="download-stat"><span>Total size</span><strong id="operation-total">—</strong></div>
+      <div class="download-stat"><span>Transfer speed</span><strong id="operation-speed">—</strong></div>
+      <div class="download-stat"><span>ETA</span><strong id="operation-eta">—</strong></div>
+      <div class="download-stat"><span>Time spent</span><strong id="operation-elapsed">00:00</strong></div>
+    </div>` : ""}
     </div>`;
   document.body.appendChild(backdrop);
   registerDialog(backdrop, { title });
   const stage = backdrop.querySelector("#operation-stage");
   const fill = backdrop.querySelector(".operation-bar span");
   const percentNode = backdrop.querySelector("#operation-percent");
-  const pauseButton = backdrop.querySelector("#operation-pause");
+  const percentStat = backdrop.querySelector("#operation-percent-stat");
+  const completedNode = backdrop.querySelector("#operation-completed");
+  const totalNode = backdrop.querySelector("#operation-total");
+  const speedNode = backdrop.querySelector("#operation-speed");
+  const etaNode = backdrop.querySelector("#operation-eta");
+  const elapsedNode = backdrop.querySelector("#operation-elapsed");
   const cancelButton = backdrop.querySelector("#operation-cancel");
   const actions = backdrop.querySelector("#operation-actions");
-  // Verification is an all-or-nothing integrity pass: let it finish or cancel.
-  if (operation === "verify") pauseButton.classList.add("hidden");
   const closeButton = backdrop.querySelector(".modal-close");
   let unlisten = null;
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   let closed = false;
   let terminal = false;
-  let paused = false;
   let cancelled = false;
   let currentPercent = 0;
+  let completed = 0;
+  let total = 0;
+  let speed = 0;
+  let elapsed = 0;
   const close = () => {
     if (closed) return;
     if (terminal) {
@@ -1386,14 +1410,20 @@ function openOperationManager(options = {}) {
     }
     fill.style.width = `${currentPercent}%`;
     percentNode.textContent = `${currentPercent.toFixed(0)}%`;
+    if (percentStat) percentStat.textContent = `${currentPercent.toFixed(0)}%`;
   };
-  const setPaused = (value) => {
-    paused = value;
-    pauseButton.innerHTML = paused
-      ? '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>'
-      : '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg>';
-    pauseButton.title = paused ? "Resume" : "Pause";
-    pauseButton.setAttribute("aria-label", pauseButton.title);
+  const setStat = (node, value) => { if (node) node.textContent = value; };
+  const applyStats = (payload) => {
+    if (typeof payload.completed === "number") completed = payload.completed;
+    if (typeof payload.total === "number") total = payload.total;
+    if (typeof payload.speed === "number") speed = payload.speed;
+    if (typeof payload.elapsed === "number") elapsed = payload.elapsed;
+    setStat(completedNode, completed > 0 ? formatBytes(completed) : "—");
+    setStat(totalNode, total > 0 ? formatBytes(total) : "—");
+    setStat(speedNode, speed > 0 ? `${formatBytes(speed)}/s` : "—");
+    const eta = speed > 0 && total > completed ? (total - completed) / speed : 0;
+    setStat(etaNode, eta > 0 ? formatSeconds(eta) : "—");
+    setStat(elapsedNode, formatSeconds(elapsed));
   };
   const apply = (payload) => {
     if (!payload || payload.operation !== operation) return;
@@ -1403,15 +1433,11 @@ function openOperationManager(options = {}) {
       terminal = true;
       stage.textContent = payload.message || "Cancelled";
       actions.classList.add("hidden");
-    } else if (payload.status === "paused") {
-      setPaused(true);
-      stage.textContent = payload.message || "Paused";
-      actions.classList.remove("hidden");
     } else {
-      if (payload.status === "running") setPaused(false);
       stage.textContent = payload.message || "Working…";
       stage.classList.toggle("error", payload.status === "error");
       setPercent(payload.percent);
+      applyStats(payload);
       if (payload.status === "done") complete(payload.message);
     }
     if (terminal) actions.classList.add("hidden");
@@ -1434,13 +1460,6 @@ function openOperationManager(options = {}) {
     if (backdrop.classList.contains("hidden")) close();
   };
   closeButton.onclick = close;
-  pauseButton.onclick = async () => {
-    try {
-      await invoke(paused ? "resume_operation" : "pause_operation", { operation, gameId: options.gameId || "" });
-      setPaused(!paused);
-      stage.textContent = paused ? "Paused" : "Resuming…";
-    } catch (error) { showToast(String(error), true); }
-  };
   cancelButton.onclick = async () => {
     if (!(await confirmDialog({
       title: "Cancel operation",
@@ -1497,6 +1516,11 @@ if (window.__TAURI__?.event?.listen) {
     const payload = event.payload || {};
     if (!payload.operation) return;
     setOperationInline(payload.operation, payload.gameId || "", payload.message || "Working…", payload.status || "running", payload.percent);
+    if (["done", "cancelled", "error"].includes(payload.status)) {
+      const key = `${payload.operation}:${payload.gameId || ""}`;
+      inlineOperations.delete(key);
+      if (payload.status !== "error") cancelledInline.delete(key);
+    }
   });
   window.__TAURI__.event.listen("download-complete", async (event) => {
     const payload = event.payload || {};
@@ -1952,8 +1976,8 @@ function openManagedGameOptions(game) {
         const linked = latestGame.installation?.mode === "linked";
         pane.innerHTML = `<h3>Installed Files</h3>
           <div class="files-card files-size-card"><strong>Size of installation: ${formatBytes(size)} (${escape(name)})</strong><button id="files-browse">Browse…</button></div>
-          <div class="files-card"><p class="pane-note">Create a backup of the installed files to restore this game in the future.</p><button class="files-wide" id="files-backup" data-operation-button="backup">Back up game files…</button><div class="operation-inline hidden" data-operation-inline="backup" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div></div>
-          <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify" data-operation-button="verify">Verify files integrity</button><div class="operation-inline hidden" data-operation-inline="verify" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div><p class="files-status" id="files-status"></p></div>
+          <div class="files-card"><p class="pane-note">Create a portable backup folder with content.tar, fixes.tar, depot manifests and appmanifest metadata.</p><button class="files-wide" id="files-backup" data-operation-button="backup">Back up game files…</button><div class="operation-inline hidden" data-operation-inline="backup" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div></div>
+          <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify" data-operation-button="verify">Verify files integrity</button><div class="operation-inline hidden" data-operation-inline="verify" data-operation-game="${game.id}"><div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="verify" data-operation-game="${game.id}" title="Cancel verification" aria-label="Cancel verification"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div><p class="files-status" id="files-status"></p></div>
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
           <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
@@ -2005,32 +2029,37 @@ function openManagedGameOptions(game) {
             operation.fail(String(error));
           }
         };
+        const verifyKey = `verify:${game.id}`;
         pane.querySelector("#files-verify").onclick = async () => {
-          const operation = ensureOperationManager("verify", game.id, {
-            operation: "verify",
-            title: `Verifying files · ${latestGame.title}`,
-            gameId: game.id,
-            gameName: latestGame.title,
-          });
-          if (!operation) return;
+          if (inlineOperations.has(verifyKey)) return;
+          inlineOperations.add(verifyKey);
           beginOperation("verify", game.id);
-          await operation.ready;
+          status.textContent = "Verifying files against depot manifests…";
+          status.classList.remove("error");
           try {
             await invoke("verify_managed_files", { gameId: game.id });
             finishOperation("verify", game.id, "Verification complete");
-            operation.complete("Verification complete. Missing or damaged files were repaired.");
             status.textContent = "Verification complete. Missing or damaged files were repaired.";
             status.classList.remove("error");
             showToast("File integrity verified");
             const next = await invoke("managed_game_size", { gameId: game.id }).catch(() => size);
             pane.querySelector(".files-size-card strong").textContent = `Size of installation: ${formatBytes(next)} (${name})`;
           } catch (error) {
-            if (operation.isCancelled()) return;
+            if (cancelledInline.has(verifyKey)) return;
             failOperation("verify", game.id, String(error));
-            operation.fail(String(error));
             status.textContent = String(error);
             status.classList.add("error");
+          } finally {
+            inlineOperations.delete(verifyKey);
+            cancelledInline.delete(verifyKey);
           }
+        };
+        const inlineVerifyCancel = pane.querySelector('[data-operation-cancel="verify"]');
+        if (inlineVerifyCancel) inlineVerifyCancel.onclick = async () => {
+          if (!(await confirmDialog({ title: "Cancel verification", message: "Stop verifying this game? Files already checked stay as they are.", confirmLabel: "Cancel verification", cancelLabel: "Keep verifying", danger: true }))) return;
+          cancelledInline.add(verifyKey);
+          try { await invoke("cancel_operation", { operation: "verify", gameId: game.id }); }
+          catch (error) { cancelledInline.delete(verifyKey); showToast(String(error), true); }
         };
         pane.querySelector("#files-move").onclick = async () => {
           const snapshot = await invoke("library_snapshot").catch(() => managedLibrary);
@@ -4574,7 +4603,7 @@ async function renderStorageSettings(host) {
       <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted partition. No folder or game file is created.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
     </div></section>
     <section class="settings-section"><h2>Game backups</h2><p>Restore a portable SteamTron game backup to a registered game or create its library entry automatically.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Restore game backup</strong><span>Adds the game to your library automatically if it is not already present.</span></div><div class="row-control"><button id="setting-restore-game" class="primary" data-operation-button="restore">Restore…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Restore backup folder</strong><span>Choose a SteamTron backup folder; the game is added to your library automatically if needed.</span></div><div class="row-control"><button id="setting-restore-game" class="primary" data-operation-button="restore">Restore…</button></div></div>
       <div class="operation-inline hidden" data-operation-inline="restore"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div>
     </div></section>
     <section class="settings-section"><h2>Data folder</h2><p>Library index, tools, diagnostics and launch state for this installation.</p><div class="settings-card">

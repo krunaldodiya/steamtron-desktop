@@ -3338,7 +3338,6 @@ fn emit_operation_at(app: &tauri::AppHandle, operation: &str, game_id: &str, sta
 
 #[derive(Clone)]
 struct OperationControl {
-    paused: Arc<AtomicBool>,
     cancelled: Arc<AtomicBool>,
     pid: Arc<Mutex<Option<u32>>>,
 }
@@ -3354,7 +3353,6 @@ fn operation_key(operation: &str, game_id: &str) -> String {
 
 fn register_operation(operation: &str, game_id: &str) -> OperationControl {
     let control = OperationControl {
-        paused: Arc::new(AtomicBool::new(false)),
         cancelled: Arc::new(AtomicBool::new(false)),
         pid: Arc::new(Mutex::new(None)),
     };
@@ -3371,53 +3369,11 @@ fn unregister_operation(operation: &str, game_id: &str) {
 }
 
 fn operation_check(control: &OperationControl) -> Result<(), String> {
-    loop {
-        if control.cancelled.load(Ordering::SeqCst) {
-            return Err("Operation cancelled".into());
-        }
-        if !control.paused.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(120));
+    if control.cancelled.load(Ordering::SeqCst) {
+        Err("Operation cancelled".into())
+    } else {
+        Ok(())
     }
-}
-
-#[tauri::command]
-fn pause_operation(app: tauri::AppHandle, operation: String, game_id: String) -> Result<(), String> {
-    let control = operation_controls()
-        .lock()
-        .map_err(|_| "operation state lock failed".to_string())?
-        .get(&operation_key(&operation, &game_id))
-        .cloned()
-        .ok_or_else(|| "this operation is not running".to_string())?;
-    control.paused.store(true, Ordering::SeqCst);
-    if let Some(pid) = *control.pid.lock().map_err(|_| "operation PID lock failed".to_string())? {
-        #[cfg(unix)]
-        {
-            let _ = std::process::Command::new("kill").args(["-STOP", &format!("-{pid}")]).status();
-        }
-    }
-    emit_operation(&app, &operation, &game_id, "paused", "paused", "Paused");
-    Ok(())
-}
-
-#[tauri::command]
-fn resume_operation(app: tauri::AppHandle, operation: String, game_id: String) -> Result<(), String> {
-    let control = operation_controls()
-        .lock()
-        .map_err(|_| "operation state lock failed".to_string())?
-        .get(&operation_key(&operation, &game_id))
-        .cloned()
-        .ok_or_else(|| "this operation is not running".to_string())?;
-    control.paused.store(false, Ordering::SeqCst);
-    if let Some(pid) = *control.pid.lock().map_err(|_| "operation PID lock failed".to_string())? {
-        #[cfg(unix)]
-        {
-            let _ = std::process::Command::new("kill").args(["-CONT", &format!("-{pid}")]).status();
-        }
-    }
-    emit_operation(&app, &operation, &game_id, "running", "running", "Resuming…");
-    Ok(())
 }
 
 #[tauri::command]
@@ -3429,7 +3385,6 @@ fn cancel_operation(app: tauri::AppHandle, operation: String, game_id: String) -
         .cloned()
         .ok_or_else(|| "this operation is not running".to_string())?;
     control.cancelled.store(true, Ordering::SeqCst);
-    control.paused.store(false, Ordering::SeqCst);
     if let Some(pid) = *control.pid.lock().map_err(|_| "operation PID lock failed".to_string())? {
         #[cfg(unix)]
         {
@@ -3439,6 +3394,34 @@ fn cancel_operation(app: tauri::AppHandle, operation: String, game_id: String) -
     }
     emit_operation(&app, &operation, &game_id, "cancelled", "cancelled", "Cancelled");
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_operation_stats(
+    app: &tauri::AppHandle,
+    operation: &str,
+    game_id: &str,
+    stage: &str,
+    message: &str,
+    percent: f64,
+    completed: u64,
+    total: u64,
+    started: std::time::Instant,
+) {
+    let elapsed = started.elapsed().as_secs_f64().max(0.001);
+    let speed = completed as f64 / elapsed;
+    let _ = app.emit("operation-progress", serde_json::json!({
+        "operation": operation,
+        "gameId": game_id,
+        "stage": stage,
+        "status": "running",
+        "message": message,
+        "percent": percent.clamp(0.0, 100.0),
+        "completed": completed,
+        "total": total,
+        "speed": speed,
+        "elapsed": elapsed,
+    }));
 }
 
 fn collect_backup_entries(
@@ -3467,93 +3450,299 @@ fn collect_backup_entries(
     Ok(())
 }
 
+struct HashingWriter<W: std::io::Write> {
+    inner: W,
+    hasher: sha2::Sha256,
+}
+
+impl<W: std::io::Write> std::io::Write for HashingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let count = self.inner.write(buf)?;
+        use sha2::Digest;
+        self.hasher.update(&buf[..count]);
+        Ok(count)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn backup_safe_folder(title: &str) -> String {
+    let mut value: String = title
+        .chars()
+        .map(|character| if matches!(character, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '_' } else { character })
+        .collect();
+    value = value.trim().trim_matches('.').to_owned();
+    if value.is_empty() { "Game".into() } else { value.chars().take(120).collect() }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn archive_component(
+    source: &Path,
+    component_path: &Path,
+    top_prefix: &str,
+    directories: &[PathBuf],
+    files: &[(PathBuf, u64)],
+    total_bytes: u64,
+    written: &mut u64,
+    overall_total: u64,
+    app: &tauri::AppHandle,
+    game_id: &str,
+    stage: &str,
+    message: &str,
+    control: &OperationControl,
+    started: std::time::Instant,
+) -> Result<(String, u64), String> {
+    use sha2::Digest;
+    use std::io::Write;
+    let file = std::fs::File::create(component_path).map_err(|error| error.to_string())?;
+    let writer = HashingWriter { inner: file, hasher: sha2::Sha256::new() };
+    let mut archive = tar::Builder::new(writer);
+    let root_header = {
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_cksum();
+        header
+    };
+    archive.append_data(&mut root_header.clone(), top_prefix, std::io::empty()).map_err(|error| error.to_string())?;
+    for relative in directories {
+        operation_check(control)?;
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_cksum();
+        let path = format!("{top_prefix}/{}", relative.to_string_lossy().replace('\\', "/"));
+        archive.append_data(&mut header, path, std::io::empty()).map_err(|error| error.to_string())?;
+    }
+    let mut last_emit = std::time::Instant::now();
+    for (relative, size) in files {
+        operation_check(control)?;
+        let path = source.join(relative);
+        let mut input = std::fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let archive_path = format!("{top_prefix}/{}", relative.to_string_lossy().replace('\\', "/"));
+        archive.append_file(archive_path, &mut input).map_err(|error| format!("{}: {error}", path.display()))?;
+        *written = written.saturating_add(*size);
+        if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+            let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
+            emit_operation_stats(app, "backup", game_id, stage, message, percent, *written, overall_total, started);
+            last_emit = std::time::Instant::now();
+        }
+    }
+    let writer = archive.into_inner().map_err(|error| error.to_string())?;
+    writer.inner.sync_all().map_err(|error| error.to_string())?;
+    let digest = writer.hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    Ok((digest, total_bytes))
+}
+
+fn collect_component(root: &Path) -> Result<(Vec<PathBuf>, Vec<(PathBuf, u64)>, u64), String> {
+    let mut directories = Vec::new();
+    let mut files = Vec::new();
+    let mut total = 0u64;
+    collect_backup_entries(root, root, &mut directories, &mut files, &mut total)?;
+    Ok((directories, files, total))
+}
+
 #[tauri::command]
 async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::Library;
 
     require_auth()?;
     let library = Library::load().map_err(|error| error.to_string())?;
-    let game = library.game(&game_id).ok_or_else(|| "unknown game".to_string())?;
+    let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     if !game.installation.root.is_dir() {
         return Err("The installation folder does not exist.".into());
     }
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Back up game files")
-        .set_file_name(format!("{}_backup.tar.gz", steamtron_core::fixes::export_name(&game.title).trim_end_matches(".zip")))
-        .add_filter("Game backup", &["tar.gz", "tgz"])
-        .save_file()
+    let Some(parent) = rfd::FileDialog::new()
+        .set_title("Choose a backup destination folder")
+        .pick_folder()
     else {
         return Ok(None);
     };
-    if path.starts_with(&game.installation.root) {
+    if parent.starts_with(&game.installation.root) {
         return Err("Choose a backup location outside the game folder.".into());
     }
+    let folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game").to_owned();
+    let final_path = parent.join(backup_safe_folder(&game.title));
+    if final_path.exists() {
+        return Err(format!("A backup folder already exists at {}.", final_path.display()));
+    }
+    let staging = parent.join(format!(".steamtron-backup-{}", std::process::id()));
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    std::fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
+    let package = staging.join(backup_safe_folder(&game.title));
+    std::fs::create_dir_all(&package).map_err(|error| error.to_string())?;
+
     let root = game.installation.root.clone();
-    let destination = path.clone();
-    let destination_cleanup = destination.clone();
-    emit_operation(&app, "backup", &game_id, "prepare", "running", "Collecting game files…");
-    let metadata = serde_json::json!({
-        "format": 1,
-        "game_id": game.id,
-        "title": game.title,
-        "appid": game.metadata_app_id,
-        "created_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0),
-    });
+    let fixes = managed_fixes_dir(&game);
+    let lua = steamtron_core::library::managed_lua_path(&game);
+    let app_id = game.metadata_app_id;
+    let title = game.title.clone();
+    let game_id_emit = game_id.clone();
     let emit_app = app.clone();
-    let emit_game = game_id.clone();
     let control = register_operation("backup", &game_id);
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let mut directories = Vec::new();
-        let mut files = Vec::new();
-        let mut total_bytes = 0u64;
-        collect_backup_entries(&root, &root, &mut directories, &mut files, &mut total_bytes)?;
-        emit_operation_at(&emit_app, "backup", &emit_game, "write", "running", "Writing backup archive…", 0.0);
-        let file = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
-        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
-        let mut archive = tar::Builder::new(encoder);
-        let payload = serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?;
-        let mut header = tar::Header::new_gnu();
-        header.set_size(payload.len() as u64);
-        header.set_mode(0o644);
-        header.set_cksum();
-        archive.append_data(&mut header, ".steamtron-backup.json", payload.as_slice()).map_err(|error| error.to_string())?;
-        for relative in &directories {
-            operation_check(&control)?;
+    let staging_cleanup = staging.clone();
+    emit_operation_at(&app, "backup", &game_id, "prepare", "running", "Collecting game files…", 0.0);
+
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<std::path::PathBuf, String> {
+        let (content_dirs, content_files, content_total) = collect_component(&root)?;
+        let (fixes_dirs, fixes_files, fixes_total) = if let Some(fixes) = fixes.as_ref().filter(|path| path.is_dir()) {
+            collect_component(fixes)?
+        } else {
+            (Vec::new(), Vec::new(), 0)
+        };
+        let manifest_source = steamtron_core::paths::layout().manifests();
+        let mut manifest_files = Vec::new();
+        if let Some(lua) = lua.as_ref().and_then(|path| std::fs::read_to_string(path).ok()) {
+            let (depots, _) = parse_lua_metadata(&lua);
+            for (depot, manifest) in depots {
+                let name = format!("{depot}_{manifest}.manifest");
+                let source = [root.join(&name), manifest_source.join(&name)]
+                    .into_iter()
+                    .find(|path| path.is_file());
+                if let Some(source) = source {
+                    let metadata = std::fs::metadata(&source).map_err(|error| error.to_string())?;
+                    manifest_files.push((source, metadata.len()));
+                }
+            }
+        }
+        let manifests_total: u64 = manifest_files.iter().map(|(_, size)| *size).sum();
+        let overall_total = content_total + fixes_total + manifests_total;
+        let mut written = 0u64;
+        let started = std::time::Instant::now();
+
+        let (content_sha, _) = archive_component(
+            &root,
+            &package.join("content.tar"),
+            &format!("common/{folder}"),
+            &content_dirs,
+            &content_files,
+            content_total,
+            &mut written,
+            overall_total,
+            &emit_app,
+            &game_id_emit,
+            "content",
+            "Backing up game content…",
+            &control,
+            started,
+        )?;
+        operation_check(&control)?;
+        let (fixes_sha, _) = if fixes_total > 0 {
+            archive_component(
+                fixes.as_ref().expect("fixes checked above"),
+                &package.join("fixes.tar"),
+                &format!("fixes/{folder}"),
+                &fixes_dirs,
+                &fixes_files,
+                fixes_total,
+                &mut written,
+                overall_total,
+                &emit_app,
+                &game_id_emit,
+                "fixes",
+                "Backing up fixes…",
+                &control,
+                started,
+            )?
+        } else {
+            ("".into(), 0)
+        };
+        operation_check(&control)?;
+        let manifest_tar = package.join("manifest-bundle.tar");
+        let manifest_sha = if !manifest_files.is_empty() {
+            use sha2::Digest;
+            use std::io::Write;
+            let file = std::fs::File::create(&manifest_tar).map_err(|error| error.to_string())?;
+            let writer = HashingWriter { inner: file, hasher: sha2::Sha256::new() };
+            let mut archive = tar::Builder::new(writer);
+            let top = format!("manifests/{folder}");
             let mut header = tar::Header::new_gnu();
             header.set_entry_type(tar::EntryType::Directory);
             header.set_size(0);
             header.set_mode(0o755);
             header.set_cksum();
-            archive.append_data(&mut header, relative, std::io::empty()).map_err(|error| error.to_string())?;
-        }
-        let mut written = 0u64;
-        let mut last_emit = std::time::Instant::now();
-        for (relative, size) in &files {
-            operation_check(&control)?;
-            let source = root.join(relative);
-            let mut input = std::fs::File::open(&source).map_err(|error| format!("{}: {error}", source.display()))?;
-            archive.append_file(relative, &mut input).map_err(|error| format!("{}: {error}", source.display()))?;
-            written = written.saturating_add(*size);
-            if last_emit.elapsed() >= std::time::Duration::from_millis(250) || written >= total_bytes {
-                let percent = if total_bytes > 0 { written as f64 / total_bytes as f64 * 100.0 } else { 100.0 };
-                emit_operation_at(&emit_app, "backup", &emit_game, "write", "running", "Writing backup archive…", percent);
-                last_emit = std::time::Instant::now();
+            archive.append_data(&mut header, &top, std::io::empty()).map_err(|error| error.to_string())?;
+            let mut last_emit = std::time::Instant::now();
+            for (source, size) in &manifest_files {
+                operation_check(&control)?;
+                let name = source.file_name().and_then(|name| name.to_str()).unwrap_or("manifest");
+                let mut input = std::fs::File::open(source).map_err(|error| error.to_string())?;
+                archive.append_file(format!("{top}/{name}"), &mut input).map_err(|error| error.to_string())?;
+                written = written.saturating_add(*size);
+                if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                    let percent = if overall_total > 0 { written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
+                    emit_operation_stats(&emit_app, "backup", &game_id_emit, "manifests", "Backing up depot manifests…", percent, written, overall_total, started);
+                    last_emit = std::time::Instant::now();
+                }
             }
-        }
-        archive.finish().map_err(|error| error.to_string())?;
+            let writer = archive.into_inner().map_err(|error| error.to_string())?;
+            writer.inner.sync_all().map_err(|error| error.to_string())?;
+            writer.hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+        } else {
+            String::new()
+        };
         operation_check(&control)?;
-        emit_operation_at(&emit_app, "backup", &emit_game, "write", "running", "Finalizing backup…", 100.0);
-        Ok::<_, String>(())
+        let primary = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first());
+        let launcher_relative = primary.and_then(|target| target.executable.strip_prefix(&root).ok()).map(|path| path.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+        let targets = game.launch_targets.iter().map(|target| {
+            serde_json::json!({
+                "id": target.id,
+                "name": target.name,
+                "executable": target.executable.strip_prefix(&root).map(|path| path.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| target.executable.to_string_lossy().into_owned()),
+                "arguments": target.arguments,
+                "primary": target.primary,
+            })
+        }).collect::<Vec<_>>();
+        let mut components = serde_json::Map::new();
+        components.insert("content".into(), serde_json::json!({"name":"content.tar","sha256":content_sha}));
+        if !fixes_sha.is_empty() {
+            components.insert("fixes".into(), serde_json::json!({"name":"fixes.tar","sha256":fixes_sha}));
+        }
+        if !manifest_sha.is_empty() {
+            components.insert("manifest_bundle".into(), serde_json::json!({"name":"manifest-bundle.tar","sha256":manifest_sha}));
+        }
+        let metadata = serde_json::json!({
+            "backup_format": 2,
+            "format": 1,
+            "game_id": game.id,
+            "title": title,
+            "steam_app_id": app_id,
+            "content_directory": format!("common/{folder}"),
+            "fixes_directory": if fixes_sha.is_empty() { String::new() } else { format!("fixes/{folder}") },
+            "content_archive": {"name":"content.tar","sha256":content_sha},
+            "components": components,
+            "launcher_relative_path": launcher_relative,
+            "launcher_targets": targets,
+            "launch_settings": {
+                "environment": game.launch.environment,
+                "prefix_mode": game.launch.prefix_mode,
+                "proton": game.launch.proton,
+                "requires_steam": game.launch.requires_steam,
+            },
+            "proton": game.launch.proton,
+            "fixes_enabled": game.fixes_enabled,
+        });
+        let manifest_name = format!("appmanifest_{}.json", app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
+        std::fs::write(package.join(manifest_name), serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+        std::fs::rename(&package, &final_path).map_err(|error| error.to_string())?;
+        let _ = std::fs::remove_dir(&staging);
+        Ok(final_path)
     })
     .await;
     unregister_operation("backup", &game_id);
-    if let Err(error) = &result {
-        let _ = std::fs::remove_file(&destination_cleanup);
-        return Err(format!("backup task failed: {error}"));
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&staging_cleanup);
     }
-    result.map_err(|error| format!("backup task failed: {error}"))??;
+    let final_path = result
+        .map_err(|error| format!("backup task failed: {error}"))??;
     emit_operation_at(&app, "backup", &game_id, "done", "done", "Backup complete", 100.0);
-    Ok(Some(serde_json::json!({ "path": path.display().to_string() })))
+    Ok(Some(serde_json::json!({ "path": final_path.display().to_string() })))
 }
 
 #[derive(serde::Deserialize)]
@@ -3566,59 +3755,143 @@ struct BackupMetadata {
     game_id: String,
 }
 
+fn sha256_file(path: &Path) -> Result<String, String> {
+    use sha2::Digest;
+    let mut file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = [0u8; 1024 * 1024];
+    loop {
+        let count = std::io::Read::read(&mut file, &mut buffer).map_err(|error| error.to_string())?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn tar_size(path: &Path) -> Result<u64, String> {
+    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut archive = tar::Archive::new(file);
+    let mut total = 0u64;
+    for entry in archive.entries().map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.header().entry_type().is_dir() {
+            total = total.saturating_add(entry.size());
+        }
+    }
+    Ok(total)
+}
+
+fn extract_tar_component(
+    archive_path: &Path,
+    destination: &Path,
+    allowed_prefix: &str,
+    app: &tauri::AppHandle,
+    operation: &str,
+    game_id: &str,
+    stage: &str,
+    message: &str,
+    control: &OperationControl,
+    written: &mut u64,
+    overall_total: u64,
+    started: std::time::Instant,
+) -> Result<(), String> {
+    std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    let file = std::fs::File::open(archive_path).map_err(|error| format!("{}: {error}", archive_path.display()))?;
+    let mut archive = tar::Archive::new(file);
+    let mut last_emit = std::time::Instant::now();
+    for entry in archive.entries().map_err(|error| error.to_string())? {
+        operation_check(control)?;
+        let mut entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path().map_err(|error| error.to_string())?.into_owned();
+        let text = path.to_string_lossy().replace('\\', "/");
+        if !text.starts_with(allowed_prefix) || text.split('/').any(|part| part == "..") {
+            return Err("Backup contains an unsafe path.".into());
+        }
+        let target = destination.join(&path);
+        if !target.starts_with(destination) {
+            return Err("Backup contains an unsafe path.".into());
+        }
+        if entry.header().entry_type().is_dir() {
+            std::fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+        } else {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            let mut output = std::fs::File::create(&target).map_err(|error| error.to_string())?;
+            let copied = std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+            *written = (*written).saturating_add(copied);
+        }
+        if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+            let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
+            emit_operation_stats(app, operation, game_id, stage, message, percent, *written, overall_total, started);
+            last_emit = std::time::Instant::now();
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
-    use steamtron_core::library::Library;
+    use steamtron_core::library::{LaunchTarget, Library};
     use steamtron_library::managed::{add_managed_game, ManagedAddRequest, ManifestProvider};
 
     require_auth()?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Restore game backup")
-        .add_filter("SteamTron backup", &["tar.gz", "tgz"])
-        .pick_file()
+    let Some(folder) = rfd::FileDialog::new()
+        .set_title("Choose a SteamTron game backup folder")
+        .pick_folder()
     else {
         return Ok(None);
     };
-    emit_operation(&app, "restore", "", "read", "running", "Reading backup metadata…");
-    let archive_path = path.clone();
-    let (metadata, total_bytes) = tauri::async_runtime::spawn_blocking(move || -> Result<(BackupMetadata, u64), String> {
-        let file = std::fs::File::open(&archive_path).map_err(|error| error.to_string())?;
-        let decoder = flate2::read::GzDecoder::new(file);
-        let mut archive = tar::Archive::new(decoder);
-        let mut metadata = None;
-        let mut total = 0u64;
-        for entry in archive.entries().map_err(|error| error.to_string())? {
-            let mut entry = entry.map_err(|error| error.to_string())?;
-            if entry.path().map(|path| path == std::path::Path::new(".steamtron-backup.json")).unwrap_or(false) {
-                let mut bytes = Vec::new();
-                std::io::Read::read_to_end(&mut entry, &mut bytes).map_err(|error| error.to_string())?;
-                metadata = Some(serde_json::from_slice::<BackupMetadata>(&bytes).map_err(|error| error.to_string())?);
-            } else if !entry.header().entry_type().is_dir() {
-                total = total.saturating_add(entry.size());
-            }
+    emit_operation_at(&app, "restore", "", "read", "running", "Reading backup metadata…", 0.0);
+    let manifest_path = std::fs::read_dir(&folder)
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("appmanifest_") && name.ends_with(".json"))
+        })
+        .ok_or_else(|| "This folder is not a SteamTron game backup (missing appmanifest_*.json).".to_string())?;
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&manifest_path).map_err(|error| error.to_string())?
+    ).map_err(|error| format!("Backup manifest is invalid: {error}"))?;
+    if manifest.get("backup_format").and_then(|value| value.as_u64()) != Some(2) {
+        return Err("Unsupported SteamTron backup format.".into());
+    }
+    let game_id = manifest.get("game_id").and_then(|value| value.as_str()).unwrap_or("").to_owned();
+    let title = manifest.get("title").and_then(|value| value.as_str()).unwrap_or("").to_owned();
+    let appid = manifest.get("steam_app_id").and_then(|value| value.as_u64()).map(|value| value as u32);
+    let content_directory = manifest.get("content_directory").and_then(|value| value.as_str()).unwrap_or("").to_owned();
+    let content_parts: Vec<&str> = content_directory.split('/').collect();
+    if content_parts.len() != 2 || content_parts[0] != "common" || content_parts[1].is_empty() {
+        return Err("Backup content path is invalid.".into());
+    }
+    let content_folder = content_parts[1].to_owned();
+    let content_tar = folder.join("content.tar");
+    if !content_tar.is_file() {
+        return Err("Backup does not contain content.tar.".into());
+    }
+    if let Some(expected) = manifest.get("content_archive").and_then(|value| value.get("sha256")).and_then(|value| value.as_str()) {
+        emit_operation_at(&app, "restore", "", "verify", "running", "Verifying backup checksum…", 0.0);
+        let actual = sha256_file(&content_tar)?;
+        if actual != expected {
+            return Err("Backup content checksum does not match its manifest.".into());
         }
-        Ok((metadata.ok_or_else(|| "This is not a SteamTron game backup.".to_string())?, total))
-    })
-    .await
-    .map_err(|error| format!("backup read failed: {error}"))??;
+        emit_operation_at(&app, "restore", "", "verify", "running", "Backup checksum verified.", 100.0);
+    }
+
     let mut library = Library::load().map_err(|error| error.to_string())?;
-    let existing = metadata.appid
+    let existing = appid
         .and_then(|appid| library.game_by_app_id(appid).cloned())
-        .or_else(|| if metadata.game_id.is_empty() { None } else { library.game(&metadata.game_id).cloned() })
-        .or_else(|| library.games().iter().find(|game| game.title == metadata.title).cloned());
-    let target_root = if let Some(game) = existing {
-        game.installation.root.clone()
+        .or_else(|| if game_id.is_empty() { None } else { library.game(&game_id).cloned() })
+        .or_else(|| library.games().iter().find(|game| game.title == title).cloned());
+    let target_game = if let Some(game) = existing {
+        game
     } else {
-        let appid = metadata.appid.ok_or_else(|| "The backup has no Steam App ID and the game is not in the library.".to_string())?;
-        let title = if metadata.title.trim().is_empty() { format!("Steam App {appid}") } else { metadata.title.clone() };
+        let appid = appid.ok_or_else(|| "The backup has no Steam App ID and the game is not in the library.".to_string())?;
+        let title = if title.trim().is_empty() { format!("Steam App {appid}") } else { title.clone() };
         let drive = library.default_drive().cloned().or_else(|| library.drives().first().cloned()).ok_or_else(|| "Register a drive before restoring a backup.".to_string())?;
         let backend = platform_backend().ok();
-        let backend = backend.filter(|backend| {
-            backend
-                .status()
-                .map(|status| status.ready)
-                .unwrap_or(false)
-        });
+        let backend = backend.filter(|backend| backend.status().map(|status| status.ready).unwrap_or(false));
         let added = add_managed_game(
             ManagedAddRequest {
                 app_id: appid,
@@ -3631,60 +3904,136 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
             backend.as_ref().map(|backend| backend as &dyn steamtron_register::RegistrationBackend),
         )
         .map_err(|error| error.to_string())?;
-        std::path::PathBuf::from(added.root)
+        let mut library = Library::load().map_err(|error| error.to_string())?;
+        library.game(&added.game_id).cloned().ok_or_else(|| "Restored game entry was not found.".to_string())?
     };
-    std::fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
-    let extract_root = target_root.clone();
-    let restore_path = path.clone();
-    let emit_app = app.clone();
+    let target_root = target_game.installation.root.clone();
+    let base = target_root.parent().and_then(|path| path.parent()).ok_or_else(|| "Installation path is invalid.".to_string())?;
+    let staging = base.join(format!(".restore-{}", std::process::id()));
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    std::fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
     let control = register_operation("restore", "");
-    emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files…", 0.0);
+    let emit_app = app.clone();
+    let restore_folder = folder.clone();
+    let staging_cleanup = staging.clone();
+    let target_root_worker = target_root.clone();
+    let content_folder_worker = content_folder.clone();
+    let fixes_directory = manifest.get("fixes_directory").and_then(|value| value.as_str()).unwrap_or("").to_owned();
+    let manifest_components = manifest.get("components").cloned().unwrap_or(serde_json::Value::Null);
+    let manifest_worker = manifest.clone();
+    let target_game_worker = target_game.clone();
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let file = std::fs::File::open(&restore_path).map_err(|error| error.to_string())?;
-        let decoder = flate2::read::GzDecoder::new(file);
-        let mut archive = tar::Archive::new(decoder);
+        let content_total = tar_size(&restore_folder.join("content.tar"))?;
+        let fixes_total = if !fixes_directory.is_empty() { tar_size(&restore_folder.join("fixes.tar")).unwrap_or(0) } else { 0 };
+        let manifests_total = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() { tar_size(&restore_folder.join("manifest-bundle.tar")).unwrap_or(0) } else { 0 };
+        let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
-        let mut last_emit = std::time::Instant::now();
-        for entry in archive.entries().map_err(|error| error.to_string())? {
-            operation_check(&control)?;
-            let mut entry = entry.map_err(|error| error.to_string())?;
-            let entry_path = entry.path().map_err(|error| error.to_string())?.into_owned();
-            if entry_path == std::path::Path::new(".steamtron-backup.json") {
-                continue;
-            }
-            let relative = entry_path.strip_prefix(".").unwrap_or(&entry_path);
-            let destination = extract_root.join(relative);
-            if !destination.starts_with(&extract_root) {
-                return Err("Backup contains an unsafe path.".into());
-            }
-            if let Some(parent) = destination.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            if entry.header().entry_type().is_dir() {
-                std::fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
-            } else {
-                let mut output = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
-                let copied = std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
-                written = written.saturating_add(copied);
-                if last_emit.elapsed() >= std::time::Duration::from_millis(200) || written >= total_bytes {
-                    let percent = if total_bytes > 0 { written as f64 / total_bytes as f64 * 100.0 } else { 100.0 };
-                    emit_operation_at(&emit_app, "restore", "", "extract", "running", "Extracting game files…", percent);
-                    last_emit = std::time::Instant::now();
+        let started = std::time::Instant::now();
+        extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", &emit_app, "restore", "", "extract", "Extracting game files…", &control, &mut written, overall_total, started)?;
+        let staged_content = staging.join("common").join(&content_folder_worker);
+        if !staged_content.is_dir() {
+            return Err("Backup did not restore the expected game content.".into());
+        }
+        if let Some(parent) = target_root_worker.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        if target_root_worker.exists() {
+            std::fs::remove_dir_all(&target_root_worker).map_err(|error| error.to_string())?;
+        }
+        std::fs::rename(&staged_content, &target_root_worker).map_err(|error| error.to_string())?;
+
+        if !fixes_directory.is_empty() {
+            extract_tar_component(&restore_folder.join("fixes.tar"), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started)?;
+            let staged_fixes = staging.join("fixes").join(&content_folder_worker);
+            if staged_fixes.is_dir() {
+                if let Some(destination) = managed_fixes_dir(&target_game_worker) {
+                    if destination.exists() {
+                        let _ = std::fs::remove_dir_all(&destination);
+                    }
+                    if let Some(parent) = destination.parent() {
+                        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                    }
+                    std::fs::rename(&staged_fixes, &destination).map_err(|error| error.to_string())?;
                 }
             }
         }
+
+        if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
+            extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started)?;
+            let staged_manifests = staging.join("manifests").join(&content_folder_worker);
+            if staged_manifests.is_dir() {
+                for entry in std::fs::read_dir(&staged_manifests).map_err(|error| error.to_string())?.flatten() {
+                    if entry.path().is_file() {
+                        let name = entry.file_name();
+                        let _ = std::fs::copy(entry.path(), target_root_worker.join(&name));
+                        let _ = std::fs::copy(entry.path(), steamtron_core::paths::layout().manifests().join(&name));
+                    }
+                }
+            }
+        }
+        let _ = manifest_components;
+        operation_check(&control)?;
         Ok(())
     })
     .await;
     unregister_operation("restore", "");
-    result
-        .map_err(|error| format!("restore task failed: {error}"))??;
-    emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files…", 100.0);
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&staging_cleanup);
+    }
+    result.map_err(|error| format!("restore task failed: {error}"))??;
     emit_operation_at(&app, "restore", "", "register", "running", "Finalizing library entry…", 100.0);
-    let library = Library::load().map_err(|error| error.to_string())?;
+
+    let mut game = target_game;
+    game.installation.root = target_root.clone();
+    game.installation.confirmed = true;
+    game.fixes_enabled = manifest.get("fixes_enabled").and_then(|value| value.as_bool()).unwrap_or(true);
+    if let Some(settings) = manifest.get("launch_settings") {
+        if let Some(mode) = settings.get("prefix_mode").and_then(|value| value.as_str()) {
+            game.launch.prefix_mode = mode.to_owned();
+        }
+        if let Some(proton) = settings.get("proton").and_then(|value| value.as_str()) {
+            game.launch.proton = proton.to_owned();
+        }
+        if let Some(requires) = settings.get("requires_steam").and_then(|value| value.as_bool()) {
+            game.launch.requires_steam = requires;
+        }
+        if let Some(environment) = settings.get("environment") {
+            if let Ok(environment) = serde_json::from_value(environment.clone()) {
+                game.launch.environment = environment;
+            }
+        }
+    }
+    let mut targets = Vec::new();
+    if let Some(items) = manifest.get("launcher_targets").and_then(|value| value.as_array()) {
+        for (index, item) in items.iter().enumerate() {
+            let relative = item.get("executable").and_then(|value| value.as_str()).unwrap_or("");
+            if relative.is_empty() { continue; }
+            let executable = target_root.join(relative);
+            targets.push(LaunchTarget {
+                id: item.get("id").and_then(|value| value.as_str()).map(str::to_owned).unwrap_or_else(|| format!("t{}", index + 1)),
+                name: item.get("name").and_then(|value| value.as_str()).unwrap_or("Game").to_owned(),
+                executable,
+                arguments: item.get("arguments").and_then(|value| value.as_array()).map(|values| values.iter().filter_map(|value| value.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
+                primary: item.get("primary").and_then(|value| value.as_bool()).unwrap_or(index == 0),
+            });
+        }
+    }
+    if targets.is_empty() {
+        if let Some((executable, name)) = download::detect_launch_target(&target_root) {
+            targets.push(LaunchTarget { id: "t1".into(), name, executable, arguments: Vec::new(), primary: true });
+        }
+    }
+    game.launch_targets = targets;
+    steamtron_core::library::mark_setup_completed(&mut game);
+    library.upsert_game(game.clone()).map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    let _ = std::fs::remove_dir_all(&staging_cleanup);
     emit_operation_at(&app, "restore", "", "done", "done", "Restore complete", 100.0);
+    let library = Library::load().map_err(|error| error.to_string())?;
     Ok(Some(serde_json::json!({
-        "title": metadata.title,
+        "title": game.title,
         "root": target_root.display().to_string(),
         "library": library_json(&library),
     })))
@@ -5195,8 +5544,6 @@ fn main() {
             export_managed_saves,
             import_managed_saves,
             uninstall_managed_game,
-            pause_operation,
-            resume_operation,
             cancel_operation,
             regenerate_managed_manifests,
             steam_download_size,

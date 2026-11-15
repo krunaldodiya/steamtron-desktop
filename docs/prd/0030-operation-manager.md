@@ -53,9 +53,11 @@ present-participle label.
 - R10: An inline 0–100% bar appears under each action, matching download's
   inline bar.
 - R11: The inline bar shows the backend stage and final message, then hides.
-- R12: Backup and restore expose Pause/Resume and Cancel beside the progress
-  bar. Verify exposes Cancel only; it must run to completion or be cancelled.
-- R13: Backup/restore pause cooperatively between archive/extraction entries.
+- R12: Backup and restore expose Cancel only in their operation window. Verify
+  has no window: its progress and Cancel button are inline under the button.
+  None of these operations supports Pause/Resume.
+- R13: Backup and restore show six stat cells: Progress, Transferred, Total
+  size, Transfer speed, ETA, and Time spent. Download shows the same six.
 - R14: Cancel stops the worker, removes a partial backup archive, and reports
   Cancelled without being overwritten by a failure.
 
@@ -97,10 +99,8 @@ present-participle label.
   click never starts a duplicate operation.
 - The download manager keeps pause/resume/cancel and per-depot rows; operation
   windows stay minimal like Steam's validation progress.
-- Backup/restore pause at file/entry boundaries, not inside a single large file.
-  Verify pauses the SMD process group, including DepotDownloaderMod.
 - Cancelling restore leaves already-extracted partial files; cancelling backup
-  removes its partial archive.
+  removes its partial archive. No operation can be paused.
 
 ## Links
 
