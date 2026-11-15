@@ -830,7 +830,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         .arg(&smd_lua)
         .arg("-o")
         .arg(&root)
-        .args(["--like-steam", "--platform", "windows", "--language", "english", "--json"])
+        // The verbose flag sends backend diagnostics to stderr instead of the
+        // shared log file. SMD 1.5.0's manifest-code fallback can stall when its
+        // diagnostics are written to the data-dir log; stderr keeps JSON stdout
+        // clean and the fallback completes.
+        .args(["--like-steam", "--platform", "windows", "--language", "english", "--json", "-v"])
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_log))
         .stderr(Stdio::from(stderr_log));
@@ -1037,8 +1041,24 @@ pub fn status(game_id: &str) -> Option<DownloadState> {
     let mut states = states().lock().ok()?;
     let state = states.get_mut(game_id)?;
     if !running && !matches!(state.status.as_str(), "done" | "error" | "cancelled") {
+        let generic = state.message.is_empty()
+            || state.message.starts_with("Downloading ·")
+            || [
+                "Preparing depots…",
+                "Preparing depot downloads…",
+                "Starting downloader…",
+                "Contacting depot sources…",
+                "Fetching depot manifests…",
+                "Generating depot keys…",
+                "Preparing downloader…",
+                "Checking disk space…",
+                "Resuming download…",
+            ]
+            .contains(&state.message.as_str());
         state.status = "error".into();
-        state.message = "Download stopped unexpectedly. Start it again.".into();
+        if generic {
+            state.message = "Download stopped unexpectedly. Start it again.".into();
+        }
         state.speed = 0.0;
     }
     if state.status == "downloading" && state.last_event_at > 0.0 {
