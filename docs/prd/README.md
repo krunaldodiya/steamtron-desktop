@@ -49,3 +49,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0022](0022-smd-downloader.md) | Self-provisioned SMD downloader | done | 2026-11-15 |
 | [0023](0023-native-fixes-tools.md) | Native Goldberg extraction and Steamless unpacking | done | 2026-11-15 |
 | [0024](0024-download-manager.md) | Reopenable download manager with pause, resume, and cancel | done | 2026-11-15 |
+| [0025](0025-uninstall-keeps-library.md) | Uninstall removes game files without removing the library entry | done | 2026-11-15 |

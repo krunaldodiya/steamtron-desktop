@@ -4139,6 +4139,7 @@ dependencies = [
  "tar",
  "tauri",
  "tauri-build",
+ "tempfile",
  "xz2",
  "zip",
 ]

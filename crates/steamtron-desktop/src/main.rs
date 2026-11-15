@@ -3495,17 +3495,19 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
     Ok(library_json(&library))
 }
 
-#[tauri::command]
-fn uninstall_managed_game(game_id: String) -> Result<serde_json::Value, String> {
+fn uninstall_managed_game_at(
+    library_path: &std::path::Path,
+    game_id: &str,
+) -> Result<(String, bool), String> {
     use steamtron_core::library::Library;
 
-    require_auth()?;
-    let mut library = Library::load().map_err(|error| error.to_string())?;
-    let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
-    if library.game(&game_id).is_some() {
-        if !game_process_pids(&game).is_empty() {
-            return Err("Stop the game before uninstalling it.".into());
-        }
+    let mut library = Library::open(library_path).map_err(|error| error.to_string())?;
+    let mut game = library
+        .game(game_id)
+        .cloned()
+        .ok_or_else(|| "unknown game".to_string())?;
+    if !game_process_pids(&game).is_empty() {
+        return Err("Stop the game before uninstalling it.".into());
     }
     if game.installation.mode == steamtron_core::library::InstallMode::Linked {
         return Err("Unlink external games instead of deleting their folder.".into());
@@ -3514,17 +3516,31 @@ fn uninstall_managed_game(game_id: String) -> Result<serde_json::Value, String> 
     if root.as_os_str().is_empty() || root == std::path::Path::new("/") {
         return Err("Refusing to delete an unsafe game folder.".into());
     }
-    if let Ok(backend) = platform_backend() {
-        if let Some(registration) = game.steam.as_ref() {
-            let _ = backend.unregister(&registration.app_id.to_string());
-        }
-    }
-    if root.exists() {
+    let existed = root.exists();
+    if existed {
         std::fs::remove_dir_all(&root).map_err(|error| format!("{}: {error}", root.display()))?;
     }
-    library.remove_game(&game_id);
+    // Uninstall removes content only. The library entry, metadata, artwork,
+    // Steam registration, fixes, and prefix stay so the user can download the
+    // game again or explicitly remove it from the library.
+    game.installation.confirmed = false;
+    game.launch_targets.clear();
+    game.setup_completed_at = None;
+    library.upsert_game(game.clone()).map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({ "uninstalled": true, "title": game.title }))
+    Ok((game.title, existed))
+}
+
+#[tauri::command]
+fn uninstall_managed_game(game_id: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    let _ = download::cancel(&game_id);
+    let (title, removed) = uninstall_managed_game_at(&steamtron_core::library::Library::default_path(), &game_id)?;
+    Ok(serde_json::json!({
+        "uninstalled": removed,
+        "title": title,
+        "kept_in_library": true,
+    }))
 }
 
 #[tauri::command]
@@ -4786,5 +4802,64 @@ mod artwork_title_tests {
         assert!(!store_title_matches("Red Dead Redemption", "Red Dead Redemption 2"));
         assert!(!store_title_matches("Uncharted 4: A Thief's End", "Uncharted: Legacy of Thieves Collection"));
         assert!(!store_title_matches("Batman: Arkham Asylum", "Batman: Arkham City"));
+    }
+}
+
+#[cfg(test)]
+mod uninstall_tests {
+    use super::*;
+    use steamtron_core::library::{
+        Artwork, Game, InstallMode, Installation, LaunchSettings, LaunchTarget, Library,
+    };
+
+    #[test]
+    fn uninstall_removes_content_but_keeps_the_library_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let root = temp.path().join("game");
+        std::fs::create_dir_all(&root).unwrap();
+        let exe = root.join("game.exe");
+        std::fs::write(&exe, b"exe").unwrap();
+
+        let mut library = Library::open(&library_path).unwrap();
+        let game = Game {
+            id: "42".into(),
+            title: "Sample Game".into(),
+            metadata_app_id: None,
+            metadata_source: None,
+            installation: Installation {
+                mode: InstallMode::Managed,
+                root: root.clone(),
+                prefix: temp.path().join("prefix"),
+                proton: String::new(),
+                manifest: temp.path().join("appmanifest_42.json"),
+                confirmed: true,
+            },
+            steam: None,
+            launch: LaunchSettings::default(),
+            launch_targets: vec![LaunchTarget {
+                id: "t1".into(),
+                name: "Game".into(),
+                executable: exe,
+                arguments: Vec::new(),
+                primary: true,
+            }],
+            fixes_enabled: true,
+            artwork: Artwork::default(),
+            setup_completed_at: Some(1),
+        };
+        library.upsert_game(game).unwrap();
+        library.save().unwrap();
+
+        let (title, removed) = uninstall_managed_game_at(&library_path, "42").unwrap();
+        assert_eq!(title, "Sample Game");
+        assert!(removed);
+        assert!(!root.exists());
+
+        let library = Library::open(&library_path).unwrap();
+        let game = library.game("42").expect("library entry stays after uninstall");
+        assert!(!game.installation.confirmed);
+        assert!(game.launch_targets.is_empty());
+        assert!(game.setup_completed_at.is_none());
     }
 }

@@ -1625,7 +1625,7 @@ function openManagedGameOptions(game) {
           <div class="files-card"><p class="pane-note">Create a backup of the installed files to restore this game in the future.</p><button class="files-wide" id="files-backup">Back up game files…</button></div>
           <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify">Verify files integrity</button><p class="files-status" id="files-status"></p></div>
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
-          <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game folder from your library."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
+          <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
           <div class="files-card"><p class="pane-note">Download the latest Lua/manifest bundle. Steam registration is refreshed only when a ready Steam backend is available.</p><button class="files-wide" id="files-regenerate">Regenerate manifests</button></div>`;
 
@@ -1712,15 +1712,19 @@ function openManagedGameOptions(game) {
           } catch (error) { showToast(String(error), true); }
         };
         pane.querySelector("#files-uninstall").onclick = async () => {
-          if (!(await confirmDialog({ title: "Uninstall game", message: "Uninstall this game? The entire game folder is permanently deleted.", confirmLabel: "Uninstall", danger: true }))) return;
-          if (!(await confirmDialog({ title: "Delete installed files", message: `Delete ${latestGame.title}'s installed files permanently? This cannot be undone.`, confirmLabel: "Delete", danger: true }))) return;
+          if (!(await confirmDialog({
+            title: "Uninstall game",
+            message: `Uninstall ${latestGame.title}? The installed game files are permanently deleted. The game stays in your library so you can download it again.`,
+            confirmLabel: "Uninstall",
+            danger: true,
+          }))) return;
+          const stop = busy(pane.querySelector("#files-uninstall"), "Uninstalling…");
           try {
             await invoke("uninstall_managed_game", { gameId: game.id });
+            await refreshGame();
             close();
-            managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
-            setView("library");
-            showToast("Game uninstalled");
-          } catch (error) { showToast(String(error), true); }
+            showToast("Game files removed; game kept in library");
+          } catch (error) { stop(); showToast(String(error), true); }
         };
         pane.querySelector("#files-export-saves").onclick = (event) => run(event.currentTarget, async () => {
           const path = await invoke("export_managed_saves", { gameId: game.id });
