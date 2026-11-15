@@ -40,3 +40,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0013](0013-guest-login.md) | Guest sign-in screen and default-browser login | done | 2026-11-15 |
 | [0014](0014-unified-modals.md) | Unified dialog windows | done | 2026-11-15 |
 | [0015](0015-home-focus-after-signin.md) | Keep Home focus after sign-in window refocus | done | 2026-11-15 |
+| [0016](0016-dialog-focus-return.md) | Return focus to the dialog opener | done | 2026-11-15 |

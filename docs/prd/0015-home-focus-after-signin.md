@@ -39,10 +39,10 @@ the route body, and never steals focus from the header or another surface.
 
 ## Verification
 
-- jsdom `/tmp/steamtron-nav-test/panel-test.mjs`: 71/71 checks pass, including
+- jsdom `/tmp/steamtron-nav-test/panel-test.mjs`: 73/73 checks pass, including
   `Window refocus keeps a Home card focused` and
   `Window refocus keeps header focus`.
-- Base suite 33/33; auth suite 13/13.
+- Base suite 34/34; auth suite 13/13.
 - Release build completed and the installed binary hash matched the build.
 
 ## Decisions and risks

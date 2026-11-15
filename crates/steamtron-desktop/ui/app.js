@@ -116,6 +116,46 @@ function cleanupDialog(entry) {
   const index = dialogWindows.indexOf(entry);
   if (index >= 0) dialogWindows.splice(index, 1);
   syncDialogBlocking();
+  restoreDialogFocus(entry);
+}
+
+function openDialogEntry() {
+  for (let index = dialogWindows.length - 1; index >= 0; index -= 1) {
+    const entry = dialogWindows[index];
+    if (document.body.contains(entry.backdrop)
+      && !entry.backdrop.classList.contains("hidden")) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function restoreDialogFocus(entry) {
+  let target = entry?.returnFocus;
+  if (!target) return;
+  if (!document.contains(target)) {
+    if (target.id) target = document.getElementById(target.id);
+    else if (target.dataset?.storeId) {
+      target = document.querySelector(`[data-store-id="${CSS.escape(target.dataset.storeId)}"]`);
+    } else {
+      target = null;
+    }
+  }
+  if (!target || !document.contains(target) || target.disabled) return;
+  const top = openDialogEntry();
+  if (top) {
+    if (top.backdrop.contains(target)) focusControl(target);
+    return;
+  }
+  if (!authGate.classList.contains("hidden")) return;
+  if (document.body.classList.contains("settings-open")) {
+    const page = settingsPage();
+    if (page && page.contains(target)) focusControl(target);
+    return;
+  }
+  if (appSections.some((node) => node?.contains(target) && node.inert)) return;
+  if (target.getClientRects && target.getClientRects().length === 0) return;
+  focusControl(target);
 }
 
 function dialogTop() {
@@ -169,6 +209,7 @@ function registerDialog(backdrop, options = {}) {
   const title = options.title || dialogTitleOf(modal);
   const header = modal.querySelector(".modal-head, .game-settings-head");
   if (header) header.classList.add("dialog-head");
+  const active = document.activeElement;
   const entry = {
     id: ++dialogSeq,
     backdrop,
@@ -176,6 +217,7 @@ function registerDialog(backdrop, options = {}) {
     title,
     maximized: false,
     observer: null,
+    returnFocus: active && active !== document.body && !backdrop.contains(active) ? active : null,
   };
   dialogWindows.push(entry);
   syncDialogBlocking();
@@ -329,6 +371,7 @@ function showAuthGate(message = "Sign in to SteamTron to manage your Steam libra
   gateSpinner.classList.add("hidden");
   gateSignin.disabled = false;
   syncAppInert();
+  gateSignin.focus();
 }
 
 function hideAuthGate() {
@@ -3615,6 +3658,8 @@ function settingsPage() {
   return document.querySelector("#settings-page");
 }
 
+let settingsReturnFocus = null;
+
 function toggleSettingsMaximize() {
   const page = settingsPage();
   if (!page) return;
@@ -3627,6 +3672,10 @@ function toggleSettingsMaximize() {
 }
 
 async function openSettingsPage() {
+  const active = document.activeElement;
+  settingsReturnFocus = active && active !== document.body && !settingsPage().contains(active)
+    ? active
+    : document.querySelector("#settings");
   document.body.classList.add("settings-open");
   document.querySelector("#settings-backdrop")?.classList.remove("hidden");
   settingsPage().classList.remove("hidden");
@@ -3638,6 +3687,8 @@ async function openSettingsPage() {
 
 function closeSettingsPage() {
   stopProtonInstallPolling();
+  const returnFocus = settingsReturnFocus;
+  settingsReturnFocus = null;
   const page = settingsPage();
   if (page) {
     page.classList.add("hidden");
@@ -3653,6 +3704,10 @@ function closeSettingsPage() {
   }
   if (navState.focused) navState.focused.classList.remove("nav-focus");
   navState.focused = null;
+  if (returnFocus && document.contains(returnFocus) && !returnFocus.disabled
+    && document.querySelector("#auth-gate").classList.contains("hidden")) {
+    focusControl(returnFocus);
+  }
 }
 
 async function refreshSettingsLibrary() {

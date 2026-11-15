@@ -66,11 +66,11 @@ has no decorative search icon.
 ## Verification
 
 - `node --check crates/steamtron-desktop/ui/app.js` passed.
-- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 71 checks,
+- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 73 checks,
   including dialog controls, outside-click persistence, background blocking,
   the dimmed Settings backdrop, inert library cards, maximize, Game Settings
-  chrome, settings window controls, and Escape.
-- Base navigation suite `test.mjs` passed 33/33; auth suite `auth-test.mjs`
+  chrome, settings window controls, Escape, and opener focus return.
+- Base navigation suite `test.mjs` passed 34/34; auth suite `auth-test.mjs`
   passed 13/13.
 - `grep -n "window.confirm" crates/steamtron-desktop/ui/app.js` returns no
   matches.
