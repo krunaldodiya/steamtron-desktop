@@ -23,6 +23,7 @@ pub struct DownloadState {
     pub completed: u64,
     pub total: u64,
     pub speed: f64,
+    pub average_speed: f64,
     pub message: String,
     pub log: String,
 }
@@ -244,6 +245,7 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
         if success {
             state.percent = 100.0;
             state.completed = state.total;
+            state.speed = 0.0;
         }
         state.clone()
     };
@@ -422,6 +424,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         completed: 0,
         total: 0,
         speed: 0.0,
+        average_speed: 0.0,
         message: "Starting smd…".into(),
         log: return_log.clone(),
     };
@@ -451,6 +454,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             completed: 0,
             total: 0,
             speed: 0.0,
+            average_speed: 0.0,
             message: "Preparing depots…".into(),
             log: log_path.display().to_string(),
         };
@@ -616,6 +620,8 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                             state.speed = 0.0;
                         } else {
                             state.speed = speed;
+                            state.average_speed = completed as f64
+                                / started.elapsed().as_secs_f64().max(0.001);
                             state.status = "downloading".into();
                             state.message = if completed == 0 {
                                 if reported_percent > 0.0 {
@@ -644,6 +650,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         completed: 0,
         total: 0,
         speed: 0.0,
+        average_speed: 0.0,
         message: "Starting smd…".into(),
         log: return_log,
     })
@@ -800,6 +807,7 @@ mod tests {
                 completed: 0,
                 total: 0,
                 speed: 0.0,
+                average_speed: 0.0,
                 message: String::new(),
                 log: String::new(),
             },
@@ -883,6 +891,7 @@ mod tests {
                 completed: 1,
                 total: 20,
                 speed: 1.0,
+                average_speed: 1.0,
                 message: "Preparing depot downloads…".into(),
                 log: String::new(),
             },

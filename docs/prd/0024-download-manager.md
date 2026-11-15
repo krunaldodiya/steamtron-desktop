@@ -34,8 +34,9 @@ button, and a cancelled download removes its partial files.
 ## Requirements
 
 - R1: The Downloading button is enabled and opens a download manager.
-- R2: The manager shows percent, completed/total bytes, speed, ETA, and the
-  current stage message; it updates without closing.
+- R2: The manager uses the broad download-modal layout with a progress bar,
+  current stage message, and stat cells for progress, downloaded bytes, total
+  size, average speed, and ETA. It updates without closing.
 - R3: Pause sends `SIGSTOP` to the downloader process group; Resume sends
   `SIGCONT`. The state reports `paused` and keeps partial files.
 - R4: Cancel terminates the downloader, removes partial game files, and returns
@@ -53,7 +54,8 @@ button, and a cancelled download removes its partial files.
 
 ## Acceptance criteria
 
-- [ ] Downloading opens a manager with progress and Pause/Resume and Cancel.
+- [ ] Downloading opens a manager with the broad stats layout, progress bar,
+  stage text, Pause/Resume, and Cancel.
 - [ ] Pause freezes the downloader; Resume continues it from the same files.
 - [ ] Cancel removes partial content and shows Download again.
 - [ ] A dead downloader becomes an error state and a retryable Download button.
@@ -71,10 +73,10 @@ button, and a cancelled download removes its partial files.
   passed 4/4: pause sends `SIGSTOP` and resume sends `SIGCONT` to the process
   group; cancel terminates a paused process; a non-terminal state without a
   process, or with a dead PID, becomes `error`.
-- JSDOM download-manager harness passed: Downloading opened the manager,
-  progress rendered, Pause/Resume invoked their commands and updated the label,
-  closing kept the download, and Cancel removed the manager and restored the
-  Download button.
+- JSDOM download-manager harness passed: Downloading opened the broad manager,
+  progress/average speed/ETA rendered, Pause/Resume invoked their commands and
+  updated the label, closing kept the download, and Cancel showed the cancelled
+  state before closing and restoring the Download button.
 - Existing navigation suites still pass.
 
 ## Decisions and risks
@@ -84,6 +86,10 @@ button, and a cancelled download removes its partial files.
   Pause/Resume returns an explicit unsupported error; Cancel remains available.
 - A paused SMD process holds its network connections frozen; long pauses can let
   the CDN connection time out. Resume relies on SMD's chunk retries.
+- The broad modal restores the pre-`0101ca2` download window, extended with
+  pause/resume, average speed, and ETA. The old window was removed when
+  downloads became inline; both now coexist: inline progress stays on the game
+  card and the Downloading button reopens the full manager.
 - Cancelling removes the managed game root, matching the existing failed-download
   cleanup. SMD checkpoints in its cache are left in place.
 - Removing a game entry now cancels an active download first, so the downloader

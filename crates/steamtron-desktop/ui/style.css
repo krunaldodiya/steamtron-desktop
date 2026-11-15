@@ -578,13 +578,6 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .game-settings-pane input:focus, .game-settings-pane textarea:focus { border-color:var(--accent); }
 .game-log { margin:0 0 8px; padding:14px; min-height:260px; max-height:420px; overflow:auto; border:1px solid var(--border); border-radius:10px; background:#0c1117; color:#c8d4e0; font-size:12px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
 
-.download-modal { width:min(520px, 92vw); }
-.download-bar { height:10px; margin:16px 0 12px; border-radius:999px; background:#141c26; overflow:hidden; border:1px solid var(--border); }
-.download-bar span { display:block; height:100%; width:0; background:var(--accent); transition:width .25s ease; }
-.download-status { margin:0; color:var(--text); font-size:14px; }
-.download-status.error { color:var(--error); }
-.download-meta { margin:8px 0 0; color:var(--muted); font-size:12px; min-height:16px; }
-
 /* Game Settings: inline folder picker and single-line environment rows. */
 .game-link-folder-row { display:flex; align-items:center; gap:8px; }
 .game-link-folder-row input { flex:1; min-width:0; width:auto; }
@@ -656,9 +649,15 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-inline-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:7px; color:var(--muted); font-size:12px; }
 .download-inline-meta button { padding:5px 10px; font-size:11px; }
 .download-drive-modal #download-drive-select { width:100%; margin:14px 0 10px; }
-.download-manager-modal { min-width:min(520px, 86vw); }
-.download-manager-modal .download-inline-track { margin:12px 0 8px; }
-.download-manager-status { margin:10px 0 0; font-weight:600; }
-.download-manager-modal #download-manager-meta { margin-bottom:2px; }
+.download-modal { width:min(620px, 92vw); }
+.download-stage { margin:10px 0 0; color:var(--text); font-size:15px; font-weight:600; }
+.download-stage.error { color:var(--error); }
+.download-bar { height:10px; margin:12px 0 16px; border-radius:999px; background:#141c26; overflow:hidden; border:1px solid var(--border); }
+.download-bar span { display:block; height:100%; width:0; background:var(--accent); transition:width .25s ease; }
+.download-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; margin:0 0 14px; }
+.download-stat { padding:10px 12px; border:1px solid var(--border); border-radius:9px; background:var(--surface); min-width:0; }
+.download-stat span { display:block; margin-bottom:4px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+.download-stat strong { display:block; color:var(--text); font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.download-meta { margin:0 0 2px; color:var(--muted); font-size:12px; min-height:16px; }
 .download-drive-meta { color:var(--muted); font-size:12px; margin:4px 0 14px; }
 .download-drive-meta.error { color:#ff9b9b; }

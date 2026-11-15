@@ -910,6 +910,20 @@ function downloadTerminal(state) {
   return ["done", "error", "cancelled"].includes(state?.status);
 }
 
+function downloadSpeed(state) {
+  return Number(state?.averageSpeed ?? state?.average_speed ?? state?.speed) || 0;
+}
+
+function downloadEta(state) {
+  const total = Number(state?.total) || 0;
+  const completed = Number(state?.completed) || 0;
+  const speed = downloadSpeed(state);
+  if (!total || total <= completed || speed <= 0) return "";
+  const seconds = Math.ceil((total - completed) / speed);
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function downloadSummary(state) {
   const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
   if (!state.total) {
@@ -923,11 +937,10 @@ function downloadSummary(state) {
     `${percent.toFixed(1)}%`,
     `${formatBytes(state.completed || 0)} of ${formatBytes(state.total || 0)}`,
   ];
-  if (state.speed > 0) parts.push(`${formatBytes(state.speed)}/s`);
-  if (state.total > state.completed && state.speed > 0) {
-    const seconds = Math.ceil((state.total - state.completed) / state.speed);
-    parts.push(`ETA ${Math.floor(seconds / 60)}m ${seconds % 60}s`);
-  }
+  const speed = downloadSpeed(state);
+  if (speed > 0) parts.push(`${formatBytes(speed)}/s`);
+  const eta = downloadEta(state);
+  if (eta) parts.push(`ETA ${eta}`);
   if ((Number(state.completed) || 0) === 0 && state.message) parts.push(state.message);
   return parts.join(" · ");
 }
@@ -1060,65 +1073,110 @@ function openDownloadManager(game) {
   if (document.querySelector("#download-manager")) return;
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal download-manager-modal" id="download-manager"><div class="modal-head"><h2>Downloading ${escape(game.title)}</h2><button class="modal-close" id="download-manager-close" aria-label="Close">×</button></div>
-    <p class="download-manager-status" id="download-manager-status">Preparing download…</p>
-    <div class="download-inline-track"><span></span></div>
-    <p class="download-drive-meta" id="download-manager-meta"></p>
-    <div class="modal-actions"><button id="download-manager-pause">Pause</button><button class="danger" id="download-manager-cancel">Cancel</button></div></div>`;
+  backdrop.innerHTML = `<div class="modal download-modal" id="download-manager"><div class="modal-head"><h2>Downloading · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <p class="download-stage" id="download-manager-stage">Preparing download…</p>
+    <div class="download-bar"><span id="download-manager-fill"></span></div>
+    <div class="download-stats">
+      <div class="download-stat"><span>Progress</span><strong id="download-manager-percent">—</strong></div>
+      <div class="download-stat"><span>Downloaded</span><strong id="download-manager-completed">—</strong></div>
+      <div class="download-stat"><span>Total size</span><strong id="download-manager-total">—</strong></div>
+      <div class="download-stat"><span>Average speed</span><strong id="download-manager-speed">—</strong></div>
+      <div class="download-stat"><span>ETA</span><strong id="download-manager-eta">—</strong></div>
+    </div>
+    <p class="download-meta" id="download-manager-meta">Keep SteamTron open while the download runs.</p>
+    <div class="modal-actions"><button id="download-manager-pause">Pause</button><button class="danger" id="download-manager-cancel">Cancel</button><button class="primary hidden" id="download-manager-done">Close</button></div></div>`;
   document.body.appendChild(backdrop);
   registerDialog(backdrop, { title: `Downloading ${game.title}` });
-  const bar = backdrop.querySelector(".download-inline-track span");
-  const status = backdrop.querySelector("#download-manager-status");
+  const fill = backdrop.querySelector("#download-manager-fill");
+  const stage = backdrop.querySelector("#download-manager-stage");
+  const percentNode = backdrop.querySelector("#download-manager-percent");
+  const completedNode = backdrop.querySelector("#download-manager-completed");
+  const totalNode = backdrop.querySelector("#download-manager-total");
+  const speedNode = backdrop.querySelector("#download-manager-speed");
+  const etaNode = backdrop.querySelector("#download-manager-eta");
   const meta = backdrop.querySelector("#download-manager-meta");
   const pauseButton = backdrop.querySelector("#download-manager-pause");
   const cancelButton = backdrop.querySelector("#download-manager-cancel");
+  const doneButton = backdrop.querySelector("#download-manager-done");
   let timer = null;
   let closed = false;
-  const render = (state) => {
-    if (!state) return;
-    const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
-    bar.style.width = `${percent}%`;
-    status.textContent = downloadSummary(state);
-    meta.textContent = state.status === "paused"
-      ? "The downloader is paused; partial files are kept."
-      : "Keep SteamTron open while the download runs. Closing this window does not cancel it.";
-    pauseButton.textContent = state.status === "paused" ? "Resume" : "Pause";
-    pauseButton.disabled = !["downloading", "paused"].includes(state.status);
-    cancelButton.disabled = downloadTerminal(state);
-  };
+  let terminal = false;
   const close = () => {
     if (closed) return;
     closed = true;
     if (timer) clearInterval(timer);
+    timer = null;
     if (document.body.contains(backdrop)) backdrop.remove();
+    if (appView === "game" && managedSelectedId === game.id) renderManagedMode();
   };
-  const finish = (state, message) => {
+  const render = (state) => {
+    if (!state) return;
+    const percent = Math.max(0, Math.min(100, Number(state.percent) || 0));
+    const total = Number(state.total) || 0;
+    const completed = Number(state.completed) || 0;
+    const speed = downloadSpeed(state);
+    const eta = downloadEta(state);
+    terminal = downloadTerminal(state);
+    fill.style.width = `${terminal && state.status === "done" ? 100 : percent}%`;
+    percentNode.textContent = total ? `${percent.toFixed(1)}%` : `${percent.toFixed(1)}%`;
+    completedNode.textContent = completed ? formatBytes(completed) : "—";
+    totalNode.textContent = total ? formatBytes(total) : "Calculating…";
+    speedNode.textContent = speed > 0 ? `${formatBytes(speed)}/s` : "—";
+    etaNode.textContent = eta || "—";
+    stage.textContent = state.message || (state.status === "paused" ? "Download paused" : "Preparing download…");
+    stage.classList.toggle("error", state.status === "error");
+    meta.textContent = state.status === "paused"
+      ? "The downloader is paused; partial files are kept."
+      : terminal
+        ? state.status === "cancelled" ? "Download cancelled. Partial game files were removed." : state.status === "error" ? "See the diagnostic log for details." : "Download complete."
+        : "Keep SteamTron open while the download runs. Closing this window does not cancel it.";
+    pauseButton.classList.toggle("hidden", terminal);
+    cancelButton.classList.toggle("hidden", terminal);
+    doneButton.classList.toggle("hidden", !terminal);
+    doneButton.classList.toggle("primary", terminal);
+    if (!terminal) {
+      pauseButton.textContent = state.status === "paused" ? "Resume" : "Pause";
+      pauseButton.disabled = !["downloading", "paused"].includes(state.status);
+      cancelButton.disabled = false;
+    }
+  };
+  const settle = (state) => {
     stopDownloadWatch(game.id);
+    if (timer) clearInterval(timer);
+    timer = null;
     if (state) managedDownloads.set(game.id, state);
     else managedDownloads.delete(game.id);
-    close();
     if (appView === "game" && managedSelectedId === game.id) renderManagedMode();
-    if (message) showToast(message, state?.status === "error");
   };
   const refresh = async () => {
+    if (closed) return;
     let state = null;
     try { state = await invoke("managed_download_status", { gameId: game.id }); }
     catch {}
-    if (!state) { finish(managedDownloads.get(game.id), "The download is no longer running."); return; }
+    if (closed) return;
+    if (!state) {
+      render({ ...(managedDownloads.get(game.id) || {}), status: "error", message: "The download is no longer running." });
+      settle(null);
+      return;
+    }
     managedDownloads.set(game.id, state);
     render(state);
     if (downloadTerminal(state)) {
-      const message = state.status === "cancelled"
-        ? "Download cancelled"
-        : state.status === "error" ? state.message || "Download failed" : "Download complete";
-      finish(state, message);
+      settle(state);
+      if (state.status === "done") {
+        managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
+        if (appView === "game" && managedSelectedId === game.id) renderManagedMode();
+        showToast("Download complete");
+      } else {
+        showToast(state.message || (state.status === "cancelled" ? "Download cancelled" : "Download failed"), state.status === "error");
+      }
     }
   };
-  backdrop.querySelector("#download-manager-close").onclick = close;
+  backdrop.querySelector(".modal-close").onclick = close;
+  doneButton.onclick = close;
   pauseButton.onclick = async () => {
     const state = managedDownloads.get(game.id);
-    const button = pauseButton;
-    const stop = busy(button, state?.status === "paused" ? "Resuming…" : "Pausing…");
+    const stop = busy(pauseButton, state?.status === "paused" ? "Resuming…" : "Pausing…");
     try {
       await invoke(state?.status === "paused" ? "resume_managed_download" : "pause_managed_download", { gameId: game.id });
       stop();
@@ -1137,14 +1195,15 @@ function openDownloadManager(game) {
     try {
       await invoke("cancel_managed_download", { gameId: game.id });
       stop();
-      finish(null, "Download cancelled");
+      await refresh();
     } catch (error) { stop(); showToast(String(error), true); }
   };
   render(managedDownloads.get(game.id));
   timer = setInterval(refresh, 800);
   void refresh();
-  focusControl(backdrop.querySelector("#download-manager-close"));
+  focusControl(pauseButton);
 }
+
 
 function applyDownloadEvent(state) {
   if (!state?.gameId) return;
