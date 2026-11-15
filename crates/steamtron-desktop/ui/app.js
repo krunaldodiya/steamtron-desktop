@@ -141,6 +141,7 @@ function syncDialogBlocking() {
   const open = dialogWindows.some((entry) =>
     document.body.contains(entry.backdrop) && !entry.backdrop.classList.contains("hidden"));
   document.body.classList.toggle("dialog-open", open);
+  syncAppInert();
 }
 
 function toggleDialogMaximize(entry) {
@@ -324,15 +325,29 @@ const appSections = [document.querySelector(".topbar"), document.querySelector("
 
 function showAuthGate(message = "Sign in to SteamTron to manage your Steam library.") {
   authGate.classList.remove("hidden");
-  for (const node of appSections) { node.inert = true; node.setAttribute("aria-hidden", "true"); }
   gateStatus.textContent = message;
   gateSpinner.classList.add("hidden");
   gateSignin.disabled = false;
+  syncAppInert();
 }
 
 function hideAuthGate() {
   authGate.classList.add("hidden");
-  for (const node of appSections) { node.inert = false; node.removeAttribute("aria-hidden"); }
+  syncAppInert();
+}
+
+function syncAppInert() {
+  const modalOpen = dialogWindows.some((entry) =>
+    document.body.contains(entry.backdrop) && !entry.backdrop.classList.contains("hidden"));
+  const inert = !authGate.classList.contains("hidden")
+    || document.body.classList.contains("settings-open")
+    || modalOpen;
+  for (const node of appSections) {
+    if (!node) continue;
+    node.inert = inert;
+    if (inert) node.setAttribute("aria-hidden", "true");
+    else node.removeAttribute("aria-hidden");
+  }
 }
 
 
@@ -2670,6 +2685,7 @@ function openFullscreenOptions() {
 document.querySelector("#window-mode").onclick = () => { void toggleFullscreenMode(); };
 
 async function boot() {
+  syncAppInert();
   try {
     const auth = await invoke("profile_status");
     if (!auth.authenticated) {
@@ -3612,7 +3628,9 @@ function toggleSettingsMaximize() {
 
 async function openSettingsPage() {
   document.body.classList.add("settings-open");
+  document.querySelector("#settings-backdrop")?.classList.remove("hidden");
   settingsPage().classList.remove("hidden");
+  syncAppInert();
   await renderSettingsPage();
   const activeTab = settingsPage().querySelector(".settings-tab.active");
   if (activeTab) focusControl(activeTab);
@@ -3625,7 +3643,9 @@ function closeSettingsPage() {
     page.classList.add("hidden");
     page.classList.remove("settings-maximized");
   }
+  document.querySelector("#settings-backdrop")?.classList.add("hidden");
   document.body.classList.remove("settings-open");
+  syncAppInert();
   const maximize = document.querySelector("#settings-maximize");
   if (maximize) {
     maximize.title = "Maximize";

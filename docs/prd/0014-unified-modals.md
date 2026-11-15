@@ -38,6 +38,8 @@ has no decorative search icon.
   nothing and never dismisses the dialog; the app behind it is not clickable
   while the dialog is open.
 - R3a: The sign-in gate and existing modal Escape semantics are unchanged.
+- R3b: Settings opens over a dimmed full-window backdrop; the app cards and
+  topbar behind Settings are inert and non-clickable until it closes.
 - R4: All 24 `window.confirm` prompts are replaced by one custom confirm
   dialog. Its default width is **360px**, visibly smaller than other dialogs.
 - R5: The settings surface becomes a windowed panel with the same controls;
@@ -56,16 +58,18 @@ has no decorative search icon.
 - [x] No minimize control remains in dialogs or Settings.
 - [x] Maximize expands the dialog to the usable window area.
 - [x] A confirm is 360px wide and uses the same window shell.
-- [x] Settings opens windowed, can minimize/maximize, and has no search glyph.
+- [x] Settings opens windowed over a dimmed backdrop, can maximize, has no
+  search glyph, and blocks the library behind it.
 - [x] All `window.confirm` call sites are gone.
 - [x] Existing dialog flows, Escape handling, and navigation suites still pass.
 
 ## Verification
 
 - `node --check crates/steamtron-desktop/ui/app.js` passed.
-- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 66 checks,
+- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 71 checks,
   including dialog controls, outside-click persistence, background blocking,
-  maximize, Game Settings chrome, settings window controls, and Escape.
+  the dimmed Settings backdrop, inert library cards, maximize, Game Settings
+  chrome, settings window controls, and Escape.
 - Base navigation suite `test.mjs` passed 33/33; auth suite `auth-test.mjs`
   passed 13/13.
 - `grep -n "window.confirm" crates/steamtron-desktop/ui/app.js` returns no
@@ -81,6 +85,11 @@ has no decorative search icon.
 - Outside-click close handlers were removed from every dialog. Backdrop clicks
   are consumed, and `body.dialog-open` disables pointer input on the app shell
   so no control behind the dialog can be activated.
+- Settings uses the same rule: a dimmed `#settings-backdrop`, plus inert
+  `.topbar`/`.layout` and `body.settings-open` pointer blocking, so game cards
+  cannot be opened while Settings is visible.
+- `syncAppInert()` is the single source for shell inertness across the auth
+  gate, Settings, and dialogs; it is recomputed when any of them opens/closes.
 - Existing dialog bodies and handlers are kept; the manager adds the shared
   shell and stack behavior, lowering migration risk.
 - Nested dialogs are tracked in open order, so the newest dialog owns focus and

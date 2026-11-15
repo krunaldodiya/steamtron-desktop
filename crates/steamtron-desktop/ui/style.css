@@ -113,6 +113,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .dialog-confirm { width:min(360px, calc(100vw - 32px)); }
 .dialog-confirm-body { margin-top:10px; color:var(--muted); font-size:14px; line-height:1.45; white-space:pre-line; }
 body.dialog-open .layout, body.dialog-open .topbar, body.dialog-open #settings-page { pointer-events:none; }
+body.settings-open .layout, body.settings-open .topbar { pointer-events:none; }
 .modal-actions[hidden] { display:none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 button.loading { cursor:progress; opacity:.85; }
@@ -367,6 +368,8 @@ button.primary:hover { filter:brightness(1.06); }
 
 /* Settings page (UmuTron-style full-screen overlay) */
 .settings-page { position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); width:min(1100px, 94vw); height:min(760px, 88vh); z-index:150; display:flex; flex-direction:column; background:#0b1017; border:1px solid var(--border-strong); border-radius:12px; box-shadow:0 30px 100px #000c; overflow:hidden; }
+.settings-backdrop { position:fixed; inset:0; z-index:145; background:rgba(0,0,0,.6); backdrop-filter:blur(3px); }
+.settings-backdrop.hidden { display:none; }
 .settings-page.settings-maximized { top:0; left:0; transform:none; width:100vw; height:100vh; border-radius:0; }
 .settings-window-title { color:var(--text); font-size:13px; font-weight:600; letter-spacing:.04em; }
 .settings-window-controls { display:flex; align-items:center; gap:2px; }
