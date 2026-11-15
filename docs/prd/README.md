@@ -41,3 +41,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0014](0014-unified-modals.md) | Unified dialog windows | done | 2026-11-15 |
 | [0015](0015-home-focus-after-signin.md) | Keep Home focus after sign-in window refocus | done | 2026-11-15 |
 | [0016](0016-dialog-focus-return.md) | Return focus to the dialog opener | done | 2026-11-15 |
+| [0017](0017-tray.md) | Close to tray and restore from the tray icon | done | 2026-11-15 |

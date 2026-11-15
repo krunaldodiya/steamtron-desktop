@@ -10,7 +10,9 @@ mod proton_sources;
 
 use serde::Serialize;
 #[cfg(target_os = "linux")]
-use tauri::{Emitter, Manager};
+use tauri::Manager;
+#[cfg(target_os = "linux")]
+use tauri::Emitter;
 mod security;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
@@ -4395,6 +4397,99 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[cfg(target_os = "linux")]
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux_tray {
+    use ksni::blocking::TrayMethods;
+    use ksni::menu::{MenuItem, StandardItem};
+
+    struct SteamTronTray {
+        app: tauri::AppHandle,
+        icons: Vec<ksni::Icon>,
+    }
+
+    impl ksni::Tray for SteamTronTray {
+        const MENU_ON_ACTIVATE: bool = false;
+
+        fn id(&self) -> String {
+            "steamtron".into()
+        }
+
+        fn title(&self) -> String {
+            "SteamTron".into()
+        }
+
+        fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+            self.icons.clone()
+        }
+
+        fn activate(&mut self, _x: i32, _y: i32) {
+            super::show_main_window(&self.app);
+        }
+
+        fn menu(&self) -> Vec<MenuItem<Self>> {
+            vec![
+                StandardItem {
+                    label: "Show SteamTron".into(),
+                    activate: Box::new(|tray: &mut SteamTronTray| super::show_main_window(&tray.app)),
+                    ..Default::default()
+                }
+                .into(),
+                MenuItem::Separator,
+                StandardItem {
+                    label: "Quit SteamTron".into(),
+                    activate: Box::new(|tray: &mut SteamTronTray| tray.app.exit(0)),
+                    ..Default::default()
+                }
+                .into(),
+            ]
+        }
+    }
+
+    pub fn setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(image) = app.default_window_icon() else {
+            return Ok(());
+        };
+        let rgba = image.rgba();
+        let mut data = vec![0u8; rgba.len()];
+        for (source, target) in rgba.chunks_exact(4).zip(data.chunks_exact_mut(4)) {
+            target[0] = source[3];
+            target[1] = source[0];
+            target[2] = source[1];
+            target[3] = source[2];
+        }
+        let tray = SteamTronTray {
+            app: app.handle().clone(),
+            icons: vec![ksni::Icon {
+                width: image.width() as i32,
+                height: image.height() as i32,
+                data,
+            }],
+        };
+        let handle = tray.spawn()?;
+        std::mem::forget(handle);
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    linux_tray::setup(app)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn setup_tray(_app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
 #[tauri::command]
 fn reconcile_registrations() -> Result<steamtron_library::managed::ReconcileReport, String> {
     let backend = platform_backend().map_err(|error| error.to_string())?;
@@ -4479,13 +4574,21 @@ fn main() {
     }
     tauri::Builder::default()
         .setup(|app| {
-            #[cfg(not(target_os = "linux"))]
-            let _ = app;
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.maximize();
             }
+            setup_tray(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                #[cfg(target_os = "linux")]
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             backend_status,
