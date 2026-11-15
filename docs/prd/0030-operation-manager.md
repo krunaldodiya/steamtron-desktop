@@ -1,6 +1,6 @@
 # Shared operation manager for backup, restore, and verification
 
-- Status: active
+- Status: done
 - Date: 2026-11-15
 - Areas: `crates/steamtron-desktop/ui/app.js`,
   `crates/steamtron-desktop/ui/style.css`,
@@ -63,6 +63,8 @@ step list that advances from the backend.
   render, stage event marks the prior step done, completion sets the bar
   determinate and status Complete, close removes the window.
 - Existing navigation suites still pass.
+- Release built and installed; the download/operation windows use the same
+  1100×760 shell as global Settings.
 
 ## Decisions and risks
 
