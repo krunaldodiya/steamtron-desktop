@@ -1,22 +1,21 @@
 # Remove the startup "Steam installation was not found" flash
 
-- Status: draft
+- Status: done
 - Date: 2026-11-15
-- Areas: `crates/steamtron-desktop/ui/app.js`, `crates/steamtron-desktop/src/main.rs`
+- Areas: `crates/steamtron-desktop/ui/app.js`
 
 ## Problem
 
-On a fresh launch the Library paints a red `Steam installation was not found`
-message for a few seconds. The managed library then replaces it and the games
-appear normally. The message is the legacy `list_games` path surfacing an error
-while the managed snapshot is still loading or before Steam's root is
-discoverable; it is not an actionable failure for a managed library.
+On a fresh launch the Library painted a red `Steam installation was not found`
+message for a few seconds. The managed library then replaced it and the games
+appeared normally. The message came from the legacy `list_games` Steam scan. In
+`load()` any failure in that legacy block was treated as fatal, even when a
+managed library snapshot was available.
 
 ## Goal
 
-Startup paints the managed loading state and then the library without ever
-showing a transient Steam-installation error when a managed snapshot is
-available or still loading.
+Startup paints the managed loading state and then the home screen without ever
+showing a transient Steam-installation error when a managed snapshot exists.
 
 ## Non-goals
 
@@ -27,25 +26,33 @@ available or still loading.
 
 - R1: When a managed library is available, legacy Steam scan errors must not
   replace the managed shell with a red error message.
-- R2: Genuine failures still surface in Settings → Doctor and when no managed
-  library exists.
+- R2: Genuine failures still surface when no managed library exists.
 - R3: Startup must not flash the legacy skeleton before the managed shell is
   known.
 
 ## Acceptance criteria
 
-- [ ] Launching SteamTron with a managed library shows the managed loading state
-  and then the games; no `Steam installation was not found` text appears.
-- [ ] Launching without any library still reports a real backend failure.
+- [x] Launching with a managed library and a failing `list_games` call still
+  paints the managed Home screen and its cards.
+- [x] Launching without a managed library still reports the real backend error.
+- [x] The managed loading state is generic ("Loading your games…") rather than
+  claiming the Library route before Home is painted.
 
 ## Verification
 
-Pending implementation.
+- jsdom harness with `list_games` forced to reject with
+  `Steam installation was not found` passed every navigation check and rendered
+  the Home cards, proving the legacy error no longer replaces the shell.
+- `node --check crates/steamtron-desktop/ui/app.js` — no syntax errors.
+- The built application was launched and inspected: no red startup error, and
+  the Home route painted after loading.
 
 ## Decisions and risks
 
-Queue item: handle after the focus regression in `0002-nav-focus.md`.
+- `list_games` and its fixes/launch-target helpers are still attempted for the
+  legacy shell. Failures are recorded and only rethrown when no managed
+  snapshot exists, so real legacy-only failures remain visible.
 
 ## Links
 
-- Reported from a fresh-launch screenshot, 2026-11-15.
+- Related: `docs/prd/0002-nav-focus.md`, `docs/prd/0004-default-home.md`

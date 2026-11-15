@@ -27,4 +27,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 |---|---|---|---|
 | [0001](0001-prd-process.md) | Per-feature PRD tracking | done | 2026-11-14 |
 | [0002](0002-nav-focus.md) | Restore keyboard and controller focus across routes | done | 2026-11-15 |
-| [0003](0003-startup-steam-flash.md) | Remove startup Steam-installation error flash | draft | 2026-11-15 |
+| [0003](0003-startup-steam-flash.md) | Remove startup Steam-installation error flash | done | 2026-11-15 |
+| [0004](0004-default-home.md) | Launch on the Home screen | done | 2026-11-15 |

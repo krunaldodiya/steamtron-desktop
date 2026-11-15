@@ -33,3 +33,17 @@ preference for batching commits or keeping a clean history.
 - Interim snapshots of unfinished work go to `autosave/<host>`
   (`~/.local/bin/git-autosync.sh`, timer `git-autosync.timer`); they are a
   safety net, not a substitute for real commits.
+
+## Rebuild and install after every change — mandatory
+
+Source changes are not visible in the running application until the desktop
+binary is rebuilt and replaced.
+
+- After every change that affects the desktop UI or binary, build the release
+  bundle (`scripts/build-linux.sh` or the equivalent `tauri build`), then
+  install the freshly built binary over `~/.local/bin/steamtron-desktop`.
+- Verify the installed file timestamp/hash matches the new build before
+  reporting the work as done.
+- Commit the source first; build artifacts stay out of git.
+- Do not report a UI fix as verified against the installed app while the
+  installed binary predates the change.

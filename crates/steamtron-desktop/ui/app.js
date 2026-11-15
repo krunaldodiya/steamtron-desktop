@@ -17,7 +17,7 @@ const runningGrace = new Map();
 let libraryPage = 1;
 let homeFocusSection = "recent";
 const LIBRARY_PAGE_SIZE = 60;
-let appView = "library";
+let appView = "home";
 let gameDetailOrigin = "library";
 let gameDetailSeed = null;
 // Steam-restart banners were removed by request. Keep the call sites inert.
@@ -2461,7 +2461,7 @@ function showLibraryLoading() {
 function showManagedLoading() {
   document.body.classList.add("managed");
   detailEl.innerHTML = `<div class="page loading-page">
-    <header class="page-head"><h1>Your library</h1><p>Loading your games…</p></header>
+    <header class="page-head"><h1>Loading your games…</h1><p>Preparing the home screen.</p></header>
     <div class="cover-grid">${Array.from({ length: 12 }, () => '<div class="cover-card skeleton"><span class="cover"></span><span class="cover-title">&nbsp;</span></div>').join("")}</div>
   </div>`;
 }
@@ -3183,12 +3183,20 @@ async function load() {
   else if (!games.length) showLibraryLoading();
   await loadBackend();
   try {
-    games = await invoke("list_games");
-    await loadFixes();
+    let legacyError = null;
     try {
-      const added = await invoke("auto_launch_targets");
-      if (added.length) await loadFixes();
-    } catch (_error) { /* non-fatal */ }
+      games = await invoke("list_games");
+      await loadFixes();
+      try {
+        const added = await invoke("auto_launch_targets");
+        if (added.length) await loadFixes();
+      } catch (_error) { /* non-fatal */ }
+    } catch (error) {
+      // A managed library does not depend on Steam's install scan. Keep the
+      // snapshot path usable while Steam is missing or still starting.
+      legacyError = error;
+      games = [];
+    }
     try { await invoke("auto_pin_installed"); } catch (_error) { /* non-fatal */ }
     try { await invoke("reconcile_managed_installs"); } catch (_error) { /* non-fatal */ }
     try { await invoke("reconcile_registrations"); } catch (_error) { /* keep stored states */ }
@@ -3202,7 +3210,13 @@ async function load() {
       setTimeout(() => { void warmStore(); }, 1200);
       return true;
     }
+    if (legacyError) throw legacyError;
     document.body.classList.remove("managed");
+    if (appView === "home") {
+      void loadArtwork();
+      setView("library");
+      return true;
+    }
     if (!games.some((game) => game.appid === selected)) {
       selected = games[0]?.appid || null;
       detailTab = "general";
