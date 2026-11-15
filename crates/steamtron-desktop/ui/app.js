@@ -594,7 +594,7 @@ function renderManagedPreview(game) {
         ? '<button id="managed-download" class="primary">Download</button>'
         : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
   detailEl.innerHTML = `<div class="page game-page game-detail">
-    <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : "Library"}</button></div>
+    <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : gameDetailOrigin === "home" ? "Home" : "Library"}</button></div>
     <section class="game-hero${provisionalHero ? "" : " no-artwork"}" id="game-hero"${provisionalHero ? ` style="background-image:url('${escape(provisionalHero)}')"` : ""}>
       <div class="game-hero-shade"></div>
       <div class="game-hero-card">
@@ -615,7 +615,7 @@ function renderManagedPreview(game) {
       </div>
     </section>
   </div>`;
-  detailEl.querySelector("#managed-back").onclick = () => setView(gameDetailOrigin);
+  detailEl.querySelector("#managed-back").onclick = () => setView(gameDetailOrigin, { focus: "restore" });
   const downloadButton = detailEl.querySelector("#managed-download");
   if (downloadButton) downloadButton.onclick = () => startManagedDownload(game);
   if (downloading) applyInlineDownload(game.id);
@@ -639,7 +639,7 @@ function renderManagedPreview(game) {
         await invoke("remove_managed_game", { gameId: game.id });
         managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
         showToast(`Removed ${game.title} from your library`);
-        setView(gameDetailOrigin === "store" ? "store" : "library");
+        setView(gameDetailOrigin === "store" ? "store" : gameDetailOrigin === "home" ? "home" : "library");
       } catch (error) {
         stop();
         showToast(String(error), true);
@@ -1555,20 +1555,24 @@ async function openManagedGame(id, origin = "library", seed = null) {
   renderManagedMode();
 }
 
-function setView(view) {
+function setView(view, options = {}) {
+  const focusMode = options.focus || "first";
   const returningToStore = view === "store" && appView === "store-game";
   appView = view;
   if (returningToStore) restoreStoreScroll = true;
   document.body.classList.toggle("store-open", view === "store");
-  const navView = view === "game" ? "library" : view === "store-game" ? "store" : view;
+  const navView = view === "game"
+    ? gameDetailOrigin
+    : view === "store-game" ? "store" : view;
   for (const name of ["home", "library", "store"]) {
     const button = document.querySelector(`#nav-${name}`);
     button.classList.toggle("active", navView === name);
     button.setAttribute("aria-current", navView === name ? "page" : "false");
   }
   if (view === "store") {
-    if (!storeTried && !storeLoading) void openStore();
+    if (!storeTried && !storeLoading) void openStore().then(() => applyPendingRouteFocus("store"));
     else renderStorePage();
+    focusRouteOnEntry(navView, focusMode);
     return;
   }
   if (managedShell()) {
@@ -1581,18 +1585,21 @@ function setView(view) {
   } else {
     detailEl.innerHTML = `<div class="empty">Add a game to build your library.</div>`;
   }
+  if (view === "home" || view === "library") focusRouteOnEntry(view, focusMode);
 }
 
 gamesEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-managed]");
   if (!button) return;
-  openManagedGame(button.dataset.managed);
+  rememberRouteFocus(button);
+  openManagedGame(button.dataset.managed, cardRoute(button));
 });
 
 detailEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-managed]");
   if (!button) return;
-  openManagedGame(button.dataset.managed);
+  rememberRouteFocus(button);
+  openManagedGame(button.dataset.managed, cardRoute(button));
 });
 
 
@@ -1638,7 +1645,9 @@ function headerControls() {
 }
 
 function activeNavControl() {
-  const view = appView === "game" ? "library" : appView === "store-game" ? "store" : appView;
+  const view = appView === "game"
+    ? gameDetailOrigin
+    : appView === "store-game" ? "store" : appView;
   return document.querySelector(`.topbar #nav-${view}`) || document.querySelector(".topbar #nav-home");
 }
 
@@ -1646,6 +1655,11 @@ function enterContentFromHeader() {
   if (appView === "home") {
     const card = document.querySelector(`.home-page .cover-card[data-managed="${CSS.escape(managedSelectedId || "")}"]`)
       || document.querySelector(".home-page .cover-card");
+    if (card) { focusControl(card); return true; }
+  }
+  if (appView === "store") {
+    const card = document.querySelector("#store-results .cover-card")
+      || document.querySelector(".store-content .cover-card");
     if (card) { focusControl(card); return true; }
   }
   const search = document.querySelector("#store-search");
@@ -1663,10 +1677,15 @@ function navigationSurface() {
   return document.querySelector("#detail");
 }
 
+function visibleModal() {
+  return [...document.querySelectorAll(".modal-backdrop")]
+    .find((node) => !node.classList.contains("hidden")) || null;
+}
+
 function navigationControls() {
   const settings = document.querySelector("#settings-page");
-  const modal = document.querySelector(".modal-backdrop");
   const dialog = document.querySelector("#profile-dialog");
+  const modal = visibleModal();
   const root = dialog && !dialog.classList.contains("hidden")
     ? dialog
     : settings && !settings.classList.contains("hidden")
@@ -1677,6 +1696,140 @@ function navigationControls() {
       && node.getClientRects().length > 0
       && !node.closest(".hidden")
       && !node.closest("#auth-gate"));
+}
+
+// Remember the card that opened a detail page so Escape can put focus back on
+// it, and give every route a sensible first stop (the first card, not the
+// header) when it is entered.
+const routeFocusMemory = { home: null, library: null, store: null };
+let pendingRouteFocus = null;
+
+function routeFocusDescriptor(node) {
+  if (!node?.matches) return null;
+  if (node.matches(".home-page .cover-card[data-managed]")) {
+    return {
+      view: "home",
+      managedId: node.dataset.managed || "",
+      rail: node.closest(".managed-rail")?.dataset.rail || "",
+    };
+  }
+  if (node.matches(".library-page .cover-card[data-managed], .games .game-card[data-appid]")) {
+    return {
+      view: "library",
+      managedId: node.dataset.managed || "",
+      appid: node.dataset.appid || "",
+      page: libraryPage,
+    };
+  }
+  if (node.matches(".store-page [data-store-id]")) {
+    return { view: "store", storeId: node.dataset.storeId || "", id: node.id || "", page: storePage };
+  }
+  return null;
+}
+
+function rememberRouteFocus(node) {
+  const descriptor = routeFocusDescriptor(node);
+  if (descriptor) routeFocusMemory[descriptor.view] = descriptor;
+  return descriptor;
+}
+
+function cardRoute(node) {
+  if (node.closest?.(".home-page")) return "home";
+  if (node.closest?.(".store-page") || node.closest?.(".store-content")) return "store";
+  return "library";
+}
+
+function routeFocusNode(memory) {
+  if (!memory) return null;
+  if (memory.view === "home" && memory.managedId) {
+    const id = CSS.escape(memory.managedId);
+    if (memory.rail) {
+      const rail = document.querySelector(`.home-page .managed-rail[data-rail="${CSS.escape(memory.rail)}"]`);
+      const card = rail?.querySelector(`.cover-card[data-managed="${id}"]`);
+      if (card) return card;
+    }
+    return document.querySelector(`.home-page .cover-card[data-managed="${id}"]`);
+  }
+  if (memory.view === "library") {
+    if (memory.managedId) {
+      const card = document.querySelector(`.library-page .cover-card[data-managed="${CSS.escape(memory.managedId)}"]`);
+      if (card) return card;
+    }
+    if (memory.appid) {
+      const card = document.querySelector(`.games .game-card[data-appid="${CSS.escape(String(memory.appid))}"]`);
+      if (card) return card;
+    }
+  }
+  if (memory.view === "store") {
+    if (memory.storeId) {
+      const id = CSS.escape(memory.storeId);
+      const card = document.querySelector(`.store-page #store-results [data-store-id="${id}"]`)
+        || document.querySelector(`.store-page .store-content [data-store-id="${id}"]`)
+        || document.querySelector(`.store-page [data-store-id="${id}"]`);
+      if (card) return card;
+    }
+    if (memory.id) {
+      const node = document.getElementById(memory.id);
+      if (node && document.contains(node)) return node;
+    }
+  }
+  return null;
+}
+
+function firstContentControl(view = appView) {
+  if (view === "home") {
+    return document.querySelector(".home-page .cover-card.active")
+      || document.querySelector(".home-page .cover-card")
+      || document.querySelector("#home-play");
+  }
+  if (view === "library") {
+    return document.querySelector(".library-page .cover-card.active")
+      || document.querySelector(".library-page .cover-card")
+      || document.querySelector(".games .game-card.active")
+      || document.querySelector(".games .game-card");
+  }
+  if (view === "store") {
+    return document.querySelector("#store-results .cover-card")
+      || document.querySelector(".store-content .cover-card")
+      || document.querySelector("#store-search");
+  }
+  if (view === "game") {
+    return document.querySelector("#managed-back")
+      || document.querySelector("#managed-play")
+      || document.querySelector("#managed-download");
+  }
+  if (view === "store-game") {
+    return document.querySelector("#store-back") || document.querySelector("#store-add");
+  }
+  return null;
+}
+
+function focusFirstContent(view = appView) {
+  if (visibleModal() || document.querySelector("#settings-page:not(.hidden)")) return false;
+  const node = firstContentControl(view);
+  if (!node) return false;
+  focusControl(node);
+  return true;
+}
+
+function focusRouteOnEntry(view, mode = "first") {
+  pendingRouteFocus = { view, mode };
+  applyPendingRouteFocus(view);
+}
+
+function applyPendingRouteFocus(view = appView) {
+  if (!pendingRouteFocus || pendingRouteFocus.view !== view) return false;
+  if (visibleModal() || document.querySelector("#settings-page:not(.hidden)")) return false;
+  // The store paints a loading skeleton first. Wait for cards instead of
+  // parking focus on the search box.
+  if (view === "store" && storeLoading && !document.querySelector("#store-results .cover-card")) return false;
+  const node = pendingRouteFocus.mode === "restore"
+    ? routeFocusNode(routeFocusMemory[view])
+    : firstContentControl(view);
+  if (!node) return false;
+  pendingRouteFocus = null;
+  focusControl(node);
+  return true;
 }
 
 function scrollControlIntoView(node) {
@@ -1745,6 +1898,7 @@ function focusStoreSidebar() {
 
 function focusControl(node) {
   if (!node) return;
+  rememberRouteFocus(node);
   if (navState.focused && navState.focused !== node) navState.focused.classList.remove("nav-focus");
   navState.focused = node;
   node.classList.add("nav-focus");
@@ -1855,6 +2009,7 @@ function moveNavigation(action) {
       ? navState.focused
       : null;
   if (!current) {
+    if (focusFirstContent()) return true;
     focusControl(controls[0]);
     return true;
   }
@@ -1960,6 +2115,8 @@ function dispatchNavigation(action, fromGamepad = false) {
   const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
   if (action === "back") {
     if (typing) {
+      const modal = visibleModal();
+      if (modal) { modal.remove(); return; }
       document.activeElement.blur();
       if (!document.body.classList.contains("settings-open")) {
         const nav = activeNavControl();
@@ -1969,11 +2126,11 @@ function dispatchNavigation(action, fromGamepad = false) {
     }
     if (profileDialogOpen()) { closeProfileDialog(); return; }
     if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
-    const modal = document.querySelector(".modal-backdrop");
+    const modal = visibleModal();
     if (modal) { modal.remove(); return; }
     if (document.body.classList.contains("fullscreen-mode")) { openFullscreenOptions(); return; }
-    if (appView === "store-game") { setView("store"); return; }
-    if (appView === "game") { setView(gameDetailOrigin); return; }
+    if (appView === "store-game") { setView("store", { focus: "restore" }); return; }
+    if (appView === "game") { setView(gameDetailOrigin, { focus: "restore" }); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");
     navState.focused = null;
     document.activeElement?.blur?.();
@@ -3040,6 +3197,7 @@ async function load() {
     if (managedShell()) {
       document.body.classList.add("managed");
       renderManagedMode();
+      focusRouteOnEntry(appView, "first");
       void loadArtwork();
       setTimeout(() => { void warmStore(); }, 1200);
       return true;
@@ -3057,6 +3215,7 @@ async function load() {
     } else {
       detailEl.innerHTML = `<div class="empty">No Steam games found.</div>`;
     }
+    focusRouteOnEntry(appView, "first");
     void loadArtwork();
     return true;
   } catch (error) {
@@ -3990,7 +4149,7 @@ function renderStoreDetail() {
         </div>
     </section>
   </div>`;
-  detailEl.querySelector("#store-back").onclick = () => setView("store");
+  detailEl.querySelector("#store-back").onclick = () => setView("store", { focus: "restore" });
   renderGameChips(detailEl.querySelector("#store-chips"), chips);
   if (!item.steam_app_id) {
     void invoke("store_resolve_steam_cached", { igdbId: Number(item.id), title: item.name }).then((appid) => {
@@ -4247,7 +4406,10 @@ function renderStorePage() {
     };
   }
   for (const card of detailEl.querySelectorAll("[data-store-id]")) {
-    card.onclick = () => openStoreItem(card.dataset.storeId);
+    card.onclick = () => {
+      rememberRouteFocus(card);
+      openStoreItem(card.dataset.storeId);
+    };
   }
   hydrateStoreCovers(detailEl);
   for (const list of detailEl.querySelectorAll(".store-option-list")) {
@@ -4266,6 +4428,7 @@ function renderStorePage() {
     else if (previousId) restore = detailEl.querySelector(`#${CSS.escape(previousId)}`);
     if (restore) focusControl(restore);
   }
+  applyPendingRouteFocus("store");
 }
 
 function showAddGame() {
@@ -4427,11 +4590,6 @@ document.querySelector("#settings").onclick = () => {
 };
 document.querySelector("#refresh").onclick = refreshLibrary;
 searchEl.oninput = () => { if (hasManagedLibrary()) renderManagedList(); else renderGames(); };
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    document.querySelectorAll(".modal-backdrop").forEach((node) => node.remove());
-  }
-});
 window.addEventListener("error", (event) => {
   console.error(event.error || event.message);
   showToast(`UI error: ${event.message}`, true);
