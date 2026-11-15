@@ -155,12 +155,12 @@ const gateSignin = document.querySelector("#gate-signin");
 const gateStatus = document.querySelector("#gate-status");
 const appSections = [document.querySelector(".topbar"), document.querySelector(".layout")];
 
-function showAuthGate(message = "") {
+function showAuthGate(message = "Sign in to SteamTron to manage your Steam library.") {
   authGate.classList.remove("hidden");
   for (const node of appSections) { node.inert = true; node.setAttribute("aria-hidden", "true"); }
   gateStatus.textContent = message;
   gateSpinner.classList.add("hidden");
-  document.querySelector("#gate-retry").disabled = false;
+  gateSignin.disabled = false;
 }
 
 function hideAuthGate() {
@@ -2484,8 +2484,7 @@ async function boot() {
   try {
     const auth = await invoke("profile_status");
     if (!auth.authenticated) {
-      showAuthGate("Opening your browser to sign in…");
-      void runSignIn();
+      showAuthGate("Sign in to SteamTron to manage your Steam library.");
       return;
     }
     hideAuthGate();
@@ -2495,7 +2494,6 @@ async function boot() {
   }
 }
 
-const gateRetry = document.querySelector("#gate-retry");
 const gateQuit = document.querySelector("#gate-quit");
 const gateSpinner = document.querySelector("#gate-spinner");
 let signInRunning = false;
@@ -2504,12 +2502,12 @@ async function runSignIn() {
   if (signInRunning) return;
   signInRunning = true;
   gateSpinner.classList.remove("hidden");
-  gateRetry.disabled = true;
+  gateSignin.disabled = true;
   gateStatus.textContent = "Opening your browser to sign in…";
   try {
     const auth = await invoke("profile_login");
     if (!auth.authenticated) {
-      gateStatus.textContent = "Sign-in did not complete. Retry to open the browser again.";
+      gateStatus.textContent = "Sign-in did not complete. Click Sign in to try again.";
       return;
     }
     hideAuthGate();
@@ -2519,11 +2517,11 @@ async function runSignIn() {
   } finally {
     signInRunning = false;
     gateSpinner.classList.add("hidden");
-    gateRetry.disabled = false;
+    gateSignin.disabled = false;
   }
 }
 
-gateRetry.onclick = () => { void runSignIn(); };
+gateSignin.onclick = () => { void runSignIn(); };
 gateQuit.onclick = () => {
   invoke("quit_app").catch(() => window.close());
 };
