@@ -3567,7 +3567,18 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
     let folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game").to_owned();
     let final_path = parent.join(backup_safe_folder(&game.title));
     if final_path.exists() {
-        return Err(format!("A backup folder already exists at {}.", final_path.display()));
+        let overwrite = rfd::MessageDialog::new()
+            .set_title("Overwrite backup?")
+            .set_description(format!(
+                "A backup folder already exists at {}.\n\nDo you want to overwrite it?",
+                final_path.display()
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .set_level(rfd::MessageLevel::Warning)
+            .show();
+        if overwrite != rfd::MessageDialogResult::Yes {
+            return Ok(None);
+        }
     }
     let staging = parent.join(format!(".steamtron-backup-{}", std::process::id()));
     if staging.exists() {
@@ -3730,6 +3741,9 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
         let manifest_name = format!("appmanifest_{}.json", app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
         std::fs::write(package.join(manifest_name), serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
+        if final_path.exists() {
+            std::fs::remove_dir_all(&final_path).map_err(|error| error.to_string())?;
+        }
         std::fs::rename(&package, &final_path).map_err(|error| error.to_string())?;
         let _ = std::fs::remove_dir(&staging);
         Ok(final_path)
