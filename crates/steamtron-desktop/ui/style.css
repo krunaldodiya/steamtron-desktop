@@ -49,8 +49,8 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .profile-email { color:#fff; font-size:16px; margin:8px 0 4px; }
 .profile-actions { display:flex; gap:8px; margin-top:18px; }
 
-.modal-backdrop { position:fixed; inset:0; background:#000b; display:flex; align-items:center; justify-content:center; z-index:300; }
-.modal { width:min(460px, calc(100vw - 32px)); background:#17212c; border:1px solid #3b5166; border-radius:12px; padding:20px; box-shadow:0 20px 70px #000c; }
+.modal-backdrop { position:fixed; inset:0; background:#000b; display:flex; align-items:center; justify-content:center; z-index:300; pointer-events:auto; }
+.modal { width:min(460px, calc(100vw - 32px)); background:#17212c; border:1px solid #3b5166; border-radius:12px; padding:20px; box-shadow:0 20px 70px #000c; pointer-events:auto; }
 .modal h2 { margin-bottom:6px; }
 .modal label { display:block; color:#8fa3b8; font-size:12px; margin:14px 0 6px; }
 .modal select { width:100%; padding:10px 12px; border:1px solid #3b5166; border-radius:7px; background:#101922; color:#e8f0f7; outline:none; }
@@ -112,7 +112,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .game-settings-head .modal-close { position:static; transform:none; }
 .dialog-confirm { width:min(360px, calc(100vw - 32px)); }
 .dialog-confirm-body { margin-top:10px; color:var(--muted); font-size:14px; line-height:1.45; white-space:pre-line; }
-.dialog-minimized { display:none !important; }
+body.dialog-open .layout, body.dialog-open .topbar, body.dialog-open #settings-page { pointer-events:none; }
 .modal-actions[hidden] { display:none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 button.loading { cursor:progress; opacity:.85; }

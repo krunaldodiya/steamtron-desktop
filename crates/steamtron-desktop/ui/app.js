@@ -93,7 +93,6 @@ function busy(button, label) {
 }
 
 const dialogWindows = [];
-const minimizedDialogs = [];
 let dialogZ = 300;
 let dialogSeq = 0;
 
@@ -116,8 +115,7 @@ function cleanupDialog(entry) {
   entry.observer?.disconnect();
   const index = dialogWindows.indexOf(entry);
   if (index >= 0) dialogWindows.splice(index, 1);
-  const minimized = minimizedDialogs.indexOf(entry);
-  if (minimized >= 0) minimizedDialogs.splice(minimized, 1);
+  syncDialogBlocking();
 }
 
 function dialogTop() {
@@ -127,7 +125,7 @@ function dialogTop() {
       cleanupDialog(entry);
       continue;
     }
-    if (entry.minimized || entry.backdrop.classList.contains("hidden")) continue;
+    if (entry.backdrop.classList.contains("hidden")) continue;
     return entry;
   }
   return null;
@@ -139,51 +137,10 @@ function dismissDialog(entry) {
   cleanupDialog(entry);
 }
 
-function focusFirstDialogControl(entry) {
-  if (!entry) return;
-  const preferred = entry.modal.querySelector(".modal-actions .primary, [data-confirm-ok]");
-  const fallback = entry.modal.querySelector(".modal-actions button, button, input, select, textarea");
-  const target = preferred || fallback;
-  if (target) focusControl(target);
-}
-
-function minimizeDialog(entry) {
-  if (!entry || entry.minimized) return;
-  entry.minimized = true;
-  entry.backdrop.classList.add("dialog-minimized");
-  minimizedDialogs.push(entry);
-  if (navState.focused && entry.backdrop.contains(navState.focused)) {
-    navState.focused.classList.remove("nav-focus");
-    navState.focused = null;
-  }
-  document.activeElement?.blur?.();
-  invoke("minimize_window").catch(() => restoreDialog(entry));
-}
-
-function restoreDialog(entry) {
-  if (!entry || !document.body.contains(entry.backdrop)) return;
-  entry.minimized = false;
-  entry.backdrop.classList.remove("dialog-minimized", "hidden");
-  const index = minimizedDialogs.indexOf(entry);
-  if (index >= 0) minimizedDialogs.splice(index, 1);
-  raiseDialog(entry);
-  focusFirstDialogControl(entry);
-}
-
-function restoreMinimizedWindow() {
-  while (minimizedDialogs.length) {
-    const entry = minimizedDialogs.pop();
-    if (entry && document.body.contains(entry.backdrop)) {
-      restoreDialog(entry);
-      return true;
-    }
-  }
-  if (settingsMinimized) {
-    settingsMinimized = false;
-    void restoreSettingsPage();
-    return true;
-  }
-  return false;
+function syncDialogBlocking() {
+  const open = dialogWindows.some((entry) =>
+    document.body.contains(entry.backdrop) && !entry.backdrop.classList.contains("hidden"));
+  document.body.classList.toggle("dialog-open", open);
 }
 
 function toggleDialogMaximize(entry) {
@@ -216,24 +173,16 @@ function registerDialog(backdrop, options = {}) {
     backdrop,
     modal,
     title,
-    minimized: false,
     maximized: false,
-    dockButton: null,
     observer: null,
   };
   dialogWindows.push(entry);
+  syncDialogBlocking();
   backdrop.dataset.dialogId = String(entry.id);
   raiseDialog(entry);
   if (header && !modal.dataset.dialogControls) {
     const controls = document.createElement("div");
     controls.className = "dialog-controls";
-    const min = document.createElement("button");
-    min.type = "button";
-    min.className = "dialog-control dialog-minimize";
-    min.title = "Minimize";
-    min.setAttribute("aria-label", `Minimize ${title}`);
-    min.innerHTML = "&#8211;";
-    min.onclick = () => minimizeDialog(entry);
     const max = document.createElement("button");
     max.type = "button";
     max.className = "dialog-control dialog-maximize";
@@ -251,16 +200,14 @@ function registerDialog(backdrop, options = {}) {
       close.onclick = () => dismissDialog(entry);
     }
     close.classList.add("dialog-control", "dialog-close");
-    controls.append(min, max, close);
+    controls.append(max, close);
     header.appendChild(controls);
     modal.dataset.dialogControls = "1";
   } else if (header) {
     // Re-registered static dialog: rebind the controls to the new entry.
     const controls = header.querySelector(".dialog-controls");
     if (controls) {
-      const min = controls.querySelector(".dialog-minimize");
       const max = controls.querySelector(".dialog-maximize");
-      if (min) min.onclick = () => minimizeDialog(entry);
       if (max) max.onclick = () => toggleDialogMaximize(entry);
     }
   }
@@ -308,7 +255,6 @@ function confirmDialog(options = {}) {
     backdrop.querySelector("[data-confirm-cancel]").onclick = () => finish(false);
     backdrop.querySelector("[data-confirm-ok]").onclick = () => finish(true);
     backdrop.querySelector(".modal-close").onclick = () => finish(false);
-    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) finish(false); });
     focusControl(backdrop.querySelector("[data-confirm-ok]") || backdrop.querySelector("[data-confirm-cancel]"));
   });
 }
@@ -326,7 +272,6 @@ function showErrorDialog(message, title = "Action failed") {
   const close = () => backdrop.remove();
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.querySelector("#error-dialog-ok").onclick = close;
-  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   registerDialog(backdrop);
   backdrop.querySelector("#error-dialog-ok").focus();
 }
@@ -345,7 +290,6 @@ function showSteamRunningDialog(action) {
   const close = () => backdrop.remove();
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.querySelector("#steam-running-ok").onclick = close;
-  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   registerDialog(backdrop);
   backdrop.querySelector("#steam-running-ok").focus();
 }
@@ -1313,7 +1257,6 @@ function openManagedGameOptions(game) {
   let latestGame = game;
   const close = () => { backdrop.remove(); renderManagedMode(); };
   backdrop.querySelector(".modal-close").onclick = close;
-  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
 
   const refreshGame = async () => {
     try {
@@ -1955,8 +1898,7 @@ function visibleModal() {
   const entry = dialogTop();
   if (entry) return entry.backdrop;
   return [...document.querySelectorAll(".modal-backdrop")]
-    .find((node) => !node.classList.contains("hidden")
-      && !node.classList.contains("dialog-minimized")) || null;
+    .find((node) => !node.classList.contains("hidden")) || null;
 }
 
 function navigationControls() {
@@ -2599,15 +2541,7 @@ function profileDialogOpen() {
 function closeProfileDialog() {
   if (!profileDialog) return;
   const entry = dialogEntryFor(profileDialog);
-  if (entry) {
-    entry.minimized = false;
-    if (entry.dockButton) {
-      entry.dockButton.remove();
-      entry.dockButton = null;
-    }
-    cleanupDialog(entry);
-  }
-  profileDialog.classList.remove("dialog-minimized");
+  if (entry) cleanupDialog(entry);
   profileDialog.classList.add("hidden");
   if (navState.focused && profileDialog.contains(navState.focused)) {
     navState.focused.classList.remove("nav-focus");
@@ -2622,16 +2556,9 @@ async function openProfileDialog() {
     profile?.email || (profile?.authenticated ? "Signed in" : "Signed out");
   document.querySelector("#profile-base").textContent = profile?.base_url || "";
   const entry = registerDialog(profileDialog, { title: "Account" });
-  if (entry) {
-    entry.minimized = false;
-    entry.backdrop.classList.remove("dialog-minimized");
-    if (entry.dockButton) {
-      entry.dockButton.remove();
-      entry.dockButton = null;
-    }
-    raiseDialog(entry);
-  }
+  if (entry) raiseDialog(entry);
   profileDialog.classList.remove("hidden");
+  syncDialogBlocking();
   focusControl(document.querySelector("#profile-logout"));
 }
 
@@ -2646,9 +2573,6 @@ document.querySelector("#profile-logout").onclick = async () => {
     showToast(String(error), true);
   }
 };
-profileDialog.addEventListener("click", (event) => {
-  if (event.target === profileDialog) closeProfileDialog();
-});
 
 function applyFullscreenState(fullscreen) {
   document.body.classList.toggle("fullscreen-mode", fullscreen);
@@ -2723,7 +2647,6 @@ function openFullscreenOptions() {
   registerDialog(backdrop);
   const close = () => backdrop.remove();
   backdrop.querySelector(".modal-close").onclick = close;
-  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   backdrop.querySelector("#fullscreen-reboot").onclick = async () => {
     if (!(await confirmDialog({ title: "Reboot system", message: "Reboot the system? Save any work in other applications first.", confirmLabel: "Reboot", danger: true }))) return;
     try { await invoke("reboot_system"); } catch (error) { showToast(String(error), true); }
@@ -2988,7 +2911,6 @@ function showLaunchChooser(game, targets) {
     const close = () => { backdrop.remove(); resolve(null); };
     backdrop.querySelector(".modal-close").onclick = close;
     backdrop.querySelector("#launch-choice-cancel").onclick = close;
-    backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   });
 }
 
@@ -3042,7 +2964,6 @@ function showLaunchEditor(game, target, onSaved, executableOverride = "") {
   const close = () => backdrop.remove();
   backdrop.querySelector(".modal-close").onclick = close;
   backdrop.querySelector("#launch-cancel").onclick = close;
-  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   backdrop.querySelector("#launch-save").onclick = async () => {
     if (!executablePath.trim()) { setStatus("Choose an executable.", true); return; }
     const name = backdrop.querySelector("#launch-name").value;
@@ -3678,36 +3599,6 @@ function settingsPage() {
   return document.querySelector("#settings-page");
 }
 
-let settingsMinimized = false;
-
-function minimizeSettingsPage() {
-  const page = settingsPage();
-  if (!page || page.classList.contains("hidden")) return;
-  page.classList.add("hidden");
-  document.body.classList.remove("settings-open");
-  settingsMinimized = true;
-  if (navState.focused) {
-    navState.focused.classList.remove("nav-focus");
-    navState.focused = null;
-  }
-  document.activeElement?.blur?.();
-  invoke("minimize_window").catch(() => {
-    settingsMinimized = false;
-    void restoreSettingsPage();
-  });
-}
-
-async function restoreSettingsPage() {
-  const page = settingsPage();
-  if (!page) return;
-  settingsMinimized = false;
-  document.body.classList.add("settings-open");
-  page.classList.remove("hidden");
-  await renderSettingsPage();
-  const activeTab = page.querySelector(".settings-tab.active");
-  if (activeTab) focusControl(activeTab);
-}
-
 function toggleSettingsMaximize() {
   const page = settingsPage();
   if (!page) return;
@@ -3720,7 +3611,6 @@ function toggleSettingsMaximize() {
 }
 
 async function openSettingsPage() {
-  settingsMinimized = false;
   document.body.classList.add("settings-open");
   settingsPage().classList.remove("hidden");
   await renderSettingsPage();
@@ -3730,7 +3620,6 @@ async function openSettingsPage() {
 
 function closeSettingsPage() {
   stopProtonInstallPolling();
-  settingsMinimized = false;
   const page = settingsPage();
   if (page) {
     page.classList.add("hidden");
@@ -3886,7 +3775,6 @@ async function renderGeneralSettings(host) {
     const close = () => backdrop.remove();
     backdrop.querySelector("#doctor-close").onclick = close;
     backdrop.querySelector("#doctor-dismiss").onclick = close;
-    backdrop.addEventListener("click", (click) => { if (click.target === backdrop) close(); });
 
     const checkRepair = (check) => {
       if (check.id === "managed-appmanifest") return { label: "Repair appmanifests", command: "repair_library_entries" };
@@ -4404,7 +4292,6 @@ for (const tab of document.querySelectorAll("[data-settings-tab]")) {
   };
 }
 document.querySelector("#settings-close").onclick = closeSettingsPage;
-document.querySelector("#settings-minimize").onclick = minimizeSettingsPage;
 document.querySelector("#settings-maximize").onclick = toggleSettingsMaximize;
 
 let storeQuery = "";
@@ -5048,7 +4935,6 @@ function showAddGame() {
     if (result.appmanifest) setStatus(`Added ${result.title}${pinned}. Appmanifest: ${result.appmanifest}`, !!result.pin_error);
   };
   backdrop.querySelector("#add-close").onclick = close;
-  backdrop.addEventListener("click", (event) => { if (event.target === backdrop) close(); });
   searchButton.onclick = runSearch;
   queryInput.addEventListener("keydown", (event) => { if (event.key === "Enter") runSearch(); });
   submit.onclick = async () => {
@@ -5101,7 +4987,6 @@ document.querySelector("#nav-library").onclick = () => setView("library", { focu
 document.querySelector("#nav-home").onclick = () => setView("home", { focus: "restore" });
 document.querySelector("#nav-store").onclick = () => setView("store", { focus: "restore" });
 window.addEventListener("focus", async () => {
-  restoreMinimizedWindow();
   if (!managedShell()) return;
   const active = document.activeElement;
   const detailHadFocus = detailEl.contains(active);

@@ -15,12 +15,11 @@ controls.
 
 ## Goal
 
-Every in-app dialog shares one window shell: title, minimize, maximize, and
-close on the right; windowed by default; minimize sends the app window to the
-desktop taskbar/dock and preserves the dialog state; clicking the app icon
-restores the minimized surface on the next window focus; maximize expands it.
-Confirms are compact custom windows. The settings surface uses the same window
-controls and has no decorative search icon.
+Every in-app dialog shares one window shell: title, maximize, and close on the
+right; windowed by default; the backdrop blocks every click outside the dialog
+and an outside click never closes it. Maximize expands the dialog. Confirms are
+compact custom windows. The settings surface uses the same window controls and
+has no decorative search icon.
 
 ## Non-goals
 
@@ -32,15 +31,13 @@ controls and has no decorative search icon.
 
 ## Requirements
 
-- R1: Every dynamic modal and the account dialog get one 3-button control group
-  at the right of its header: minimize, maximize, close.
-- R2: Default presentation is windowed. Maximize fills the usable window;
-  minimize hides the dialog without destroying its DOM or state.
-- R3: Minimize sends the main app window to the desktop taskbar/dock. The next
-  app-window focus restores the minimized dialog (or Settings) and its focus.
-  No in-app dock is rendered.
-- R3a: If more than one surface was minimized, each app-window focus restores
-  the next one in last-in-first-out order.
+- R1: Every dynamic modal and the account dialog get one control group at the
+  right of its header: maximize and close.
+- R2: Default presentation is windowed. Maximize fills the usable window.
+- R3: Every dialog has a full-window backdrop. Clicking the backdrop does
+  nothing and never dismisses the dialog; the app behind it is not clickable
+  while the dialog is open.
+- R3a: The sign-in gate and existing modal Escape semantics are unchanged.
 - R4: All 24 `window.confirm` prompts are replaced by one custom confirm
   dialog. Its default width is **360px**, visibly smaller than other dialogs.
 - R5: The settings surface becomes a windowed panel with the same controls;
@@ -52,11 +49,11 @@ controls and has no decorative search icon.
 
 ## Acceptance criteria
 
-- [x] A custom dialog shows minimize, maximize, and close controls, in that
-  order, on the right.
-- [x] Minimize hides the dialog, calls `minimize_window`, and the next
-  app-window focus restores the same dialog.
-- [x] No in-app dialog dock is rendered.
+- [x] A custom dialog shows maximize and close controls, in that order, on the
+  right.
+- [x] Clicking outside a dialog does not close it; the backdrop consumes the
+  click and the background is not clickable.
+- [x] No minimize control remains in dialogs or Settings.
 - [x] Maximize expands the dialog to the usable window area.
 - [x] A confirm is 360px wide and uses the same window shell.
 - [x] Settings opens windowed, can minimize/maximize, and has no search glyph.
@@ -66,8 +63,8 @@ controls and has no decorative search icon.
 ## Verification
 
 - `node --check crates/steamtron-desktop/ui/app.js` passed.
-- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 69 checks,
-  including dialog controls, confirm window shell, app-icon minimize/refocus,
+- jsdom suite `/tmp/steamtron-nav-test/panel-test.mjs` passed all 66 checks,
+  including dialog controls, outside-click persistence, background blocking,
   maximize, Game Settings chrome, settings window controls, and Escape.
 - Base navigation suite `test.mjs` passed 33/33; auth suite `auth-test.mjs`
   passed 13/13.
@@ -80,15 +77,14 @@ controls and has no decorative search icon.
 
 ## Decisions and risks
 
-- Dialogs are still DOM windows inside the single SteamTron app window. True
-  per-dialog OS taskbar entries would require each dialog to be a separate
-  Tauri window with cross-window state; that is not part of this change.
-  Minimize therefore minimizes the app window and restores the pending dialog
-  on refocus.
+- Minimize was removed by request. Only maximize and close remain.
+- Outside-click close handlers were removed from every dialog. Backdrop clicks
+  are consumed, and `body.dialog-open` disables pointer input on the app shell
+  so no control behind the dialog can be activated.
 - Existing dialog bodies and handlers are kept; the manager adds the shared
   shell and stack behavior, lowering migration risk.
 - Nested dialogs are tracked in open order, so the newest dialog owns focus and
-  Escape until it is closed or minimized.
+  Escape until it is closed.
 - OS file/folder pickers remain native because they are the platform file
   browser, not app confirmation surfaces.
 

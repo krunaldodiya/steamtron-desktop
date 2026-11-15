@@ -9,9 +9,8 @@ mod fix_tools;
 mod proton_sources;
 
 use serde::Serialize;
-use tauri::Manager;
 #[cfg(target_os = "linux")]
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 mod security;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
@@ -4392,13 +4391,6 @@ fn detach_umutron_paths() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn minimize_window(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.minimize();
-    }
-}
-
-#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -4550,7 +4542,6 @@ fn main() {
             play_managed,
             reconcile_registrations,
             quit_app,
-            minimize_window,
             managed_game_size,
             verify_managed_files,
             backup_managed_game,
