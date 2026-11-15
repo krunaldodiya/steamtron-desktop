@@ -15,7 +15,9 @@ let managedSelectedId = null;
 let runningManaged = new Set();
 const runningGrace = new Map();
 let libraryPage = 1;
-let homeFocusSection = "recent";
+// Every route owns its selection so Home and Library never share an active
+// card. The detail page keeps using managedSelectedId independently.
+const routeSelection = { home: null, library: null };
 const LIBRARY_PAGE_SIZE = 60;
 let appView = "home";
 let gameDetailOrigin = "library";
@@ -254,7 +256,10 @@ async function hydrateHero(game) {
     const artwork = await artworkFor(game.id);
     if (!artwork?.hero) return;
     const node = document.querySelector("#home-hero, .game-page .detail-hero");
-    if (node && managedSelectedId === game.id) {
+    const currentId = node?.id === "home-hero"
+      ? routeSelection.home?.id
+      : managedSelectedId;
+    if (node && currentId === game.id) {
       node.style.backgroundImage = `url('${convertFileSrc(artwork.hero)}')`;
     }
   } catch (_error) {
@@ -264,8 +269,12 @@ async function hydrateHero(game) {
 
 function coverCard(game, section, caption = "") {
   const appId = game.metadata_app_id;
-  const selected = game.id === managedSelectedId
-    && (!section || section === homeFocusSection);
+  // Home rails pass their rail name as section; the Library grid passes none.
+  // Each route reads only its own selection.
+  const selection = section ? routeSelection.home : routeSelection.library;
+  const selected = Boolean(selection
+    && selection.id === game.id
+    && (!section || selection.section === section));
   const active = selected ? " active" : "";
   return `<button class="cover-card${active}" data-managed="${escape(game.id)}" title="${escape(game.title)}">
     <span class="cover">${appId ? `<img loading="lazy" data-cover-game="${escape(game.id)}" alt="">` : ""}<span class="play-glyph" aria-hidden="true">▶</span></span>
@@ -1477,8 +1486,15 @@ function renderManagedHome() {
     .sort((left, right) => left.title.localeCompare(right.title));
   const ready = [...dated, ...undated];
   const choices = [...recent, ...ready.filter((game) => !recent.some((entry) => entry.id === game.id))];
-  const featured = choices.find((game) => game.id === managedSelectedId) || choices[0] || null;
+  const remembered = routeSelection.home;
+  const featured = (remembered && choices.find((game) => game.id === remembered.id)) || choices[0] || null;
   const featuredSection = recent.some((game) => game.id === featured?.id) ? "recent" : "setup";
+  // Keep the remembered card when it still exists; otherwise Home starts on
+  // its own first card.
+  if (!featured) routeSelection.home = null;
+  else if (!remembered || remembered.id !== featured.id || remembered.section !== featuredSection) {
+    routeSelection.home = { id: featured.id, section: featuredSection };
+  }
   const appId = featured?.metadata_app_id;
   const hero = appId ? heroUrl(appId) : "";
   const running = featured ? runningManaged.has(featured.id) : false;
@@ -1524,6 +1540,12 @@ function renderManagedMode() {
   if (!managedLibrary.games.some((game) => game.id === managedSelectedId)) {
     managedSelectedId = managedLibrary.games[0]?.id || null;
   }
+  for (const view of ["home", "library"]) {
+    const selection = routeSelection[view];
+    if (selection && !managedLibrary.games.some((game) => game.id === selection.id)) {
+      routeSelection[view] = null;
+    }
+  }
   if (!hasManagedLibrary()) {
     if (appView === "home") { renderManagedHome(); return; }
     if (appView === "game") appView = "library";
@@ -1553,6 +1575,9 @@ async function openManagedGame(id, origin = "library", seed = null) {
   // not-yet-downloaded game always shows Download instead of a stale Play.
   managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
   renderManagedMode();
+  // Land on Play/Download so the primary action is one keypress away.
+  const action = firstContentControl("game");
+  if (action) focusControl(action);
 }
 
 function setView(view, options = {}) {
@@ -1653,8 +1678,10 @@ function activeNavControl() {
 
 function enterContentFromHeader() {
   if (appView === "home") {
-    const card = document.querySelector(`.home-page .cover-card[data-managed="${CSS.escape(managedSelectedId || "")}"]`)
-      || document.querySelector(".home-page .cover-card");
+    // Home order is top menu -> hero Play -> first card.
+    const play = document.querySelector("#home-play:not([disabled]), #home-view:not([disabled])");
+    if (play) { focusControl(play); return true; }
+    const card = firstContentControl("home");
     if (card) { focusControl(card); return true; }
   }
   if (appView === "store") {
@@ -1794,12 +1821,15 @@ function firstContentControl(view = appView) {
       || document.querySelector("#store-search");
   }
   if (view === "game") {
-    return document.querySelector("#managed-back")
-      || document.querySelector("#managed-play")
-      || document.querySelector("#managed-download");
+    // Detail pages land on the primary action (Play/Download), not the header.
+    return document.querySelector("#managed-play:not([disabled])")
+      || document.querySelector("#managed-download:not([disabled])")
+      || document.querySelector("#managed-stop:not([disabled])")
+      || document.querySelector("#managed-back");
   }
   if (view === "store-game") {
-    return document.querySelector("#store-back") || document.querySelector("#store-add");
+    return document.querySelector("#store-add:not([disabled])")
+      || document.querySelector("#store-back");
   }
   return null;
 }
@@ -1824,7 +1854,7 @@ function applyPendingRouteFocus(view = appView) {
   // parking focus on the search box.
   if (view === "store" && storeLoading && !document.querySelector("#store-results .cover-card")) return false;
   const node = pendingRouteFocus.mode === "restore"
-    ? routeFocusNode(routeFocusMemory[view])
+    ? routeFocusNode(routeFocusMemory[view]) || firstContentControl(view)
     : firstContentControl(view);
   if (!node) return false;
   pendingRouteFocus = null;
@@ -1909,11 +1939,8 @@ function focusControl(node) {
     if (node.closest(".home-page")) {
       syncHomeHero(node);
     } else if (node.closest(".library-page")) {
-      // Selection follows focus: the previous card loses its outline.
-      managedSelectedId = node.dataset.managed;
-      for (const card of document.querySelectorAll(".library-page .cover-card")) {
-        card.classList.toggle("active", card.dataset.managed === managedSelectedId);
-      }
+      // Selection follows focus within Library only.
+      setLibrarySelection(node.dataset.managed);
     }
   }
 }
@@ -1940,7 +1967,7 @@ async function applyHeroDetails(game) {
   if (!appId) return;
   try {
     const details = await appDetails(appId);
-    if (managedSelectedId !== game.id) return;
+    if (routeSelection.home?.id !== game.id) return;
     const meta = [details.release_date, details.genres].filter(Boolean).join(" · ");
     if (meta) related.textContent = meta;
     if (details.description) {
@@ -1953,11 +1980,17 @@ async function applyHeroDetails(game) {
 }
 
 function setHomeSelection(section, id) {
-  homeFocusSection = section;
-  managedSelectedId = id;
+  routeSelection.home = id ? { id, section } : null;
   for (const card of document.querySelectorAll(".home-page .cover-card")) {
     const railSection = card.closest(".managed-rail")?.dataset.rail;
     card.classList.toggle("active", card.dataset.managed === id && railSection === section);
+  }
+}
+
+function setLibrarySelection(id) {
+  routeSelection.library = id ? { id } : null;
+  for (const card of document.querySelectorAll(".library-page .cover-card")) {
+    card.classList.toggle("active", card.dataset.managed === id);
   }
 }
 
@@ -2024,17 +2057,39 @@ function moveNavigation(action) {
     if (action === "down") return enterContentFromHeader();
     if (action === "up") return true;
   }
+  if (current.closest(".home-page")) {
+    // Home uses an explicit vertical chain: top menu -> hero Play -> cards.
+    if (current.id === "home-play" || current.id === "home-view") {
+      if (action === "up") {
+        const nav = activeNavControl();
+        if (nav) { focusControl(nav); return true; }
+      }
+      if (action === "down") {
+        const card = firstContentControl("home");
+        if (card) { focusControl(card); return true; }
+      }
+    }
+    if (action === "up" && current.matches?.(".cover-card[data-managed]")) {
+      const rail = current.closest(".managed-rail");
+      const rails = [...document.querySelectorAll(".home-page .managed-rail")]
+        .filter((node) => node.querySelector(".cover-card"));
+      if (rail && rails[0] === rail) {
+        const play = document.querySelector("#home-play:not([disabled]), #home-view:not([disabled])");
+        if (play) { focusControl(play); return true; }
+      }
+    }
+  }
   if (action === "next" || action === "previous") {
     const index = controls.indexOf(current);
     const step = action === "next" ? 1 : -1;
     focusControl(controls[(index + step + controls.length) % controls.length]);
     return true;
   }
-  // UmuTron's home rail wraps with modulo; the scroll clamps at the end and
-  // focus moves across the last visible cards before looping to the first.
+  // Home rails wrap with modulo; focus moves across the last visible cards
+  // and then loops back to the start of the same rail.
   if ((action === "left" || action === "right") && current.matches?.(".cover-card[data-managed]")) {
     const rail = current.closest(".rail-scroll");
-    if (rail && rail.closest(".home-page") && rail.closest(".managed-rail")?.dataset.rail === "recent") {
+    if (rail && rail.closest(".home-page")) {
       const cards = [...rail.querySelectorAll(".cover-card")];
       const index = cards.indexOf(current);
       if (index >= 0) {
@@ -3981,6 +4036,7 @@ let storeServerPage = 0;
 let storeExhausted = false;
 let storeGenres = [];
 let storeLoading = false;
+let storeRefreshing = false;
 let storeError = "";
 let storeTried = false;
 let storeGeneration = 0;
@@ -4192,6 +4248,10 @@ function renderStoreDetail() {
   }
   const coverNode = detailEl.querySelector(".game-cover");
   if (coverNode) coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; });
+  // Land on Add to library so a Store title can be added without hunting for
+  // the button. Titles without a Steam build fall back to Back.
+  const focusTarget = firstContentControl("store-game");
+  if (focusTarget) focusControl(focusTarget);
 }
 
 async function mapLimit(items, limit, worker) {
@@ -4243,55 +4303,113 @@ function resetStorePaging() {
   storeExhausted = false;
   storePage = 1;
   storeError = "";
+  storeRefreshing = false;
+}
+
+// The Rust side caches each catalogue page and the genre list. Read those
+// first so browsing the Store does not hit the API on every launch and keeps
+// working when the API is unreachable.
+async function loadStoreGenres() {
+  if (storeGenres.length) return storeGenres;
+  try {
+    const cached = await invoke("store_cached_genres");
+    if (Array.isArray(cached) && cached.length) {
+      storeGenres = cached;
+      return storeGenres;
+    }
+  } catch (_error) { /* fall through to the network */ }
+  try { storeGenres = await invoke("store_genres"); }
+  catch (_error) { storeGenres = []; }
+  return storeGenres;
+}
+
+async function cachedStorePage(page) {
+  try {
+    const data = await invoke("store_cached_catalog", {
+      query: storeQuery,
+      genre: storeGenre,
+      sort: storeSort,
+      page,
+    });
+    return data && Array.isArray(data.items) ? data : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function absorbStorePage(data, serverPage, generation) {
+  const items = data.items || [];
+  const existing = new Set(storeBuffer.map((entry) => entry.id));
+  const candidates = items.filter((item) => isPcCatalogItem(item) && !existing.has(item.id));
+  // Verify Steam availability (cached per IGDB id) and keep only titles that
+  // genuinely exist on Steam; edition variants are matched.
+  const checked = await mapLimit(candidates, 5, async (item) => {
+    const steam = await resolveSteamForItem(item);
+    if (steam === undefined) return item;
+    if (!steam) return null;
+    return { ...item, steam_app_id: steam };
+  });
+  if (generation !== storeGeneration) return false;
+  storeServerPage = Math.max(storeServerPage, serverPage);
+  for (const item of checked) {
+    if (!item) continue;
+    if (!storeBuffer.some((entry) => entry.id === item.id)) storeBuffer.push(item);
+  }
+  const totalPages = data.total_pages || 1;
+  if (!items.length || storeServerPage >= totalPages) storeExhausted = true;
+  return true;
 }
 
 async function ensureStorePage(page, render = true) {
   const generation = storeGeneration;
   storePage = Math.max(1, page);
   storeLoading = true;
+  storeRefreshing = false;
   storeError = "";
   if (render) renderStorePage();
   const target = storePage * STORE_PAGE_SIZE;
   let guard = 0;
+
+  await loadStoreGenres();
+  if (generation !== storeGeneration) return;
+
+  // Paint cached server pages first, with no API request for them.
   while (storeBuffer.length < target && !storeExhausted && guard < 20) {
     guard += 1;
     const nextServerPage = storeServerPage + 1;
-    let data;
-    try {
-      if (!storeGenres.length) {
-        try { storeGenres = await invoke("store_genres"); } catch (_error) { storeGenres = []; }
-      }
-      data = await invoke("store_catalog", {
+    const cached = await cachedStorePage(nextServerPage);
+    if (generation !== storeGeneration) return;
+    if (!cached) break;
+    await absorbStorePage(cached, nextServerPage, generation);
+    if (generation !== storeGeneration) return;
+  }
+  if (storeBuffer.length) {
+    storeLoading = false;
+    storeRefreshing = true;
+    if (render || appView === "store") renderStorePage();
+  }
+
+  // Only pages that are not cached are fetched from the network.
+  try {
+    while (storeBuffer.length < target && !storeExhausted && guard < 20) {
+      guard += 1;
+      const nextServerPage = storeServerPage + 1;
+      const data = await invoke("store_catalog", {
         query: storeQuery,
         genre: storeGenre,
         sort: storeSort,
         page: nextServerPage,
       });
-    } catch (error) {
-      if (generation === storeGeneration) storeError = String(error);
-      break;
+      if (generation !== storeGeneration) return;
+      await absorbStorePage(data, nextServerPage, generation);
+      if (generation !== storeGeneration) return;
     }
-    if (generation !== storeGeneration) return; // a newer filter owns the buffer
-    storeServerPage = nextServerPage;
-    const items = data.items || [];
-    const existing = new Set(storeBuffer.map((entry) => entry.id));
-    const candidates = items.filter((item) => isPcCatalogItem(item) && !existing.has(item.id));
-    // Verify Steam availability (cached per IGDB id) and keep only titles that
-    // genuinely exist on Steam; edition variants are matched.
-    const checked = await mapLimit(candidates, 5, async (item) => {
-      const steam = await resolveSteamForItem(item);
-      if (steam === undefined) return item;
-      if (!steam) return null;
-      return { ...item, steam_app_id: steam };
-    });
-    for (const item of checked) {
-      if (!item) continue;
-      if (!storeBuffer.some((entry) => entry.id === item.id)) storeBuffer.push(item);
-    }
-    const totalPages = data.total_pages || 1;
-    if (!items.length || storeServerPage >= totalPages) storeExhausted = true;
+  } catch (error) {
+    // A cached catalogue stays usable when the API is offline.
+    if (generation === storeGeneration && !storeBuffer.length) storeError = String(error);
   }
   storeLoading = false;
+  storeRefreshing = false;
   storeTried = true;
   // Warm-up fetches often finish after the user opened the Store; always
   // repaint then so the screen never stays on "Loading…".
@@ -4299,9 +4417,13 @@ async function ensureStorePage(page, render = true) {
 }
 
 async function openStore() {
+  // If an earlier warm-up failed without cache, retry when the user opens the
+  // Store instead of leaving the error on screen.
   if (!storeBuffer.length) {
     resetStorePaging();
     await ensureStorePage(1);
+  } else if (storeError) {
+    await ensureStorePage(storePage);
   } else {
     renderStorePage();
   }
@@ -4334,7 +4456,13 @@ function renderStorePage() {
   for (let page = windowStart; page < windowStart + 5 && page <= knownPages; page += 1) {
     pageNumbers.push(page);
   }
-  const count = storeLoading ? "Loading…" : storeError ? "Store unavailable" : `${storeBuffer.length} PC titles`;
+  const count = storeLoading
+    ? "Loading…"
+    : storeError
+      ? "Store unavailable"
+      : storeRefreshing
+        ? "Saved catalogue · updating…"
+        : `${storeBuffer.length} PC titles`;
   detailEl.innerHTML = `<div class="page store-page">
     <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">
@@ -4563,9 +4691,9 @@ function showAddGame() {
   queryInput.focus();
 }
 
-document.querySelector("#nav-library").onclick = () => setView("library");
-document.querySelector("#nav-home").onclick = () => setView("home");
-document.querySelector("#nav-store").onclick = () => setView("store");
+document.querySelector("#nav-library").onclick = () => setView("library", { focus: "restore" });
+document.querySelector("#nav-home").onclick = () => setView("home", { focus: "restore" });
+document.querySelector("#nav-store").onclick = () => setView("store", { focus: "restore" });
 window.addEventListener("focus", async () => {
   if (!managedShell()) return;
   await refreshManagedRunning();

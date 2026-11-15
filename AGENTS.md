@@ -24,6 +24,9 @@ preference for batching commits or keeping a clean history.
 
 - Every change ends with a commit and a push to `origin/main` in the same turn,
   before reporting the work as done.
+- If work was started on a feature or work branch, merge it into `main` locally,
+  push `main`, and verify `origin/main` contains the commit. Never leave
+  completed work only on a branch at `origin`.
 - Never leave the working tree dirty or the branch ahead of `origin`.
 - Verify before reporting:
   `git status --porcelain` prints nothing and
@@ -33,6 +36,10 @@ preference for batching commits or keeping a clean history.
 - Interim snapshots of unfinished work go to `autosave/<host>`
   (`~/.local/bin/git-autosync.sh`, timer `git-autosync.timer`); they are a
   safety net, not a substitute for real commits.
+- Autosave branches are snapshots, not feature branches. Never open or merge a
+  pull request from `autosave/<host>`. Once the real work is committed on
+  `main` and pushed, delete stale `origin/autosave/<host>` branches so GitHub
+  does not offer to merge them.
 
 ## Rebuild and install after every change — mandatory
 
