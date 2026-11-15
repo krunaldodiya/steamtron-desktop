@@ -1494,7 +1494,7 @@ function openManagedGameOptions(game) {
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
           <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game folder from your library."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
-          <div class="files-card"><p class="pane-note">Download the latest Lua/manifest bundle and refresh the Steam registration for this game.</p><button class="files-wide" id="files-regenerate">Regenerate manifests + Steam registration</button></div>`;
+          <div class="files-card"><p class="pane-note">Download the latest Lua/manifest bundle. Steam registration is refreshed only when a ready Steam backend is available.</p><button class="files-wide" id="files-regenerate">Regenerate manifests</button></div>`;
 
         const status = pane.querySelector("#files-status");
         const refreshGameAndTab = async () => {
@@ -1601,7 +1601,7 @@ function openManagedGameOptions(game) {
         }, (result) => `Imported ${result.files} save file${result.files === 1 ? "" : "s"}`, async () => {});
         pane.querySelector("#files-regenerate").onclick = (event) => run(event.currentTarget,
           () => invoke("regenerate_managed_manifests", { gameId: game.id }),
-          (result) => `Regenerated manifests (${result.manifests} depot manifest${result.manifests === 1 ? "" : "s"})`);
+          (result) => result.warning || `Regenerated manifests (${result.manifests} depot manifest${result.manifests === 1 ? "" : "s"})`);
       };
       void renderFilesTab();
       return;
@@ -3744,6 +3744,7 @@ async function renderGeneralSettings(host) {
   settingsLibrary = snapshot;
   const settings = snapshot?.settings || {};
   const mode = settings.default_display_mode || "desktop";
+  const prefix = settings.default_prefix_mode || "umu";
   const gamemode = settings.gamemode !== false;
   const email = profile?.email || (profile?.authenticated ? "Signed in" : "Signed out");
   const activity = diagnostics
@@ -3752,13 +3753,14 @@ async function renderGeneralSettings(host) {
   host.innerHTML = `
     <section class="settings-section"><h2>Display mode</h2><p>Default mode applies on the next app start. Enter fullscreen from the mode button; leave through fullscreen options or the tray.</p><div class="settings-card">
       ${settingsRow("Default launch mode", "Desktop or fullscreen when a game starts.", `<select id="setting-display-mode"><option value="desktop"${mode === "desktop" ? " selected" : ""}>Desktop</option><option value="fullscreen"${mode === "fullscreen" ? " selected" : ""}>Fullscreen</option></select>`)}
+      ${settingsRow("Default prefix source", "Used for new games. Steam prefixes borrow Steam's compatdata; umu prefixes live inside the SteamTron library.", `<select id="setting-prefix-mode"><option value="umu"${prefix === "umu" ? " selected" : ""}>umu (SteamTron)</option><option value="steam"${prefix === "steam" ? " selected" : ""}>Steam compatdata</option></select>`)}
       ${settingsRow("Feral GameMode", "Automatically optimize CPU governor, GPU performance, and process priorities while gaming, then revert on exit.", `<label class="switch"><input type="checkbox" id="setting-gamemode"${gamemode ? " checked" : ""}><span></span></label>`)}
     </div></section>
     <section class="settings-section"><h2>Account</h2><p>Session used for manifests, library actions and Steam registration.</p><div class="settings-card">
       ${settingsRow(email, profile?.base_url || "SteamTron account", '<button id="setting-signout">Sign out</button>')}
     </div></section>
     <section class="settings-section"><h2>Maintenance</h2><p>Library backup, restore and desktop integration.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Library metadata</strong><span>Back up or restore Lua manifests, appmanifests and fixes.</span></div><div class="row-control settings-inline"><button id="setting-backup">Backup…</button><button id="setting-restore">Restore…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Library backup</strong><span>Full backup: library index, drives, games, Lua manifests, appmanifests and fixes.</span></div><div class="row-control settings-inline"><button id="setting-backup">Backup…</button><button id="setting-restore">Restore…</button></div></div>
       ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
       ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
     </div></section>
@@ -3775,6 +3777,12 @@ async function renderGeneralSettings(host) {
     try {
       await invoke("update_library_settings", { defaultDisplayMode: event.target.value });
       showToast(`Default launch mode: ${event.target.value}`);
+    } catch (error) { showToast(String(error), true); }
+  };
+  host.querySelector("#setting-prefix-mode").onchange = async (event) => {
+    try {
+      await invoke("update_library_settings", { defaultPrefixMode: event.target.value });
+      showToast(`Default prefix source: ${event.target.value}`);
     } catch (error) { showToast(String(error), true); }
   };
   host.querySelector("#setting-gamemode").onchange = async (event) => {
@@ -3800,15 +3808,15 @@ async function renderGeneralSettings(host) {
     } catch (error) { stop(); showToast(String(error), true); }
   };
   host.querySelector("#setting-restore").onclick = async (event) => {
-    if (!(await confirmDialog({ title: "Restore metadata", message: "Restore metadata from a backup? Steam must be stopped. Existing Lua, appmanifest and fixes files may be overwritten.", confirmLabel: "Restore" }))) return;
+    if (!(await confirmDialog({ title: "Restore backup", message: "Restore this backup? It replaces the current library index, drives and settings and may overwrite Lua, appmanifest and fixes files. Steam is not required.", confirmLabel: "Restore" }))) return;
     const stop = busy(event.target, "Restoring…");
     try {
       const result = await invoke("restore_backup");
       stop();
       if (!result) { showToast("Restore cancelled."); return; }
-      markRestartRequired("Library metadata restored. Start Steam to apply the restored files.");
       await load();
-      showToast(`Restored ${result.games} games (${result.lua_files} Lua, ${result.appmanifests} appmanifest, ${result.fixes} fixes)`);
+      const warning = result.warnings?.length ? ` · ${result.warnings.length} skipped item${result.warnings.length === 1 ? "" : "s"}` : "";
+      showToast(`Restored ${result.library ? "library index + " : ""}${result.games} games (${result.lua_files} Lua, ${result.appmanifests} appmanifest, ${result.fixes} fixes)${warning}`);
     } catch (error) { stop(); showToast(String(error), true); }
   };
   host.querySelector("#setting-shortcut").onclick = async (event) => {
@@ -4025,9 +4033,6 @@ async function renderStorageSettings(host) {
       ${rows || '<div class="settings-row"><div class="row-text"><span>No drives registered yet.</span></div></div>'}
       <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted partition. No folder or game file is created.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
     </div></section>
-    <section class="settings-section"><h2>Library backup</h2><p>Save the whole library index — drives, games and settings — as JSON, or restore it after reinstalling. Game content, prefixes and saves are not included and stay on their drives.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Library file</strong><span>Export or import <code>library.json</code>. Import replaces the current drives, games and settings; the previous file is kept as <code>library.json.bak</code>.</span></div><div class="row-control settings-inline"><button id="setting-export-library">Export…</button><button id="setting-import-library">Import…</button></div></div>
-    </div></section>
     <section class="settings-section"><h2>Game backups</h2><p>Restore a portable SteamTron game backup to a registered game or create its library entry automatically.</p><div class="settings-card">
       <div class="settings-row"><div class="row-text"><strong>Restore game backup</strong><span>Adds the game to your library automatically if it is not already present.</span></div><div class="row-control"><button id="setting-restore-game" class="primary">Restore…</button></div></div>
     </div></section>
@@ -4063,27 +4068,6 @@ async function renderStorageSettings(host) {
       } catch (error) { showToast(String(error), true); }
     };
   }
-  host.querySelector("#setting-export-library").onclick = async (event) => {
-    const stop = busy(event.target, "Exporting…");
-    try {
-      const result = await invoke("export_library_file");
-      stop();
-      if (!result) { showToast("Library export cancelled."); return; }
-      showToast(`Library exported: ${result.path} (${result.games} games, ${result.drives} drives)`);
-    } catch (error) { stop(); showToast(String(error), true); }
-  };
-  host.querySelector("#setting-import-library").onclick = async (event) => {
-    if (!(await confirmDialog({ title: "Import library", message: "Import this library file? It replaces the current drives, games and settings. Game content and saves are not moved.", confirmLabel: "Import" }))) return;
-    const stop = busy(event.target, "Importing…");
-    try {
-      const result = await invoke("import_library_file");
-      stop();
-      if (!result) { showToast("Library import cancelled."); return; }
-      await load();
-      await renderSettingsPage();
-      showToast(`Library imported: ${result.games} games, ${result.drives} drives. Previous file kept as library.json.bak.`);
-    } catch (error) { stop(); showToast(String(error), true); }
-  };
   host.querySelector("#setting-restore-game").onclick = async (event) => {
     const stop = busy(event.target, "Restoring…");
     try {
@@ -4511,7 +4495,7 @@ async function addStoreItemToLibrary(item, button) {
       const profile = await invoke("profile_status");
       if (profile?.authenticated) provider = "api";
     } catch (_error) { /* fall back to the public provider */ }
-    progress.setStatus("Downloading the Lua manifest and registering the App ID…");
+    progress.setStatus("Downloading the Lua manifest…");
     const result = await invoke("add_managed_game", { request: {
       app_id: item.steam_app_id,
       title: item.name,
@@ -4523,7 +4507,8 @@ async function addStoreItemToLibrary(item, button) {
     managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
     progress.close();
     clearRestartRequired();
-    showToast(`Added ${result.title} to your library`);
+    if (result.warning) showToast(result.warning);
+    else showToast(`Added ${result.title} to your library`);
     openManagedGame(result.game_id, "store", item);
   } catch (error) {
     progress.fail(String(error));

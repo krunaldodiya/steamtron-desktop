@@ -9,6 +9,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use regex::Regex;
 use serde::Serialize;
 
+use steamtron_core::library::{Library, managed_lua_path};
 use steamtron_core::steam;
 
 use crate::LibraryError;
@@ -146,10 +147,24 @@ fn manifest_store() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from).map(|home| home.join(".config")))?;
-    Some(base.join("SLSsteam/manifests"))
+    let sls = base.join("SLSsteam/manifests");
+    if sls.is_dir() {
+        Some(sls)
+    } else {
+        Some(steamtron_core::paths::layout().manifests())
+    }
 }
 
 fn lua_path(appid: &str) -> Option<PathBuf> {
+    if let Ok(app_id) = appid.parse::<u32>() {
+        if let Ok(library) = Library::load() {
+            if let Some(game) = library.game_by_app_id(app_id) {
+                if let Some(path) = managed_lua_path(game).filter(|path| path.is_file()) {
+                    return Some(path);
+                }
+            }
+        }
+    }
     let root = steam::steam_root().ok()?;
     let stplug = root.join("config/stplug-in");
     let lua = root.join("config/lua");
@@ -269,6 +284,9 @@ fn sources(depots: &BTreeMap<String, String>) -> Vec<PathBuf> {
         if let Ok(entries) = fs::read_dir(store) {
             paths.extend(entries.flatten().map(|entry| entry.path()));
         }
+    }
+    if let Ok(entries) = fs::read_dir(steamtron_core::paths::layout().manifests()) {
+        paths.extend(entries.flatten().map(|entry| entry.path()));
     }
     if let Ok(root) = steam::steam_root() {
         if let Ok(entries) = fs::read_dir(root.join("steamapps/depotcache")) {

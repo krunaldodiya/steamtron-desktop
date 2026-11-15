@@ -76,6 +76,11 @@ impl Layout {
         self.home().join("tools")
     }
 
+    /// Steam-independent depot manifests saved with managed games.
+    pub fn manifests(&self) -> PathBuf {
+        self.home().join("manifests")
+    }
+
     pub fn goldberg(&self, tag: &str) -> PathBuf {
         self.tools().join("goldberg").join(format!("gse_fork-{tag}"))
     }

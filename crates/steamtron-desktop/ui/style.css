@@ -48,6 +48,9 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 
 .profile-email { color:#fff; font-size:16px; margin:8px 0 4px; }
 .profile-actions { display:flex; gap:8px; margin-top:18px; }
+.profile-actions .danger { background:#a33343; border-color:transparent; color:#fff; }
+.profile-actions .danger:hover { background:#b23b4c; }
+.profile-actions .danger.nav-focus { border-color:transparent; }
 
 .modal-backdrop { position:fixed; inset:0; background:#000b; display:flex; align-items:center; justify-content:center; z-index:300; pointer-events:auto; }
 .modal { width:min(460px, calc(100vw - 32px)); background:#17212c; border:1px solid #3b5166; border-radius:12px; padding:20px; box-shadow:0 20px 70px #000c; pointer-events:auto; }

@@ -906,17 +906,18 @@ pub fn list(family: &str) -> Result<Vec<SourceRelease>, String> {
 
 fn valve_releases() -> Result<Vec<SourceRelease>, String> {
     let mut installed: Vec<(String, PathBuf)> = Vec::new();
-    let libraries = steamtron_core::steam::libraries().map_err(|error| error.to_string())?;
-    for library in libraries {
-        let common = library.join("common");
-        let Ok(entries) = fs::read_dir(&common) else { continue };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let runner = path.join("proton");
-            if !runner.is_file() {
-                continue;
+    if let Ok(libraries) = steamtron_core::steam::libraries() {
+        for library in libraries {
+            let common = library.join("common");
+            let Ok(entries) = fs::read_dir(&common) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let runner = path.join("proton");
+                if !runner.is_file() {
+                    continue;
+                }
+                installed.push((entry.file_name().to_string_lossy().into_owned(), runner));
             }
-            installed.push((entry.file_name().to_string_lossy().into_owned(), runner));
         }
     }
     let mut used = std::collections::BTreeSet::new();

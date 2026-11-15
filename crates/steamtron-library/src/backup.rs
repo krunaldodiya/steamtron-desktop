@@ -14,6 +14,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use steamtron_core::config::Config;
+use steamtron_core::library::{drive_root_for, game_layout, managed_lua_path, Library};
 use steamtron_core::steam;
 
 use steamtron_core::fixes::{fixes_root, fixes_path};
@@ -38,6 +39,8 @@ pub struct RestoreSummary {
     pub lua_files: usize,
     pub appmanifests: usize,
     pub fixes: usize,
+    pub library: bool,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,19 +60,33 @@ struct BackupGame {
 }
 
 pub fn export_backup(path: &Path, appids: Option<&BTreeSet<String>>) -> Result<BackupSummary, LibraryError> {
-    let root = steam::steam_root().map_err(|error| LibraryError::Archive(error.to_string()))?;
-    let config = Config::load().map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let library = Library::load().ok();
+    let library_bytes = fs::read(Library::default_path()).ok();
+    let root = steam::steam_root().ok();
+    let config = Config::load().ok();
     let installed: BTreeMap<String, steam::SteamGame> = steam::games()
-        .map_err(|error| LibraryError::Archive(error.to_string()))?
+        .unwrap_or_default()
         .into_iter()
         .map(|game| (game.appid.clone(), game))
         .collect();
-    let managed = steam::managed_appids().map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let mut managed: BTreeSet<String> = library
+        .as_ref()
+        .map(|library| {
+            library
+                .games()
+                .iter()
+                .filter_map(|game| game.metadata_app_id.map(|id| id.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Ok(ids) = steam::managed_appids() {
+        managed.extend(ids);
+    }
     let selected: Vec<String> = managed
         .into_iter()
         .filter(|appid| appids.map_or(true, |wanted| wanted.contains(appid)))
         .collect();
-    if selected.is_empty() {
+    if selected.is_empty() && library_bytes.is_none() {
         return Err(LibraryError::Archive("No managed games to back up.".into()));
     }
 
@@ -88,20 +105,40 @@ pub fn export_backup(path: &Path, appids: Option<&BTreeSet<String>>) -> Result<B
         Ok(())
     };
 
+    if let Some(data) = library_bytes {
+        add(&mut writer, "library.json", &data, &mut files, &mut bytes)?;
+    }
+
     for appid in selected {
-        let lua_path = root.join("config/stplug-in").join(format!("{appid}.lua"));
-        let lua = match fs::read(&lua_path) {
-            Ok(data) => Some(data),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(LibraryError::io(&lua_path, error)),
-        };
+        let library_game = library.as_ref().and_then(|library| {
+            appid
+                .parse::<u32>()
+                .ok()
+                .and_then(|id| library.game_by_app_id(id))
+        });
+        let lua_path = library_game
+            .and_then(managed_lua_path)
+            .filter(|path| path.is_file())
+            .or_else(|| {
+                root.as_ref()
+                    .map(|root| root.join("config/stplug-in").join(format!("{appid}.lua")))
+                    .filter(|path| path.is_file())
+            });
+        let lua = lua_path.and_then(|path| fs::read(path).ok());
         let game = installed.get(&appid);
         let appmanifest = game.map(|game| game.manifest.as_path());
-        let config_entry = config.entry(&appid);
-        let fixes = config_entry.map(|entry| entry.fixes.as_path());
+        let managed_fixes = library_game
+            .and_then(|game| drive_root_for(&game.installation.root))
+            .and_then(|drive| library_game.and_then(|game| game_layout(&drive, game).ok()))
+            .map(|layout| layout.fixes)
+            .filter(|path| path.is_dir());
+        let config_entry = config.as_ref().and_then(|config| config.entry(&appid));
+        let steam_fixes = config_entry.map(|entry| entry.fixes.as_path());
+        let fixes = managed_fixes.as_deref().or(steam_fixes);
         let has_fixes = fixes.is_some_and(|path| path.is_dir());
-        let title = game
-            .map(|game| game.name.clone())
+        let title = library_game
+            .map(|game| game.title.clone())
+            .or_else(|| game.map(|game| game.name.clone()))
             .or_else(|| config_entry.map(|_| format!("Steam App {appid}")))
             .unwrap_or_else(|| format!("Steam App {appid}"));
 
@@ -191,6 +228,7 @@ pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
     let mut archive = ZipArchive::new(fs::File::open(path).map_err(|error| LibraryError::io(path, error))?)
         .map_err(LibraryError::Zip)?;
     let mut manifest = None;
+    let mut library_data = None;
     let mut files = Vec::new();
     let mut total = 0u64;
     for index in 0..archive.len() {
@@ -213,6 +251,8 @@ pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
         entry.read_to_end(&mut data).map_err(|error| LibraryError::io(&path, error))?;
         if name == MANIFEST {
             manifest = Some(serde_json::from_slice::<BackupManifest>(&data).map_err(|error| LibraryError::Archive(error.to_string()))?);
+        } else if name == "library.json" {
+            library_data = Some(data);
         } else {
             files.push((name, data));
         }
@@ -221,18 +261,31 @@ pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
     if manifest.version != 1 {
         return Err(LibraryError::Archive(format!("Unsupported backup version {}.", manifest.version)));
     }
-    let root = steam::steam_root().map_err(|error| LibraryError::Archive(error.to_string()))?;
-    let lua_dir = root.join("config/stplug-in");
-    fs::create_dir_all(&lua_dir).map_err(|error| LibraryError::io(&lua_dir, error))?;
-    let library = steam::libraries()
-        .map_err(|error| LibraryError::Archive(error.to_string()))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| LibraryError::Archive("No Steam library found.".into()))?;
+    let library_imported = if let Some(data) = library_data {
+        let temporary = std::env::temp_dir().join(format!(
+            "steamtron-restore-{}-{}.json",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+        ));
+        fs::write(&temporary, &data).map_err(|error| LibraryError::io(&temporary, error))?;
+        let imported = steamtron_core::library::import_library_file(&temporary);
+        let _ = fs::remove_file(&temporary);
+        imported.map_err(|error| LibraryError::Archive(error.to_string()))?;
+        true
+    } else {
+        false
+    };
+    let library = Library::load().ok();
+    let root = steam::steam_root().ok();
+    let lua_dir = root.as_ref().map(|root| root.join("config/stplug-in"));
+    let steam_library = steam::libraries()
+        .ok()
+        .and_then(|libraries| libraries.into_iter().next());
     let allowed: BTreeSet<&str> = manifest.games.iter().map(|game| game.appid.as_str()).collect();
     let mut lua_files = 0;
     let mut appmanifests = 0;
     let mut fixes_count = 0;
+    let mut warnings = Vec::new();
     for (name, data) in files {
         let parts: Vec<&str> = name.split('/').collect();
         if parts.len() < 2 || !allowed.contains(parts[1].trim_end_matches(".lua")) && parts[0] != "fixes" && parts[0] != "lua" && parts[0] != "appmanifests" {
@@ -241,34 +294,55 @@ pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
         if let Some(rest) = name.strip_prefix("lua/") {
             let appid = rest.strip_suffix(".lua").ok_or_else(|| LibraryError::Archive("Invalid Lua entry.".into()))?;
             if !allowed.contains(appid) { return Err(LibraryError::Archive("Unexpected Lua App ID.".into())); }
-            atomic_write(&lua_dir.join(format!("{appid}.lua")), &data)?;
-            lua_files += 1;
+            let game = appid.parse::<u32>().ok().and_then(|id| library.as_ref()?.game_by_app_id(id));
+            let local = game.and_then(managed_lua_path);
+            if let Some(target) = local {
+                if let Some(parent) = target.parent() { fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?; }
+                atomic_write(&target, &data)?;
+                lua_files += 1;
+            } else if let Some(dir) = &lua_dir {
+                fs::create_dir_all(dir).map_err(|error| LibraryError::io(dir, error))?;
+                atomic_write(&dir.join(format!("{appid}.lua")), &data)?;
+                lua_files += 1;
+            } else {
+                warnings.push(format!("Lua manifest for App {appid} was skipped: no local game or Steam install."));
+            }
         } else if let Some(rest) = name.strip_prefix("appmanifests/appmanifest_") {
             let appid = rest.strip_suffix(".acf").ok_or_else(|| LibraryError::Archive("Invalid appmanifest entry.".into()))?;
             if !allowed.contains(appid) { return Err(LibraryError::Archive("Unexpected appmanifest App ID.".into())); }
-            atomic_write(&library.join(format!("appmanifest_{appid}.acf")), &data)?;
-            appmanifests += 1;
+            if let Some(library) = &steam_library {
+                atomic_write(&library.join(format!("appmanifest_{appid}.acf")), &data)?;
+                appmanifests += 1;
+            } else {
+                warnings.push(format!("appmanifest for App {appid} was skipped: Steam is not installed."));
+            }
         } else if let Some(rest) = name.strip_prefix("fixes/") {
             let (appid, relative) = rest.split_once('/').ok_or_else(|| LibraryError::Archive("Invalid fixes entry.".into()))?;
             if !allowed.contains(appid) { return Err(LibraryError::Archive("Unexpected fixes App ID.".into())); }
-            let target = fixes_path(appid).map_err(|error| LibraryError::Archive(error.to_string()))?;
+            let game = appid.parse::<u32>().ok().and_then(|id| library.as_ref()?.game_by_app_id(id));
+            let local = game
+                .and_then(|game| drive_root_for(&game.installation.root))
+                .and_then(|drive| game.and_then(|game| game_layout(&drive, game).ok()))
+                .map(|layout| layout.fixes);
+            let target = local.unwrap_or_else(|| fixes_path(appid).unwrap_or_else(|_| fixes_root().join(appid)));
             let destination = target.join(safe_relative(relative)?);
             if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?; }
             atomic_write(&destination, &data)?;
         }
     }
-    let mut config = Config::load().map_err(|error| LibraryError::Archive(error.to_string()))?;
-    for game in &manifest.games {
-        let target = fixes_root().join(&game.appid);
-        if game.has_fixes && target.is_dir() {
-            let entry = config
-                .upsert(&game.appid, &target, game.enabled)
-                .map_err(|error| LibraryError::Archive(error.to_string()))?;
-            if entry.launch_option_disabled != game.launch_option_disabled {
-                config.set_launch_option_disabled(&game.appid, game.launch_option_disabled)
+    if let Some(mut config) = Config::load().ok() {
+        for game in &manifest.games {
+            let target = fixes_root().join(&game.appid);
+            if game.has_fixes && target.is_dir() {
+                let entry = config
+                    .upsert(&game.appid, &target, game.enabled)
                     .map_err(|error| LibraryError::Archive(error.to_string()))?;
+                if entry.launch_option_disabled != game.launch_option_disabled {
+                    config.set_launch_option_disabled(&game.appid, game.launch_option_disabled)
+                        .map_err(|error| LibraryError::Archive(error.to_string()))?;
+                }
+                fixes_count += 1;
             }
-            fixes_count += 1;
         }
     }
     Ok(RestoreSummary {
@@ -276,6 +350,8 @@ pub fn restore_backup(path: &Path) -> Result<RestoreSummary, LibraryError> {
         lua_files,
         appmanifests,
         fixes: fixes_count,
+        library: library_imported,
+        warnings,
     })
 }
 

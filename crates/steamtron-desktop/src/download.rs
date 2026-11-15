@@ -246,10 +246,15 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         .metadata_app_id
         .ok_or_else(|| "this game has no Steam App ID".to_string())?;
     let root = game.installation.root.clone();
-    let lua_dir = steamtron_core::steam::steam_root()
-        .map_err(|error| error.to_string())?
-        .join("config/stplug-in");
-    let lua = lua_dir.join(format!("{app_id}.lua"));
+    let local_lua = steamtron_core::library::managed_lua_path(game)
+        .filter(|path| path.is_file());
+    let lua = if let Some(path) = local_lua {
+        path
+    } else if let Ok(steam_root) = steamtron_core::steam::steam_root() {
+        steam_root.join("config/stplug-in").join(format!("{app_id}.lua"))
+    } else {
+        return Err("The Lua manifest is missing. Re-add the game first.".into());
+    };
     if !lua.is_file() {
         return Err("The Lua manifest is missing. Re-add the game first.".into());
     }

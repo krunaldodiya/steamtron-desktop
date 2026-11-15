@@ -42,3 +42,6 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0015](0015-home-focus-after-signin.md) | Keep Home focus after sign-in window refocus | done | 2026-11-15 |
 | [0016](0016-dialog-focus-return.md) | Return focus to the dialog opener | done | 2026-11-15 |
 | [0017](0017-tray.md) | Close to tray and restore from the tray icon | done | 2026-11-15 |
+| [0018](0018-steamless-operations.md) | Steam-independent managed games | active | 2026-11-15 |
+| [0019](0019-consolidated-backup.md) | One consolidated library backup | done | 2026-11-15 |
+| [0020](0020-proton-defaults.md) | Proton and prefix defaults without Steam | done | 2026-11-15 |

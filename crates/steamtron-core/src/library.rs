@@ -260,6 +260,8 @@ impl Artwork {
 pub struct LibrarySettings {
     #[serde(default = "default_display_mode")]
     pub default_display_mode: String,
+    #[serde(default = "default_prefix_mode")]
+    pub default_prefix_mode: String,
     #[serde(default = "default_true")]
     pub gamemode: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -278,6 +280,7 @@ impl Default for LibrarySettings {
     fn default() -> Self {
         Self {
             default_display_mode: default_display_mode(),
+            default_prefix_mode: default_prefix_mode(),
             gamemode: true,
             proton_runners: Vec::new(),
             default_proton: String::new(),
@@ -705,9 +708,22 @@ pub fn game_layout(drive_root: &Path, game: &Game) -> Result<GameLayout, Library
     })
 }
 
+/// Local SteamTron copy of the game's Lua manifest.
+///
+/// Added games keep this next to their managed content so downloads,
+/// verification, updates, and DLC detection work without a Steam install.
+pub fn managed_lua_path(game: &Game) -> Option<PathBuf> {
+    let app_id = game.metadata_app_id?;
+    let base = game.installation.manifest.parent()?;
+    Some(base.join("lua").join(format!("{app_id}.lua")))
+}
+
 fn validate(settings: &LibrarySettings, drives: &[Drive], games: &[Game]) -> Result<(), LibraryError> {
     if settings.default_display_mode != "desktop" && settings.default_display_mode != "fullscreen" {
         return Err(LibraryError::Invalid("invalid default display mode".into()));
+    }
+    if settings.default_prefix_mode != "umu" && settings.default_prefix_mode != "steam" {
+        return Err(LibraryError::Invalid("invalid default prefix source".into()));
     }
     if settings.proton_runners.len() > 32 {
         return Err(LibraryError::Invalid("too many Proton runners".into()));

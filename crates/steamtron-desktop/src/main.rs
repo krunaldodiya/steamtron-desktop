@@ -17,10 +17,6 @@ mod security;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
 use steamtron_core::fixes::{export_name, export_zip, install_zip};
-use steamtron_core::library::{
-    export_library_file as export_library_document, import_library_file as import_library_document,
-    LibraryFileSummary,
-};
 use steamtron_core::steam;
 use steamtron_register::{platform_backend, RegistrationBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
@@ -707,7 +703,6 @@ async fn export_backup() -> Result<Option<backup::BackupSummary>, String> {
 #[tauri::command]
 async fn restore_backup() -> Result<Option<backup::RestoreSummary>, String> {
     require_auth()?;
-    require_steam_stopped()?;
     let Some(path) = rfd::FileDialog::new()
         .set_title("Choose SteamTron library backup")
         .add_filter("SteamTron backup", &["zip"])
@@ -720,41 +715,6 @@ async fn restore_backup() -> Result<Option<backup::RestoreSummary>, String> {
     })
     .await
     .map_err(|error| format!("Restore task failed: {error}"))?
-}
-
-#[tauri::command]
-async fn export_library_file() -> Result<Option<LibraryFileSummary>, String> {
-    require_auth()?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Save SteamTron library")
-        .set_file_name("steamtron-library.json")
-        .add_filter("SteamTron library", &["json"])
-        .save_file()
-    else {
-        return Ok(None);
-    };
-    tauri::async_runtime::spawn_blocking(move || {
-        export_library_document(&path).map(Some).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("Library export task failed: {error}"))?
-}
-
-#[tauri::command]
-async fn import_library_file() -> Result<Option<LibraryFileSummary>, String> {
-    require_auth()?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Choose a SteamTron library file")
-        .add_filter("SteamTron library", &["json"])
-        .pick_file()
-    else {
-        return Ok(None);
-    };
-    tauri::async_runtime::spawn_blocking(move || {
-        import_library_document(&path).map(Some).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("Library import task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1829,6 +1789,27 @@ fn dir_has_entries(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+fn installed_proton_runner() -> Option<std::path::PathBuf> {
+    let root = proton_sources::runner_root();
+    let mut candidates: Vec<std::path::PathBuf> = std::fs::read_dir(&root)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    candidates.sort();
+    for directory in candidates {
+        let runner = directory.join("proton");
+        if runner.is_file() {
+            return Some(runner);
+        }
+        if directory.join("proton").is_dir() {
+            return Some(directory.join("proton"));
+        }
+    }
+    None
+}
+
 #[tauri::command]
 fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     use std::fs::File;
@@ -1843,8 +1824,33 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .cloned()
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
     steamtron_core::runtime::use_default_proton(&mut game, &library.settings().default_proton);
-    let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
-    if game.launch.requires_steam {
+    let selected_proton = if !game.launch.proton.is_empty() {
+        game.launch.proton.clone()
+    } else {
+        game.installation.proton.clone()
+    };
+    let proton_usable = {
+        let path = std::path::Path::new(&selected_proton);
+        !selected_proton.is_empty() && (path.is_file() || path.is_dir())
+    };
+    if !proton_usable {
+        if let Some(fallback) = installed_proton_runner() {
+            let fallback = fallback.display().to_string();
+            game.launch.proton = fallback.clone();
+            game.installation.proton = fallback;
+        } else {
+            return Err(
+                "No Proton runner is installed. Open Settings → Proton Manager and install one before playing."
+                    .into(),
+            );
+        }
+    }
+    let steam_root = steam::steam_root().ok();
+    let client_root = if game.launch.requires_steam {
+        let root = steam_root.clone().ok_or_else(|| {
+            "This game requires Steam, but Steam is not installed. Install Steam or turn off the Steam requirement in Game Settings."
+                .to_string()
+        })?;
         game.launch.environment.remove("PROTON_DISABLE_LSTEAMCLIENT");
         if let Some(overrides) = game.launch.environment.get_mut("WINEDLLOVERRIDES") {
             let kept: Vec<&str> = overrides
@@ -1869,13 +1875,16 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         if let Some(app_id) = game.metadata_app_id {
             if game.launch.prefix_mode != "steam" {
                 game.launch.prefix_mode = "steam".into();
-                game.installation.prefix = steam_root
+                game.installation.prefix = root
                     .join("steamapps/compatdata")
                     .join(app_id.to_string())
                     .join("pfx");
             }
         }
-    }
+        root
+    } else {
+        steam_root.unwrap_or_else(|| steamtron_core::paths::layout().home())
+    };
 
     let layout = steamtron_core::paths::layout();
     let logs = layout.diagnostics_for(&game.id);
@@ -1895,7 +1904,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     let target = primary_target(&game)
         .cloned()
         .ok_or_else(|| "This game has no launch target yet.".to_string())?;
-    let plan = managed_launch_plan(&game, &target, &steam_root)
+    let plan = managed_launch_plan(&game, &target, &client_root)
         .map_err(|error| error.to_string())?;
     let fixes = managed_fixes_dir(&game);
     let use_overlay =
@@ -1924,7 +1933,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
                 "--cwd",
                 &game.installation.root.display().to_string(),
                 "--steam-root",
-                &steam_root.display().to_string(),
+                &client_root.display().to_string(),
                 "--",
                 &plan.arguments[1],
             ])
@@ -2485,6 +2494,7 @@ fn app_version() -> String {
 #[tauri::command]
 fn update_library_settings(
     default_display_mode: Option<String>,
+    default_prefix_mode: Option<String>,
     gamemode: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
@@ -2495,6 +2505,12 @@ fn update_library_settings(
             return Err("display mode must be desktop or fullscreen".into());
         }
         library.settings_mut().default_display_mode = mode;
+    }
+    if let Some(mode) = default_prefix_mode {
+        if mode != "umu" && mode != "steam" {
+            return Err("prefix source must be umu or steam".into());
+        }
+        library.settings_mut().default_prefix_mode = mode;
     }
     if let Some(gamemode) = gamemode {
         library.settings_mut().gamemode = gamemode;
@@ -3135,9 +3151,14 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
     let Some(app_id) = game.metadata_app_id else {
         return Ok(Vec::new());
     };
-    let lua = steam::steam_root()
-        .ok()
-        .map(|root| root.join("config/stplug-in").join(format!("{app_id}.lua")))
+    let lua = steamtron_core::library::managed_lua_path(game)
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            steam::steam_root()
+                .ok()
+                .map(|root| root.join("config/stplug-in").join(format!("{app_id}.lua")))
+                .filter(|path| path.is_file())
+        })
         .and_then(|path| std::fs::read_to_string(path).ok())
         .unwrap_or_default();
     let response = store_client()
@@ -3399,7 +3420,13 @@ async fn restore_game_backup() -> Result<Option<serde_json::Value>, String> {
         let appid = metadata.appid.ok_or_else(|| "The backup has no Steam App ID and the game is not in the library.".to_string())?;
         let title = if metadata.title.trim().is_empty() { format!("Steam App {appid}") } else { metadata.title.clone() };
         let drive = library.default_drive().cloned().or_else(|| library.drives().first().cloned()).ok_or_else(|| "Register a drive before restoring a backup.".to_string())?;
-        let backend = platform_backend().map_err(|error| error.to_string())?;
+        let backend = platform_backend().ok();
+        let backend = backend.filter(|backend| {
+            backend
+                .status()
+                .map(|status| status.ready)
+                .unwrap_or(false)
+        });
         let added = add_managed_game(
             ManagedAddRequest {
                 app_id: appid,
@@ -3409,7 +3436,7 @@ async fn restore_game_backup() -> Result<Option<serde_json::Value>, String> {
                 provider: ManifestProvider::Api,
                 proton: String::new(),
             },
-            &backend,
+            backend.as_ref().map(|backend| backend as &dyn steamtron_register::RegistrationBackend),
         )
         .map_err(|error| error.to_string())?;
         std::path::PathBuf::from(added.root)
@@ -3533,19 +3560,42 @@ async fn regenerate_managed_manifests(game_id: String) -> Result<serde_json::Val
     let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     let app_id = game.metadata_app_id.ok_or_else(|| "This game has no Steam App ID.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
+        use steamtron_library::managed::{write_managed_lua, write_managed_manifests};
+
         let bundle = steamtron_library::download_bundle(&app_id.to_string()).map_err(|error| error.to_string())?;
-        let backend = platform_backend().map_err(|error| error.to_string())?;
-        backend
-            .register(&steamtron_register::RegistrationRequest {
+        let (lua, lua_path) = write_managed_lua(&game, &bundle.lua).map_err(|error| error.to_string())?;
+        write_managed_manifests(&bundle.manifests).map_err(|error| error.to_string())?;
+        let backend = platform_backend().ok().filter(|backend| {
+            backend
+                .status()
+                .map(|status| status.ready)
+                .unwrap_or(false)
+        });
+        let mut registered = false;
+        let mut warning = None;
+        if let Some(backend) = backend {
+            match backend.register(&steamtron_register::RegistrationRequest {
                 app_id: &app_id.to_string(),
                 title: &game.title,
-                lua: &bundle.lua,
+                lua: &lua,
                 manifests: &bundle.manifests,
-            })
-            .map_err(|error| error.to_string())?;
+            }) {
+                Ok(_) => registered = true,
+                Err(error) => {
+                    warning = Some(format!(
+                        "Local manifests refreshed, but Steam registration failed: {error}"
+                    ));
+                }
+            }
+        } else {
+            warning = Some("Local manifests refreshed. Steam was not detected, so Steam registration was skipped.".into());
+        }
         Ok::<_, String>(serde_json::json!({
             "appid": app_id,
             "manifests": bundle.manifests.len(),
+            "lua": lua_path.display().to_string(),
+            "registered": registered,
+            "warning": warning,
         }))
     })
     .await
@@ -3679,13 +3729,15 @@ async fn verify_managed_files(game_id: String) -> Result<serde_json::Value, Stri
     if !root.is_dir() {
         return Err("The installation folder does not exist.".into());
     }
-    let lua = steam::steam_root()
-        .map_err(|error| error.to_string())?
-        .join("config/stplug-in")
-        .join(format!("{app_id}.lua"));
-    if !lua.is_file() {
-        return Err("The Lua manifest is missing. Re-add the game first.".into());
-    }
+    let lua = steamtron_core::library::managed_lua_path(game)
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            steam::steam_root()
+                .ok()
+                .map(|root| root.join("config/stplug-in").join(format!("{app_id}.lua")))
+                .filter(|path| path.is_file())
+        })
+        .ok_or_else(|| "The Lua manifest is missing. Regenerate manifests or re-add the game first.".to_string())?;
     let cache = steamtron_core::paths::layout().cache_dir().join("smd");
     let smd_lua = download::smd_lua(app_id, &lua, &cache)?;
     let smd = download::resolve_smd()?;
@@ -4506,18 +4558,18 @@ async fn add_managed_game(
     if request.provider == ManifestProvider::Api {
         require_auth()?;
     }
-    let backend = platform_backend().map_err(|error| error.to_string())?;
-    let status = backend.status().map_err(|error| error.to_string())?;
-    if !status.ready {
-        return Err(format!(
-            "Registration backend is not ready: {}. Open Settings → Doctor.",
-            status.details
-        ));
-    }
-    // Manifest download and registration are blocking; keep them off the main
-    // thread so the window stays responsive while the add is in progress.
+    let backend = platform_backend().ok();
+    let backend = backend.filter(|backend| {
+        backend
+            .status()
+            .map(|status| status.ready)
+            .unwrap_or(false)
+    });
+    // Manifest download and optional Steam registration are blocking; keep
+    // them off the main thread so the window stays responsive.
     tauri::async_runtime::spawn_blocking(move || {
-        steamtron_library::managed::add_managed_game(request, &backend)
+        let backend = backend.as_ref().map(|backend| backend as &dyn steamtron_register::RegistrationBackend);
+        steamtron_library::managed::add_managed_game(request, backend)
             .map_err(|error| error.to_string())
     })
     .await
@@ -4594,8 +4646,6 @@ fn main() {
             backend_status,
             export_backup,
             restore_backup,
-            export_library_file,
-            import_library_file,
             game_artwork,
             search_games,
             add_game,

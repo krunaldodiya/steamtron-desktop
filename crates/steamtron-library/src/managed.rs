@@ -4,6 +4,7 @@
 //! platform backend, writes the managed library entry, and reports the exact
 //! registration state so the UI can ask for a Steam restart.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use steamtron_core::library::{
     Artwork, Game, Installation, InstallMode, LaunchMode, LaunchSettings, Library, MetadataSource,
-    RegistrationState, SteamRegistration, game_layout,
+    RegistrationState, SteamRegistration, game_layout, managed_lua_path,
 };
 use steamtron_register::{RegistrationBackend, RegistrationRequest};
 
@@ -578,12 +579,52 @@ pub struct ManagedAdded {
     pub provider: &'static str,
     pub registered: bool,
     pub pending_restart: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
-/// Add one game to the managed library and register it with `backend`.
+/// Normalize and store the game's Lua manifest in the managed folder.
+pub fn write_managed_lua(game: &Game, raw_lua: &str) -> Result<(String, PathBuf), LibraryError> {
+    let appid = game
+        .metadata_app_id
+        .ok_or_else(|| LibraryError::Invalid("this game has no Steam App ID".into()))?;
+    let lua = windows_only_lua(&appid.to_string(), raw_lua)
+        .unwrap_or_else(|_| canonical_lua(raw_lua));
+    let path = managed_lua_path(game)
+        .ok_or_else(|| LibraryError::Invalid("managed game has no Lua path".into()))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
+    }
+    fs::write(&path, lua.as_bytes()).map_err(|error| LibraryError::io(&path, error))?;
+    Ok((lua, path))
+}
+
+/// Store provider depot manifests in SteamTron's Steam-independent store.
+pub fn write_managed_manifests(
+    manifests: &BTreeMap<String, Vec<u8>>,
+) -> Result<(), LibraryError> {
+    if manifests.is_empty() {
+        return Ok(());
+    }
+    let directory = steamtron_core::paths::layout().manifests();
+    fs::create_dir_all(&directory).map_err(|error| LibraryError::io(&directory, error))?;
+    for (name, data) in manifests {
+        let safe = Path::new(name)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("manifest");
+        let path = directory.join(safe);
+        fs::write(&path, data).map_err(|error| LibraryError::io(&path, error))?;
+    }
+    Ok(())
+}
+
+/// Add one game to the managed library. Steam registration is attempted only
+/// when a ready backend is supplied.
 pub fn add_managed_game(
     request: ManagedAddRequest,
-    backend: &dyn RegistrationBackend,
+    backend: Option<&dyn RegistrationBackend>,
 ) -> Result<ManagedAdded, LibraryError> {
     let bundle = fetch_manifest_bundle(&request.app_id.to_string(), request.provider)?;
     add_managed_game_with_bundle(request, bundle, backend)
@@ -593,7 +634,7 @@ pub fn add_managed_game(
 pub fn add_managed_game_with_bundle(
     request: ManagedAddRequest,
     bundle: Bundle,
-    backend: &dyn RegistrationBackend,
+    backend: Option<&dyn RegistrationBackend>,
 ) -> Result<ManagedAdded, LibraryError> {
     add_managed_game_at(request, bundle, backend, &Library::default_path())
 }
@@ -602,7 +643,7 @@ pub fn add_managed_game_with_bundle(
 pub fn add_managed_game_at(
     request: ManagedAddRequest,
     bundle: Bundle,
-    backend: &dyn RegistrationBackend,
+    backend: Option<&dyn RegistrationBackend>,
     library_path: &Path,
 ) -> Result<ManagedAdded, LibraryError> {
     let appid = request.app_id.to_string();
@@ -611,15 +652,12 @@ pub fn add_managed_game_at(
             "drive root must be an absolute path".into(),
         ));
     }
-    let status = backend
-        .status()
-        .map_err(|error| LibraryError::Backend(error.to_string()))?;
-    if !status.ready {
-        return Err(LibraryError::Backend(format!(
-            "registration backend is not ready: {}",
-            status.details
-        )));
-    }
+    let backend = backend.filter(|backend| {
+        backend
+            .status()
+            .map(|status| status.ready)
+            .unwrap_or(false)
+    });
     let mut library = Library::open(library_path)
         .map_err(|error| LibraryError::Invalid(error.to_string()))?;
     if library.game(&appid).is_some() || library.game_by_app_id(request.app_id).is_some() {
@@ -670,6 +708,7 @@ pub fn add_managed_game_at(
         },
         steam: None,
         launch: LaunchSettings {
+            prefix_mode: library.settings().default_prefix_mode.clone(),
             proton: request.proton.clone(),
             ..LaunchSettings::default()
         },
@@ -688,35 +727,75 @@ pub fn add_managed_game_at(
     // registration, so the provider Lua is kept unchanged in that case.
     let lua = windows_only_lua(&appid, &bundle.lua)
         .unwrap_or_else(|_| canonical_lua(&bundle.lua));
-    let registration = backend
-        .register(&RegistrationRequest {
+    let local_lua = managed_lua_path(&game)
+        .ok_or_else(|| LibraryError::Invalid("managed game has no Lua path".into()))?;
+    if let Some(parent) = local_lua.parent() {
+        fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
+    }
+    fs::write(&local_lua, lua.as_bytes()).map_err(|error| LibraryError::io(&local_lua, error))?;
+    let manifest_dir = steamtron_core::paths::layout().manifests();
+    fs::create_dir_all(&manifest_dir).map_err(|error| LibraryError::io(&manifest_dir, error))?;
+    for (name, data) in &bundle.manifests {
+        let safe = Path::new(name)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("manifest");
+        let path = manifest_dir.join(safe);
+        fs::write(&path, data).map_err(|error| LibraryError::io(&path, error))?;
+    }
+
+    let mut registered = false;
+    let mut pending_restart = false;
+    let mut backend_id = String::new();
+    let mut lua_result = local_lua.display().to_string();
+    let mut warning = None;
+    if let Some(backend) = backend {
+        match backend.register(&RegistrationRequest {
             app_id: &appid,
             title: &game.title,
             lua: &lua,
             manifests: &bundle.manifests,
-        })
-        .map_err(|error| LibraryError::Backend(error.to_string()))?;
-    let state = backend
-        .verify(&appid)
-        .map_err(|error| LibraryError::Backend(error.to_string()))?;
-    if !state.registered {
-        return Err(LibraryError::Backend(format!(
-            "{} did not keep the registration for App {appid}",
-            backend.id()
-        )));
+        }) {
+            Ok(registration) => match backend.verify(&appid) {
+                Ok(state) if state.registered => {
+                    game.steam = Some(SteamRegistration {
+                        app_id: request.app_id,
+                        registered: true,
+                        backend: backend.id().to_owned(),
+                        state: RegistrationState::PendingRestart,
+                        registered_at: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|elapsed| elapsed.as_secs())
+                            .unwrap_or(0),
+                        launch_mode: LaunchMode::Emulator,
+                    });
+                    registered = true;
+                    pending_restart = true;
+                    backend_id = registration.backend;
+                    lua_result = registration.lua_path.display().to_string();
+                }
+                Ok(_) => {
+                    warning = Some(
+                        "Steam did not keep the registration; added to the SteamTron library only."
+                            .into(),
+                    );
+                }
+                Err(error) => {
+                    warning = Some(format!(
+                        "Steam registration could not be verified; added to the SteamTron library only: {error}"
+                    ));
+                }
+            },
+            Err(error) => {
+                warning = Some(format!(
+                    "Steam registration failed; added to the SteamTron library only: {error}"
+                ));
+            }
+        }
+    } else {
+        warning = Some("Steam was not detected; added to the SteamTron library only.".into());
     }
-
-    game.steam = Some(SteamRegistration {
-        app_id: request.app_id,
-        registered: true,
-        backend: backend.id().to_owned(),
-        state: RegistrationState::PendingRestart,
-        registered_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_secs())
-            .unwrap_or(0),
-        launch_mode: LaunchMode::Emulator,
-    });
 
     library
         .upsert_game(game.clone())
@@ -733,11 +812,12 @@ pub fn add_managed_game_at(
         prefix: layout.prefix.display().to_string(),
         manifest: layout.manifest.display().to_string(),
         fixes: layout.fixes.display().to_string(),
-        lua: registration.lua_path.display().to_string(),
-        backend: registration.backend,
+        lua: lua_result,
+        backend: backend_id,
         provider: request.provider.id(),
-        registered: state.registered,
-        pending_restart: true,
+        registered,
+        pending_restart,
+        warning,
     })
 }
 
@@ -829,7 +909,7 @@ mod tests {
                 proton: String::new(),
             },
             bundle,
-            &backend,
+            Some(&backend),
             &library_path,
         )
         .unwrap();
@@ -853,7 +933,7 @@ mod tests {
                 proton: String::new(),
             },
             sample_bundle("42"),
-            &backend,
+            Some(&backend),
             &library_path,
         );
         assert!(duplicate.is_err());
@@ -880,7 +960,7 @@ mod tests {
                 proton: String::new(),
             },
             sample_bundle("42"),
-            &backend,
+            Some(&backend),
             &library_path,
         )
         .unwrap();
@@ -938,7 +1018,7 @@ mod tests {
                 proton: String::new(),
             },
             sample_bundle("42"),
-            &backend,
+            Some(&backend),
             &library_path,
         )
         .unwrap();
@@ -1020,7 +1100,7 @@ mod tests {
                 provider: ManifestProvider::SteamMl,
             },
             sample_bundle("42"),
-            &backend,
+            Some(&backend),
             &library_path,
         )
         .unwrap();
@@ -1078,7 +1158,7 @@ mod tests {
                 proton: String::new(),
             },
             sample_bundle("42"),
-            &backend,
+            Some(&backend),
             &library_path,
         )
         .unwrap();
@@ -1097,6 +1177,33 @@ mod tests {
     }
 
     #[test]
+    fn adds_without_a_steam_backend_and_writes_local_lua() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let report = add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 42,
+                title: "Sample Game".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                provider: ManifestProvider::SteamMl,
+                proton: String::new(),
+            },
+            sample_bundle("42"),
+            None,
+            &library_path,
+        )
+        .unwrap();
+        assert!(!report.registered);
+        assert!(!report.pending_restart);
+        assert!(report.warning.is_some());
+        assert!(Path::new(&report.lua).is_file());
+        let game = Library::open(&library_path).unwrap().game("42").unwrap().clone();
+        assert!(game.steam.is_none());
+        assert_eq!(game.launch.prefix_mode, "umu");
+    }
+
+    #[test]
     fn rejects_a_bundle_for_another_app() {
         let temp = tempfile::tempdir().unwrap();
         let backend = MemoryBackend {
@@ -1112,7 +1219,7 @@ mod tests {
                 proton: String::new(),
             },
             sample_bundle("99"),
-            &backend,
+            Some(&backend),
             &temp.path().join("library.json"),
         )
         .unwrap_err();
