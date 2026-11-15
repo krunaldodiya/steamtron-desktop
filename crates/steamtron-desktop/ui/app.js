@@ -1104,6 +1104,7 @@ function openDownloadManager(game) {
   const totalNode = backdrop.querySelector("#download-manager-total");
   const speedNode = backdrop.querySelector("#download-manager-speed");
   const etaNode = backdrop.querySelector("#download-manager-eta");
+  const elapsedNode = backdrop.querySelector("#download-manager-elapsed");
   const nextSection = backdrop.querySelector("#download-manager-next");
   const nextCount = backdrop.querySelector("#download-manager-next-count");
   const depotList = backdrop.querySelector("#download-manager-depots-list");

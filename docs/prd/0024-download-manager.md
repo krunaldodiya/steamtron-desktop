@@ -86,10 +86,12 @@ button, and a cancelled download removes its partial files.
   group; cancel terminates a paused process; a non-terminal state without a
   process, or with a dead PID, becomes `error`.
 - JSDOM download-manager harness passed: Downloading opened the large manager,
-  progress/average speed/ETA/depot progress rendered, the content-group list
-  rendered, Pause/Resume icon controls invoked their commands, closing kept the
+  progress/average speed/ETA/time spent/depot progress rendered with six stat
+  cells, Pause/Resume icon controls invoked their commands, closing kept the
   download, and Cancel showed the cancelled state before the top-right close
   restored the Download button.
+- Fixed the Time spent render crash by declaring the elapsed-stat node; the
+  harness now asserts six stats and `1m 5s`.
 - Rust test `status_reports_a_live_download_with_no_recent_output_as_stalled`
   passed: a live process with 30s of no output reports 29+ stalled seconds.
 - Existing navigation suites still pass.
