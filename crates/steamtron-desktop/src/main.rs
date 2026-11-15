@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 mod artwork;
 mod download;
@@ -3045,15 +3046,32 @@ async fn store_get(path: &str, query: &[(&str, String)]) -> Result<serde_json::V
         return Err("Sign in to browse the Store.".into());
     }
     let base = steamtron_auth::api_base();
-    let response = store_client()
-        .get(format!("{base}{path}"))
-        .query(query)
-        .bearer_auth(token)
-        .header("Accept", "application/json")
-        .header("User-Agent", "steamtron-desktop")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
+    let request = |client: &reqwest::Client| {
+        client
+            .get(format!("{base}{path}"))
+            .query(query)
+            .bearer_auth(&token)
+            .header("Accept", "application/json")
+            .header("User-Agent", "steamtron-desktop")
+            .send()
+    };
+    let response = match request(store_client()).await {
+        Ok(response) => response,
+        Err(_) => {
+            // A pooled connection can go stale while the window sits idle. Retry
+            // once with a fresh client so Store search does not fail permanently
+            // until the app restarts.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .connect_timeout(std::time::Duration::from_secs(8))
+                .build()
+                .map_err(|error| format!("Could not create the Store client: {error}"))?;
+            request(&client)
+                .await
+                .map_err(|error| format!("Could not reach the Store. Check your connection and retry. ({error})"))?
+        }
+    };
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Err("The Store rejected this session. Sign in again.".into());
@@ -3318,6 +3336,111 @@ fn emit_operation_at(app: &tauri::AppHandle, operation: &str, game_id: &str, sta
     }));
 }
 
+#[derive(Clone)]
+struct OperationControl {
+    paused: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
+    pid: Arc<Mutex<Option<u32>>>,
+}
+
+fn operation_controls() -> &'static Mutex<HashMap<String, OperationControl>> {
+    static CONTROLS: OnceLock<Mutex<HashMap<String, OperationControl>>> = OnceLock::new();
+    CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn operation_key(operation: &str, game_id: &str) -> String {
+    format!("{operation}:{game_id}")
+}
+
+fn register_operation(operation: &str, game_id: &str) -> OperationControl {
+    let control = OperationControl {
+        paused: Arc::new(AtomicBool::new(false)),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        pid: Arc::new(Mutex::new(None)),
+    };
+    if let Ok(mut controls) = operation_controls().lock() {
+        controls.insert(operation_key(operation, game_id), control.clone());
+    }
+    control
+}
+
+fn unregister_operation(operation: &str, game_id: &str) {
+    if let Ok(mut controls) = operation_controls().lock() {
+        controls.remove(&operation_key(operation, game_id));
+    }
+}
+
+fn operation_check(control: &OperationControl) -> Result<(), String> {
+    loop {
+        if control.cancelled.load(Ordering::SeqCst) {
+            return Err("Operation cancelled".into());
+        }
+        if !control.paused.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    }
+}
+
+#[tauri::command]
+fn pause_operation(app: tauri::AppHandle, operation: String, game_id: String) -> Result<(), String> {
+    let control = operation_controls()
+        .lock()
+        .map_err(|_| "operation state lock failed".to_string())?
+        .get(&operation_key(&operation, &game_id))
+        .cloned()
+        .ok_or_else(|| "this operation is not running".to_string())?;
+    control.paused.store(true, Ordering::SeqCst);
+    if let Some(pid) = *control.pid.lock().map_err(|_| "operation PID lock failed".to_string())? {
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("kill").args(["-STOP", &format!("-{pid}")]).status();
+        }
+    }
+    emit_operation(&app, &operation, &game_id, "paused", "paused", "Paused");
+    Ok(())
+}
+
+#[tauri::command]
+fn resume_operation(app: tauri::AppHandle, operation: String, game_id: String) -> Result<(), String> {
+    let control = operation_controls()
+        .lock()
+        .map_err(|_| "operation state lock failed".to_string())?
+        .get(&operation_key(&operation, &game_id))
+        .cloned()
+        .ok_or_else(|| "this operation is not running".to_string())?;
+    control.paused.store(false, Ordering::SeqCst);
+    if let Some(pid) = *control.pid.lock().map_err(|_| "operation PID lock failed".to_string())? {
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("kill").args(["-CONT", &format!("-{pid}")]).status();
+        }
+    }
+    emit_operation(&app, &operation, &game_id, "running", "running", "Resuming…");
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_operation(app: tauri::AppHandle, operation: String, game_id: String) -> Result<(), String> {
+    let control = operation_controls()
+        .lock()
+        .map_err(|_| "operation state lock failed".to_string())?
+        .get(&operation_key(&operation, &game_id))
+        .cloned()
+        .ok_or_else(|| "this operation is not running".to_string())?;
+    control.cancelled.store(true, Ordering::SeqCst);
+    control.paused.store(false, Ordering::SeqCst);
+    if let Some(pid) = *control.pid.lock().map_err(|_| "operation PID lock failed".to_string())? {
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("kill").args(["-CONT", &format!("-{pid}")]).status();
+            let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+        }
+    }
+    emit_operation(&app, &operation, &game_id, "cancelled", "cancelled", "Cancelled");
+    Ok(())
+}
+
 fn collect_backup_entries(
     root: &Path,
     directory: &Path,
@@ -3367,6 +3490,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
     }
     let root = game.installation.root.clone();
     let destination = path.clone();
+    let destination_cleanup = destination.clone();
     emit_operation(&app, "backup", &game_id, "prepare", "running", "Collecting game files…");
     let metadata = serde_json::json!({
         "format": 1,
@@ -3377,7 +3501,8 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
     });
     let emit_app = app.clone();
     let emit_game = game_id.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let control = register_operation("backup", &game_id);
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let mut directories = Vec::new();
         let mut files = Vec::new();
         let mut total_bytes = 0u64;
@@ -3393,6 +3518,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
         header.set_cksum();
         archive.append_data(&mut header, ".steamtron-backup.json", payload.as_slice()).map_err(|error| error.to_string())?;
         for relative in &directories {
+            operation_check(&control)?;
             let mut header = tar::Header::new_gnu();
             header.set_entry_type(tar::EntryType::Directory);
             header.set_size(0);
@@ -3403,6 +3529,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
         let mut written = 0u64;
         let mut last_emit = std::time::Instant::now();
         for (relative, size) in &files {
+            operation_check(&control)?;
             let source = root.join(relative);
             let mut input = std::fs::File::open(&source).map_err(|error| format!("{}: {error}", source.display()))?;
             archive.append_file(relative, &mut input).map_err(|error| format!("{}: {error}", source.display()))?;
@@ -3414,11 +3541,17 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
             }
         }
         archive.finish().map_err(|error| error.to_string())?;
+        operation_check(&control)?;
         emit_operation_at(&emit_app, "backup", &emit_game, "write", "running", "Finalizing backup…", 100.0);
         Ok::<_, String>(())
     })
-    .await
-    .map_err(|error| format!("backup task failed: {error}"))??;
+    .await;
+    unregister_operation("backup", &game_id);
+    if let Err(error) = &result {
+        let _ = std::fs::remove_file(&destination_cleanup);
+        return Err(format!("backup task failed: {error}"));
+    }
+    result.map_err(|error| format!("backup task failed: {error}"))??;
     emit_operation_at(&app, "backup", &game_id, "done", "done", "Backup complete", 100.0);
     Ok(Some(serde_json::json!({ "path": path.display().to_string() })))
 }
@@ -3504,14 +3637,16 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let extract_root = target_root.clone();
     let restore_path = path.clone();
     let emit_app = app.clone();
+    let control = register_operation("restore", "");
     emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files…", 0.0);
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let file = std::fs::File::open(&restore_path).map_err(|error| error.to_string())?;
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
         let mut written = 0u64;
         let mut last_emit = std::time::Instant::now();
         for entry in archive.entries().map_err(|error| error.to_string())? {
+            operation_check(&control)?;
             let mut entry = entry.map_err(|error| error.to_string())?;
             let entry_path = entry.path().map_err(|error| error.to_string())?.into_owned();
             if entry_path == std::path::Path::new(".steamtron-backup.json") {
@@ -3540,8 +3675,10 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         }
         Ok(())
     })
-    .await
-    .map_err(|error| format!("restore task failed: {error}"))??;
+    .await;
+    unregister_operation("restore", "");
+    result
+        .map_err(|error| format!("restore task failed: {error}"))??;
     emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files…", 100.0);
     emit_operation_at(&app, "restore", "", "register", "running", "Finalizing library entry…", 100.0);
     let library = Library::load().map_err(|error| error.to_string())?;
@@ -3834,12 +3971,19 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
     emit_operation_at(&app, "verify", &game_id, "check", "running", "Checking files against depot manifests…", 0.0);
     let emit_app = app.clone();
     let emit_game = game_id.clone();
+    let control = register_operation("verify", &game_id);
     let result = tauri::async_runtime::spawn_blocking(move || {
         use std::io::{BufRead, BufReader, Write};
         let smd = download::resolve_smd()?;
         let stderr_log = log.with_extension("stderr.log");
         let stderr = std::fs::File::create(&stderr_log).map_err(|error| error.to_string())?;
-        let mut child = std::process::Command::new(&smd)
+        let mut command = std::process::Command::new(&smd);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
             .arg("--data-dir")
             .arg(cache.join("data"))
             .arg("download")
@@ -3850,6 +3994,9 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
             .stderr(std::process::Stdio::from(stderr))
             .spawn()
             .map_err(|error| format!("could not start smd: {error}"))?;
+        if let Ok(mut pid) = control.pid.lock() {
+            *pid = Some(child.id());
+        }
         let stdout = child.stdout.take().ok_or("smd stdout unavailable")?;
         let mut file = std::fs::File::create(&log).map_err(|error| error.to_string())?;
         let mut reader = BufReader::new(stdout);
@@ -3858,7 +4005,9 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
         let mut depots_done = 0u32;
         let mut file_percent = 0.0f64;
         let mut last_emit = std::time::Instant::now();
-        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+        while control.cancelled.load(Ordering::SeqCst) == false
+            && reader.read_line(&mut line).unwrap_or(0) > 0
+        {
             let _ = write!(file, "{line}");
             let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else { line.clear(); continue };
             if let Some(depots) = value.get("depots").and_then(|depots| depots.as_array()) {
@@ -3895,11 +4044,12 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
         }
         Ok::<_, String>(log)
     })
-    .await
-    .map_err(|error| format!("verification task failed: {error}"))??;
+    .await;
+    unregister_operation("verify", &game_id);
+    let log_path = result
+        .map_err(|error| format!("verification task failed: {error}"))??;
     emit_operation_at(&app, "verify", &game_id, "done", "done", "Verification complete", 100.0);
-    emit_operation(&app, "verify", &game_id, "done", "done", "Verification complete");
-    Ok(serde_json::json!({ "verified": true, "log": result.display().to_string() }))
+    Ok(serde_json::json!({ "verified": true, "log": log_path.display().to_string() }))
 }
 
 #[tauri::command]
@@ -4856,6 +5006,9 @@ fn main() {
             export_managed_saves,
             import_managed_saves,
             uninstall_managed_game,
+            pause_operation,
+            resume_operation,
+            cancel_operation,
             regenerate_managed_manifests,
             steam_download_size,
             remove_managed_game,

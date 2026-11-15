@@ -1272,6 +1272,13 @@ function setOperationInline(operation, gameId, message, status, percent) {
       if (text) text.textContent = `100% · ${message || "Complete"}`;
       operationInlineTimers.set(node, setTimeout(() => node.classList.add("hidden"), 3500));
       setOperationButton(operation, false);
+    } else if (status === "cancelled") {
+      if (text) text.textContent = message || "Cancelled";
+      operationInlineTimers.set(node, setTimeout(() => node.classList.add("hidden"), 3500));
+      setOperationButton(operation, false);
+    } else if (status === "paused") {
+      if (text) text.textContent = message || "Paused";
+      setOperationButton(operation, true);
     } else if (status === "error") {
       node.classList.add("error");
       if (text) text.textContent = message || "Failed";
@@ -1327,19 +1334,29 @@ function openOperationManager(options = {}) {
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal download-modal operation-modal" id="operation-manager"><div class="modal-head"><h2>${escape(title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <p class="download-stage" id="operation-stage">Starting…</p>
-    <div class="download-progress-row"><div class="download-bar operation-bar"><span></span></div><strong class="operation-percent" id="operation-percent">0%</strong></div>
+    <div class="download-progress-row"><div class="download-bar operation-bar"><span></span></div><strong class="operation-percent" id="operation-percent">0%</strong>
+      <div class="download-actions-inline" id="operation-actions">
+        <button class="game-icon-button" id="operation-pause" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
+        <button class="game-icon-button download-cancel-icon" id="operation-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+      </div>
+    </div>
     </div>`;
   document.body.appendChild(backdrop);
   registerDialog(backdrop, { title });
   const stage = backdrop.querySelector("#operation-stage");
   const fill = backdrop.querySelector(".operation-bar span");
   const percentNode = backdrop.querySelector("#operation-percent");
+  const pauseButton = backdrop.querySelector("#operation-pause");
+  const cancelButton = backdrop.querySelector("#operation-cancel");
+  const actions = backdrop.querySelector("#operation-actions");
   const closeButton = backdrop.querySelector(".modal-close");
   let unlisten = null;
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   let closed = false;
   let terminal = false;
+  let paused = false;
+  let cancelled = false;
   let currentPercent = 0;
   const close = () => {
     if (closed) return;
@@ -1368,13 +1385,34 @@ function openOperationManager(options = {}) {
     fill.style.width = `${currentPercent}%`;
     percentNode.textContent = `${currentPercent.toFixed(0)}%`;
   };
+  const setPaused = (value) => {
+    paused = value;
+    pauseButton.innerHTML = paused
+      ? '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg>'
+      : '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg>';
+    pauseButton.title = paused ? "Resume" : "Pause";
+    pauseButton.setAttribute("aria-label", pauseButton.title);
+  };
   const apply = (payload) => {
     if (!payload || payload.operation !== operation) return;
     if (payload.gameId && options.gameId && payload.gameId !== options.gameId) return;
-    stage.textContent = payload.message || "Working…";
-    stage.classList.toggle("error", payload.status === "error");
-    setPercent(payload.percent);
-    if (payload.status === "done") complete(payload.message);
+    if (payload.status === "cancelled") {
+      cancelled = true;
+      terminal = true;
+      stage.textContent = payload.message || "Cancelled";
+      actions.classList.add("hidden");
+    } else if (payload.status === "paused") {
+      setPaused(true);
+      stage.textContent = payload.message || "Paused";
+      actions.classList.remove("hidden");
+    } else {
+      if (payload.status === "running") setPaused(false);
+      stage.textContent = payload.message || "Working…";
+      stage.classList.toggle("error", payload.status === "error");
+      setPercent(payload.percent);
+      if (payload.status === "done") complete(payload.message);
+    }
+    if (terminal) actions.classList.add("hidden");
   };
   const complete = (message) => {
     if (closed) return;
@@ -1382,6 +1420,7 @@ function openOperationManager(options = {}) {
     setPercent(100);
     stage.textContent = message || "Complete";
     stage.classList.remove("error");
+    actions.classList.add("hidden");
     if (backdrop.classList.contains("hidden")) close();
   };
   const fail = (message) => {
@@ -1389,9 +1428,34 @@ function openOperationManager(options = {}) {
     terminal = true;
     stage.textContent = String(message);
     stage.classList.add("error");
+    actions.classList.add("hidden");
     if (backdrop.classList.contains("hidden")) close();
   };
   closeButton.onclick = close;
+  pauseButton.onclick = async () => {
+    try {
+      await invoke(paused ? "resume_operation" : "pause_operation", { operation, gameId: options.gameId || "" });
+      setPaused(!paused);
+      stage.textContent = paused ? "Paused" : "Resuming…";
+    } catch (error) { showToast(String(error), true); }
+  };
+  cancelButton.onclick = async () => {
+    if (!(await confirmDialog({
+      title: "Cancel operation",
+      message: `Cancel ${operation}? This cannot be undone.`,
+      confirmLabel: "Cancel operation",
+      cancelLabel: "Keep running",
+      danger: true,
+    }))) return;
+    try {
+      await invoke("cancel_operation", { operation, gameId: options.gameId || "" });
+      cancelled = true;
+      terminal = true;
+      stage.textContent = "Cancelled";
+      actions.classList.add("hidden");
+      setOperationInline(operation, options.gameId || "", "Cancelled", "cancelled", currentPercent);
+    } catch (error) { showToast(String(error), true); }
+  };
   setPercent(0);
   if (window.__TAURI__?.event?.listen) {
     void window.__TAURI__.event.listen("operation-progress", (event) => apply(event.payload || {})).then((stop) => {
@@ -1402,7 +1466,7 @@ function openOperationManager(options = {}) {
   } else {
     resolveReady();
   }
-  return { close, complete, fail, ready, show, isTerminal: () => terminal };
+  return { close, complete, fail, ready, show, isTerminal: () => terminal, isCancelled: () => cancelled };
 }
 
 function applyDownloadEvent(state) {
@@ -1933,7 +1997,11 @@ function openManagedGameOptions(game) {
             finishOperation("backup", game.id, `Backup written to ${result.path}`);
             operation.complete(`Backup written to ${result.path}`);
             showToast(`Backup written to ${result.path}`);
-          } catch (error) { failOperation("backup", game.id, String(error)); operation.fail(String(error)); }
+          } catch (error) {
+            if (operation.isCancelled()) return;
+            failOperation("backup", game.id, String(error));
+            operation.fail(String(error));
+          }
         };
         pane.querySelector("#files-verify").onclick = async () => {
           const operation = ensureOperationManager("verify", game.id, {
@@ -1955,6 +2023,7 @@ function openManagedGameOptions(game) {
             const next = await invoke("managed_game_size", { gameId: game.id }).catch(() => size);
             pane.querySelector(".files-size-card strong").textContent = `Size of installation: ${formatBytes(next)} (${name})`;
           } catch (error) {
+            if (operation.isCancelled()) return;
             failOperation("verify", game.id, String(error));
             operation.fail(String(error));
             status.textContent = String(error);
@@ -4556,7 +4625,11 @@ async function renderStorageSettings(host) {
       await load();
       await renderSettingsPage();
       showToast(`Restored ${result.title || "game"} to ${result.root}`);
-    } catch (error) { failOperation("restore", "", String(error)); operation.fail(String(error)); }
+    } catch (error) {
+      if (operation.isCancelled()) return;
+      failOperation("restore", "", String(error));
+      operation.fail(String(error));
+    }
   };
   host.querySelector("#setting-refresh-drives").onclick = () => { void renderSettingsPage(); };
   host.querySelector("#setting-add-drive").onclick = () => { void showAddDriveDialog(); };
