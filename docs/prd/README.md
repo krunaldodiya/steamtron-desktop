@@ -54,3 +54,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0027](0027-background-downloads.md) | Downloads continue after SteamTron exits | done | 2026-11-15 |
 | [0028](0028-smd-manifest-fallback.md) | SMD manifest fallback completes in verbose mode | done | 2026-11-15 |
 | [0029](0029-ddm-engine.md) | Use DepotDownloaderMod instead of SMD native engine | done | 2026-11-15 |
+| [0030](0030-operation-manager.md) | Shared operation manager for backup, restore, and verification | active | 2026-11-15 |

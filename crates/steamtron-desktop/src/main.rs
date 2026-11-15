@@ -3296,8 +3296,18 @@ fn copy_tree(source: &std::path::Path, destination: &std::path::Path) -> Result<
     Ok(())
 }
 
+fn emit_operation(app: &tauri::AppHandle, operation: &str, game_id: &str, stage: &str, status: &str, message: &str) {
+    let _ = app.emit("operation-progress", serde_json::json!({
+        "operation": operation,
+        "gameId": game_id,
+        "stage": stage,
+        "status": status,
+        "message": message,
+    }));
+}
+
 #[tauri::command]
-async fn backup_managed_game(game_id: String) -> Result<Option<serde_json::Value>, String> {
+async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::Library;
 
     require_auth()?;
@@ -3319,6 +3329,7 @@ async fn backup_managed_game(game_id: String) -> Result<Option<serde_json::Value
     }
     let root = game.installation.root.clone();
     let destination = path.clone();
+    emit_operation(&app, "backup", &game_id, "prepare", "running", "Collecting game files…");
     let metadata = serde_json::json!({
         "format": 1,
         "game_id": game.id,
@@ -3326,7 +3337,10 @@ async fn backup_managed_game(game_id: String) -> Result<Option<serde_json::Value
         "appid": game.metadata_app_id,
         "created_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0),
     });
+    let emit_app = app.clone();
+    let emit_game = game_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        emit_operation(&emit_app, "backup", &emit_game, "write", "running", "Writing backup archive…");
         let file = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
         let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
         let mut archive = tar::Builder::new(encoder);
@@ -3342,6 +3356,7 @@ async fn backup_managed_game(game_id: String) -> Result<Option<serde_json::Value
     })
     .await
     .map_err(|error| format!("backup task failed: {error}"))??;
+    emit_operation(&app, "backup", &game_id, "done", "done", "Backup complete");
     Ok(Some(serde_json::json!({ "path": path.display().to_string() })))
 }
 
@@ -3356,7 +3371,7 @@ struct BackupMetadata {
 }
 
 #[tauri::command]
-async fn restore_game_backup() -> Result<Option<serde_json::Value>, String> {
+async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::Library;
     use steamtron_library::managed::{add_managed_game, ManagedAddRequest, ManifestProvider};
 
@@ -3368,6 +3383,7 @@ async fn restore_game_backup() -> Result<Option<serde_json::Value>, String> {
     else {
         return Ok(None);
     };
+    emit_operation(&app, "restore", "", "read", "running", "Reading backup metadata…");
     let archive_path = path.clone();
     let metadata = tauri::async_runtime::spawn_blocking(move || -> Result<BackupMetadata, String> {
         let file = std::fs::File::open(&archive_path).map_err(|error| error.to_string())?;
@@ -3420,6 +3436,7 @@ async fn restore_game_backup() -> Result<Option<serde_json::Value>, String> {
     std::fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
     let extract_root = target_root.clone();
     let restore_path = path.clone();
+    emit_operation(&app, "restore", "", "extract", "running", "Extracting game files…");
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let file = std::fs::File::open(&restore_path).map_err(|error| error.to_string())?;
         let decoder = flate2::read::GzDecoder::new(file);
@@ -3449,7 +3466,9 @@ async fn restore_game_backup() -> Result<Option<serde_json::Value>, String> {
     })
     .await
     .map_err(|error| format!("restore task failed: {error}"))??;
+    emit_operation(&app, "restore", "", "register", "running", "Finalizing library entry…");
     let library = Library::load().map_err(|error| error.to_string())?;
+    emit_operation(&app, "restore", "", "done", "done", "Restore complete");
     Ok(Some(serde_json::json!({
         "title": metadata.title,
         "root": target_root.display().to_string(),
@@ -3706,7 +3725,7 @@ fn save_folders(game: &steamtron_core::library::Game) -> Option<Vec<(String, std
 }
 
 #[tauri::command]
-async fn verify_managed_files(game_id: String) -> Result<serde_json::Value, String> {
+async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
     require_auth()?;
@@ -3735,7 +3754,11 @@ async fn verify_managed_files(game_id: String) -> Result<serde_json::Value, Stri
     let logs = steamtron_core::paths::layout().diagnostics_for(&game_id);
     std::fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
     let log = logs.join(format!("verify-{}.log", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0)));
+    emit_operation(&app, "verify", &game_id, "check", "running", "Checking files against depot manifests…");
+    let emit_app = app.clone();
+    let emit_game = game_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        emit_operation(&emit_app, "verify", &emit_game, "repair", "running", "Repairing missing or damaged files…");
         let smd = download::resolve_smd()?;
         let output = std::process::Command::new(&smd)
             .arg("--data-dir")
@@ -3756,6 +3779,7 @@ async fn verify_managed_files(game_id: String) -> Result<serde_json::Value, Stri
     })
     .await
     .map_err(|error| format!("verification task failed: {error}"))??;
+    emit_operation(&app, "verify", &game_id, "done", "done", "Verification complete");
     Ok(serde_json::json!({ "verified": true, "log": result.display().to_string() }))
 }
 

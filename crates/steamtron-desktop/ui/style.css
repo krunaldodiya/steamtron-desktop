@@ -649,7 +649,7 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-inline-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:7px; color:var(--muted); font-size:12px; }
 .download-inline-meta button { padding:5px 10px; font-size:11px; }
 .download-drive-modal #download-drive-select { width:100%; margin:14px 0 10px; }
-.download-modal { width:min(1100px, 94vw); max-height:86vh; }
+.download-modal { width:min(1100px, 94vw); height:min(760px, 88vh); display:flex; flex-direction:column; }
 .download-stage { margin:10px 0 0; color:var(--text); font-size:15px; font-weight:600; }
 .download-stage.error { color:var(--error); }
 .download-stage.warning { color:var(--warning); }
@@ -658,11 +658,12 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-progress-row { display:flex; align-items:center; gap:8px; margin:10px 0 16px; }
 .download-progress-row .download-bar { flex:1; margin:0; }
 .download-actions-inline { display:flex; align-items:center; gap:6px; flex:none; }
-.download-next { margin:4px 0 0; }
+.download-next { margin:4px 0 0; display:flex; flex-direction:column; min-height:0; }
+.download-modal > .download-next { flex:1; }
 .download-next-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .download-next-head h3 { margin:0; font-size:15px; }
 .download-next-head span { color:var(--muted); font-size:12px; }
-.download-next-list { display:grid; gap:7px; max-height:min(260px, 30vh); overflow:auto; padding-right:4px; }
+.download-next-list { display:grid; gap:7px; max-height:none; overflow:auto; padding-right:4px; }
 .download-depot-row { padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); }
 .download-depot-row.done { opacity:.72; }
 .download-depot-head { display:flex; justify-content:space-between; gap:10px; margin-bottom:5px; font-size:12px; }
@@ -677,5 +678,13 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-stat span { display:block; margin-bottom:4px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
 .download-stat strong { display:block; color:var(--text); font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .download-meta { margin:0 0 2px; color:var(--muted); font-size:12px; min-height:16px; }
+.operation-modal { width:min(1100px, 94vw); height:min(760px, 88vh); display:flex; flex-direction:column; }
+.operation-modal .download-next-list { max-height:none; flex:1; }
+.operation-bar.indeterminate span { width:35%; animation:operation-progress 1.2s ease-in-out infinite; }
+.operation-bar:not(.indeterminate) span { animation:none; }
+@keyframes operation-progress {
+  0% { transform:translateX(-100%); }
+  100% { transform:translateX(290%); }
+}
 .download-drive-meta { color:var(--muted); font-size:12px; margin:4px 0 14px; }
 .download-drive-meta.error { color:#ff9b9b; }

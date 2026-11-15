@@ -1236,6 +1236,134 @@ function openDownloadManager(game) {
 }
 
 
+const OPERATION_STEPS = {
+  backup: [
+    ["prepare", "Collect game files"],
+    ["write", "Write backup archive"],
+    ["done", "Finish"],
+  ],
+  restore: [
+    ["read", "Read backup metadata"],
+    ["extract", "Extract game files"],
+    ["register", "Finalize library entry"],
+    ["done", "Finish"],
+  ],
+  verify: [
+    ["check", "Check files against manifests"],
+    ["repair", "Repair missing or damaged files"],
+    ["done", "Finish"],
+  ],
+};
+
+function openOperationManager(options = {}) {
+  const operation = options.operation || "operation";
+  const title = options.title || "Working";
+  const gameName = options.gameName || "";
+  const steps = OPERATION_STEPS[operation] || [["run", "Working"], ["done", "Finish"]];
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `<div class="modal download-modal operation-modal" id="operation-manager"><div class="modal-head"><h2>${escape(title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
+    <p class="download-stage" id="operation-stage">Starting…</p>
+    <div class="download-progress-row"><div class="download-bar operation-bar indeterminate"><span></span></div></div>
+    <div class="download-stats operation-stats">
+      <div class="download-stat"><span>Operation</span><strong>${escape(operation[0].toUpperCase() + operation.slice(1))}</strong></div>
+      <div class="download-stat"><span>Game</span><strong>${escape(gameName || "—")}</strong></div>
+      <div class="download-stat"><span>Elapsed</span><strong id="operation-elapsed">0s</strong></div>
+      <div class="download-stat"><span>Status</span><strong id="operation-status">Running</strong></div>
+    </div>
+    <div class="download-next-head"><h3>Steps</h3><span id="operation-step-count"></span></div>
+    <div class="download-next-list" id="operation-steps-list"></div>
+    </div>`;
+  document.body.appendChild(backdrop);
+  registerDialog(backdrop, { title });
+  const stage = backdrop.querySelector("#operation-stage");
+  const bar = backdrop.querySelector(".operation-bar");
+  const elapsedNode = backdrop.querySelector("#operation-elapsed");
+  const statusNode = backdrop.querySelector("#operation-status");
+  const list = backdrop.querySelector("#operation-steps-list");
+  const count = backdrop.querySelector("#operation-step-count");
+  const closeButton = backdrop.querySelector(".modal-close");
+  let started = Date.now();
+  let timer = setInterval(() => {
+    elapsedNode.textContent = `${Math.floor((Date.now() - started) / 1000)}s`;
+  }, 1000);
+  let unlisten = null;
+  let resolveReady;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+  let closed = false;
+  let currentStage = "";
+  const renderSteps = (activeKey, done = false, error = false) => {
+    const activeIndex = steps.findIndex(([key]) => key === activeKey);
+    list.innerHTML = steps.map(([key, label], index) => {
+      const isDone = done || (activeIndex >= 0 && index < activeIndex);
+      const isActive = !done && !error && index === activeIndex;
+      const stateLabel = isDone ? "Done" : error && isActive ? "Failed" : isActive ? "Running" : "Waiting";
+      return `<div class="download-depot-row ${isDone ? "done" : isActive ? "downloading" : ""}">
+        <div class="download-depot-head"><span>${escape(label)}</span><small>${stateLabel}</small></div>
+        <div class="download-depot-track"><span style="width:${isDone ? 100 : isActive ? 45 : 0}%"></span></div>
+      </div>`;
+    }).join("");
+    const finished = done ? steps.length : Math.max(0, activeIndex);
+    count.textContent = `${finished} / ${steps.length} complete`;
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (timer) clearInterval(timer);
+    timer = null;
+    if (unlisten) unlisten();
+    unlisten = null;
+    if (document.body.contains(backdrop)) backdrop.remove();
+  };
+  const apply = (payload) => {
+    if (!payload || payload.operation !== operation) return;
+    if (payload.gameId && options.gameId && payload.gameId !== options.gameId) return;
+    currentStage = payload.stage || "";
+    stage.textContent = payload.message || "Working…";
+    stage.classList.toggle("error", payload.status === "error");
+    renderSteps(currentStage, payload.status === "done");
+    if (payload.status === "done") complete(payload.message);
+  };
+  const complete = (message) => {
+    if (closed) return;
+    bar.classList.remove("indeterminate");
+    bar.querySelector("span").style.width = "100%";
+    stage.textContent = message || "Complete";
+    statusNode.textContent = "Complete";
+    renderSteps("done", true);
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
+  const fail = (message) => {
+    if (closed) return;
+    bar.classList.remove("indeterminate");
+    bar.querySelector("span").style.width = "100%";
+    stage.textContent = String(message);
+    stage.classList.add("error");
+    statusNode.textContent = "Failed";
+    renderSteps(currentStage, false, true);
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
+  closeButton.onclick = () => {
+    if (timer) {
+      showToast("The operation is still running; it will finish in the background.");
+    }
+    close();
+  };
+  renderSteps(steps[0][0]);
+  if (window.__TAURI__?.event?.listen) {
+    void window.__TAURI__.event.listen("operation-progress", (event) => apply(event.payload || {})).then((stop) => {
+      if (closed) stop();
+      else unlisten = stop;
+      resolveReady();
+    });
+  } else {
+    resolveReady();
+  }
+  return { close, complete, fail, ready };
+}
+
 function applyDownloadEvent(state) {
   if (!state?.gameId) return;
   managedDownloads.set(state.gameId, state);
@@ -1743,24 +1871,39 @@ function openManagedGameOptions(game) {
           try { await invoke("open_path", { path: latestGame.installation.root }); }
           catch (error) { showToast(String(error), true); }
         };
-        pane.querySelector("#files-backup").onclick = (event) => run(event.currentTarget, async () => {
-          const result = await invoke("backup_managed_game", { gameId: game.id });
-          if (!result) throw new Error("Backup cancelled.");
-          return result.path;
-        }, (path) => `Backup written to ${path}`, async () => {});
-        pane.querySelector("#files-verify").onclick = async (event) => {
-          const stop = busy(event.target, "Verifying…");
-          status.textContent = "Verifying files against depot manifests…";
-          status.classList.remove("error");
+        pane.querySelector("#files-backup").onclick = async () => {
+          const operation = openOperationManager({
+            operation: "backup",
+            title: `Backing up · ${latestGame.title}`,
+            gameId: game.id,
+            gameName: latestGame.title,
+          });
+          await operation.ready;
+          try {
+            const result = await invoke("backup_managed_game", { gameId: game.id });
+            if (!result) { operation.close(); showToast("Backup cancelled."); return; }
+            operation.complete(`Backup written to ${result.path}`);
+            showToast(`Backup written to ${result.path}`);
+          } catch (error) { operation.fail(String(error)); }
+        };
+        pane.querySelector("#files-verify").onclick = async () => {
+          const operation = openOperationManager({
+            operation: "verify",
+            title: `Verifying files · ${latestGame.title}`,
+            gameId: game.id,
+            gameName: latestGame.title,
+          });
+          await operation.ready;
           try {
             await invoke("verify_managed_files", { gameId: game.id });
-            stop();
+            operation.complete("Verification complete. Missing or damaged files were repaired.");
             status.textContent = "Verification complete. Missing or damaged files were repaired.";
+            status.classList.remove("error");
             showToast("File integrity verified");
             const next = await invoke("managed_game_size", { gameId: game.id }).catch(() => size);
             pane.querySelector(".files-size-card strong").textContent = `Size of installation: ${formatBytes(next)} (${name})`;
           } catch (error) {
-            stop();
+            operation.fail(String(error));
             status.textContent = String(error);
             status.classList.add("error");
           }
@@ -4341,17 +4484,22 @@ async function renderStorageSettings(host) {
       } catch (error) { showToast(String(error), true); }
     };
   }
-  host.querySelector("#setting-restore-game").onclick = async (event) => {
-    const stop = busy(event.target, "Restoring…");
+  host.querySelector("#setting-restore-game").onclick = async () => {
+    const operation = openOperationManager({
+      operation: "restore",
+      title: "Restoring game backup",
+      gameName: "Choose a backup file",
+    });
+    await operation.ready;
     try {
       const result = await invoke("restore_game_backup");
-      stop();
-      if (!result) { showToast("Restore cancelled."); return; }
+      if (!result) { operation.close(); showToast("Restore cancelled."); return; }
+      operation.complete(`Restored ${result.title || "game"} to ${result.root}`);
       managedLibrary = result.library;
       await load();
       await renderSettingsPage();
       showToast(`Restored ${result.title || "game"} to ${result.root}`);
-    } catch (error) { stop(); showToast(String(error), true); }
+    } catch (error) { operation.fail(String(error)); }
   };
   host.querySelector("#setting-refresh-drives").onclick = () => { void renderSettingsPage(); };
   host.querySelector("#setting-add-drive").onclick = () => { void showAddDriveDialog(); };
