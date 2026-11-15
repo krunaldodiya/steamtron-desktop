@@ -2219,7 +2219,6 @@ function dispatchNavigation(action, fromGamepad = false) {
     if (document.body.classList.contains("settings-open")) { closeSettingsPage(); return; }
     const modal = visibleModal();
     if (modal) { modal.remove(); return; }
-    if (document.body.classList.contains("fullscreen-mode")) { openFullscreenOptions(); return; }
     if (appView === "store-game") { setView("store", { focus: "restore" }); return; }
     if (appView === "game") { setView(gameDetailOrigin, { focus: "restore" }); return; }
     if (navState.focused) navState.focused.classList.remove("nav-focus");

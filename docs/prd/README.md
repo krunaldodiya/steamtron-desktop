@@ -35,3 +35,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0008](0008-panel-nav-focus.md) | Store pane isolation and route-tab Up focus | done | 2026-11-15 |
 | [0009](0009-store-card-open.md) | Open Store cards without waiting for the detail request | done | 2026-11-15 |
 | [0010](0010-chip-focus-ring.md) | One focus ring on pill chips | done | 2026-11-15 |
+| [0011](0011-fullscreen-escape.md) | Fullscreen Escape matches desktop back behavior | done | 2026-11-15 |
