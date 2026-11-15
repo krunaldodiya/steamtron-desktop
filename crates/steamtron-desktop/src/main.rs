@@ -3546,7 +3546,7 @@ fn collect_component(root: &Path) -> Result<(Vec<PathBuf>, Vec<(PathBuf, u64)>, 
 }
 
 #[tauri::command]
-async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<Option<serde_json::Value>, String> {
+async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination: Option<String>, replace: bool) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::Library;
 
     require_auth()?;
@@ -3555,30 +3555,32 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
     if !game.installation.root.is_dir() {
         return Err("The installation folder does not exist.".into());
     }
-    let Some(parent) = rfd::FileDialog::new()
-        .set_title("Choose a backup destination folder")
-        .pick_folder()
-    else {
-        return Ok(None);
+    let parent = if let Some(destination) = destination {
+        let parent = std::path::PathBuf::from(destination);
+        if !parent.is_dir() {
+            return Err("The selected backup destination is no longer available.".into());
+        }
+        parent
+    } else {
+        let Some(parent) = rfd::FileDialog::new()
+            .set_title("Choose a backup destination folder")
+            .pick_folder()
+        else {
+            return Ok(None);
+        };
+        parent
     };
     if parent.starts_with(&game.installation.root) {
         return Err("Choose a backup location outside the game folder.".into());
     }
     let folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game").to_owned();
     let final_path = parent.join(backup_safe_folder(&game.title));
-    if final_path.exists() {
-        let overwrite = rfd::MessageDialog::new()
-            .set_title("Overwrite backup?")
-            .set_description(format!(
-                "A backup folder already exists at {}.\n\nDo you want to overwrite it?",
-                final_path.display()
-            ))
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .set_level(rfd::MessageLevel::Warning)
-            .show();
-        if overwrite != rfd::MessageDialogResult::Yes {
-            return Ok(None);
-        }
+    if final_path.exists() && !replace {
+        return Ok(Some(serde_json::json!({
+            "exists": true,
+            "parent": parent.display().to_string(),
+            "target": final_path.display().to_string(),
+        })));
     }
     let staging = parent.join(format!(".steamtron-backup-{}", std::process::id()));
     if staging.exists() {

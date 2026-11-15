@@ -34,8 +34,9 @@ and fixes state are preserved.
 ## Requirements
 
 - R1: Backup destination is a chosen parent folder; output is
-  `<parent>/<Game Title>/`. If it exists, a native Yes/No dialog offers to
-  overwrite it; declining returns Cancel without changing the old backup.
+  `<parent>/<Game Title>/`. If it exists, the first command returns an `exists`
+  result without starting; the UI asks Overwrite/Keep old backup and retries with
+  the same parent only on Overwrite.
 - R2: Write `content.tar`, `fixes.tar` (when present), and
   `manifest-bundle.tar` (when manifests are available).
 - R3: Write `appmanifest_<appid>.json` with format 2, directories, launch
@@ -72,8 +73,8 @@ and fixes state are preserved.
   target root after extraction succeeds, so cancelling/failing does not destroy
   existing content.
 - The backup folder name is sanitized from the game title. An existing folder is
-  never overwritten without an explicit Yes; the old backup is replaced only
-  after the new package is fully staged.
+  never overwritten without an explicit in-app confirmation; the old backup is
+  replaced only after the new package is fully staged.
 - Legacy single archive restore is removed from the primary path.
 
 ## Links

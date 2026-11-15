@@ -1459,6 +1459,11 @@ function openOperationManager(options = {}) {
     actions.classList.add("hidden");
     if (backdrop.classList.contains("hidden")) close();
   };
+  const discard = () => {
+    terminal = true;
+    cancelled = true;
+    close();
+  };
   closeButton.onclick = close;
   cancelButton.onclick = async () => {
     if (!(await confirmDialog({
@@ -1487,7 +1492,7 @@ function openOperationManager(options = {}) {
   } else {
     resolveReady();
   }
-  return { close, complete, fail, ready, show, isTerminal: () => terminal, isCancelled: () => cancelled };
+  return { close, complete, fail, discard, ready, show, isTerminal: () => terminal, isCancelled: () => cancelled };
 }
 
 function applyDownloadEvent(state) {
@@ -2018,8 +2023,25 @@ function openManagedGameOptions(game) {
           beginOperation("backup", game.id);
           await operation.ready;
           try {
-            const result = await invoke("backup_managed_game", { gameId: game.id });
-            if (!result) { cancelOperation("backup", game.id); operation.close(); showToast("Backup cancelled."); return; }
+            let result = await invoke("backup_managed_game", { gameId: game.id, destination: null, replace: false });
+            if (!result) { cancelOperation("backup", game.id); operation.discard(); showToast("Backup cancelled."); return; }
+            if (result.exists) {
+              const overwrite = await confirmDialog({
+                title: "Overwrite backup?",
+                message: `A backup folder already exists at ${result.target}.\n\nOverwrite it with a new backup? The old backup is kept until the new one is ready.`,
+                confirmLabel: "Overwrite backup",
+                cancelLabel: "Keep old backup",
+                danger: true,
+              });
+              if (!overwrite) {
+                cancelOperation("backup", game.id);
+                operation.discard();
+                showToast("Backup cancelled; the old backup was kept.");
+                return;
+              }
+              result = await invoke("backup_managed_game", { gameId: game.id, destination: result.parent, replace: true });
+              if (!result) { cancelOperation("backup", game.id); operation.discard(); showToast("Backup cancelled."); return; }
+            }
             finishOperation("backup", game.id, `Backup written to ${result.path}`);
             operation.complete(`Backup written to ${result.path}`);
             showToast(`Backup written to ${result.path}`);
@@ -4649,7 +4671,7 @@ async function renderStorageSettings(host) {
     await operation.ready;
     try {
       const result = await invoke("restore_game_backup");
-      if (!result) { cancelOperation("restore", ""); operation.close(); showToast("Restore cancelled."); return; }
+      if (!result) { cancelOperation("restore", ""); operation.discard(); showToast("Restore cancelled."); return; }
       finishOperation("restore", "", `Restored ${result.title || "game"}`);
       operation.complete(`Restored ${result.title || "game"} to ${result.root}`);
       managedLibrary = result.library;
