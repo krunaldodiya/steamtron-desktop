@@ -43,8 +43,9 @@ present-participle label.
   verify from depot/file progress.
 - R6: Success shows 100% and Complete; failure keeps the window open with the
   error stage.
-- R7: Closing a running operation window does not cancel the backend operation;
-  it finishes in the background.
+- R7: Closing a running operation window hides it without cancelling; the
+  action button stays enabled with its running label and reopens the same
+  manager instead of starting a duplicate operation.
 - R8: Download manager retains its own depot list and icon controls inside the
   large shell.
 - R9: Buttons switch to running labels (`Backing up…`, `Verifying…`,
@@ -62,6 +63,8 @@ present-participle label.
 - [ ] The operation window has one bar and no stat/step boxes.
 - [ ] A failure remains visible in the manager.
 - [ ] Closing the manager does not cancel the backend task.
+- [ ] Clicking the running action reopens the manager without starting another
+  operation.
 - [ ] Buttons change to running labels and back.
 - [ ] Inline progress appears under backup, verify, and restore actions.
 
@@ -84,8 +87,9 @@ present-participle label.
 - Backup enumerates files first and reports percent by written bytes. Restore
   counts archive bytes first, then reports extracted bytes. Verify streams SMD
   JSON and reports depot/file progress.
-- Closing the operation window leaves the backend command running; there is no
-  cancel protocol for these commands.
+- Closing the operation window hides it; the backend command keeps running.
+  The action button remains enabled and reopens the same manager. A second
+  click never starts a duplicate operation.
 - The download manager keeps pause/resume/cancel and per-depot rows; operation
   windows stay minimal like Steam's validation progress.
 

@@ -1256,7 +1256,7 @@ function setOperationButton(operation, running) {
   const labels = OPERATION_LABELS[operation];
   if (!labels) return;
   button.textContent = running ? labels[0] : labels[1];
-  button.disabled = running;
+  button.dataset.operationRunning = running ? "1" : "0";
 }
 
 function setOperationInline(operation, gameId, message, status, percent) {
@@ -1269,7 +1269,7 @@ function setOperationInline(operation, gameId, message, status, percent) {
     const bar = track?.querySelector("span");
     if (status === "done") {
       if (bar) bar.style.width = "100%";
-      if (text) text.textContent = message || "Complete";
+      if (text) text.textContent = `100% · ${message || "Complete"}`;
       operationInlineTimers.set(node, setTimeout(() => node.classList.add("hidden"), 3500));
       setOperationButton(operation, false);
     } else if (status === "error") {
@@ -1277,8 +1277,9 @@ function setOperationInline(operation, gameId, message, status, percent) {
       if (text) text.textContent = message || "Failed";
       setOperationButton(operation, false);
     } else {
-      if (bar) bar.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
-      if (text) text.textContent = message || "Starting…";
+      const current = Math.max(0, Math.min(100, Number(percent) || 0));
+      if (bar) bar.style.width = `${current}%`;
+      if (text) text.textContent = `${current.toFixed(0)}% · ${message || "Starting…"}`;
       setOperationButton(operation, true);
     }
   }
@@ -1305,6 +1306,20 @@ function cancelOperation(operation, gameId) {
   setOperationButton(operation, false);
 }
 
+const activeOperations = new Map();
+
+function ensureOperationManager(operation, gameId, options) {
+  const key = `${operation}:${gameId || ""}`;
+  const existing = activeOperations.get(key);
+  if (existing && !existing.isTerminal()) {
+    existing.show();
+    return null;
+  }
+  const manager = openOperationManager(options);
+  activeOperations.set(key, manager);
+  return manager;
+}
+
 function openOperationManager(options = {}) {
   const operation = options.operation || "operation";
   const title = options.title || "Working";
@@ -1324,14 +1339,27 @@ function openOperationManager(options = {}) {
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   let closed = false;
+  let terminal = false;
   let currentPercent = 0;
   const close = () => {
     if (closed) return;
-    closed = true;
-    if (unlisten) unlisten();
-    unlisten = null;
-    if (document.body.contains(backdrop)) backdrop.remove();
-    if (appView === "game" && managedSelectedId) renderManagedMode();
+    if (terminal) {
+      closed = true;
+      if (unlisten) unlisten();
+      unlisten = null;
+      if (document.body.contains(backdrop)) backdrop.remove();
+      syncDialogBlocking();
+      if (appView === "game" && managedSelectedId) renderManagedMode();
+    } else {
+      backdrop.classList.add("hidden");
+      syncDialogBlocking();
+    }
+  };
+  const show = () => {
+    if (closed) return;
+    backdrop.classList.remove("hidden");
+    registerDialog(backdrop, { title });
+    syncDialogBlocking();
   };
   const setPercent = (value) => {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -1350,14 +1378,18 @@ function openOperationManager(options = {}) {
   };
   const complete = (message) => {
     if (closed) return;
+    terminal = true;
     setPercent(100);
     stage.textContent = message || "Complete";
     stage.classList.remove("error");
+    if (backdrop.classList.contains("hidden")) close();
   };
   const fail = (message) => {
     if (closed) return;
+    terminal = true;
     stage.textContent = String(message);
     stage.classList.add("error");
+    if (backdrop.classList.contains("hidden")) close();
   };
   closeButton.onclick = close;
   setPercent(0);
@@ -1370,7 +1402,7 @@ function openOperationManager(options = {}) {
   } else {
     resolveReady();
   }
-  return { close, complete, fail, ready };
+  return { close, complete, fail, ready, show, isTerminal: () => terminal };
 }
 
 function applyDownloadEvent(state) {
@@ -1886,12 +1918,13 @@ function openManagedGameOptions(game) {
           catch (error) { showToast(String(error), true); }
         };
         pane.querySelector("#files-backup").onclick = async () => {
-          const operation = openOperationManager({
+          const operation = ensureOperationManager("backup", game.id, {
             operation: "backup",
             title: `Backing up · ${latestGame.title}`,
             gameId: game.id,
             gameName: latestGame.title,
           });
+          if (!operation) return;
           beginOperation("backup", game.id);
           await operation.ready;
           try {
@@ -1903,12 +1936,13 @@ function openManagedGameOptions(game) {
           } catch (error) { failOperation("backup", game.id, String(error)); operation.fail(String(error)); }
         };
         pane.querySelector("#files-verify").onclick = async () => {
-          const operation = openOperationManager({
+          const operation = ensureOperationManager("verify", game.id, {
             operation: "verify",
             title: `Verifying files · ${latestGame.title}`,
             gameId: game.id,
             gameName: latestGame.title,
           });
+          if (!operation) return;
           beginOperation("verify", game.id);
           await operation.ready;
           try {
@@ -4505,11 +4539,12 @@ async function renderStorageSettings(host) {
     };
   }
   host.querySelector("#setting-restore-game").onclick = async () => {
-    const operation = openOperationManager({
+    const operation = ensureOperationManager("restore", "", {
       operation: "restore",
       title: "Restoring game backup",
       gameName: "Choose a backup file",
     });
+    if (!operation) return;
     beginOperation("restore", "");
     await operation.ready;
     try {
