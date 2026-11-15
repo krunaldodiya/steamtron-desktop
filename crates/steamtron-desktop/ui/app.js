@@ -2243,8 +2243,81 @@ function applyPendingRouteFocus(view = appView) {
   return true;
 }
 
+let pageScrollFrame = null;
+let pageScrollTarget = null;
+
+function pageScroller() {
+  return document.scrollingElement || document.documentElement;
+}
+
+function pageScrollTop() {
+  const root = pageScroller();
+  return root.scrollTop ?? window.scrollY ?? 0;
+}
+
+function cancelPageScroll() {
+  if (pageScrollFrame !== null) {
+    cancelAnimationFrame(pageScrollFrame);
+    pageScrollFrame = null;
+  }
+  pageScrollTarget = null;
+}
+
+// One animation owner for the page keeps rapid focus moves from stacking
+// native smooth-scroll requests, which is what makes repeated arrow presses
+// look like stuttering.
+function smoothScrollPageTo(target) {
+  const root = pageScroller();
+  const viewport = window.innerHeight || root.clientHeight || 0;
+  const max = Math.max(0, (root.scrollHeight || document.body.scrollHeight || 0) - viewport);
+  const destination = Math.max(0, Math.min(Math.round(target), max));
+  const start = pageScrollTop();
+  if (Math.abs(destination - start) < 1) {
+    cancelPageScroll();
+    root.scrollTop = destination;
+    return;
+  }
+  if (pageScrollTarget === destination && pageScrollFrame !== null) return;
+  cancelPageScroll();
+  pageScrollTarget = destination;
+  const duration = Math.min(520, Math.max(240, Math.abs(destination - start) * 0.35));
+  const started = performance.now();
+  let last = Math.round(start);
+  const step = (now) => {
+    const progress = Math.min(1, (now - started) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const next = Math.round(start + (destination - start) * eased);
+    if (next !== last) {
+      root.scrollTop = next;
+      last = next;
+    }
+    if (progress < 1) {
+      pageScrollFrame = requestAnimationFrame(step);
+    } else {
+      root.scrollTop = destination;
+      pageScrollFrame = null;
+      pageScrollTarget = null;
+    }
+  };
+  pageScrollFrame = requestAnimationFrame(step);
+}
+
+window.addEventListener("wheel", cancelPageScroll, { passive: true });
+window.addEventListener("touchmove", cancelPageScroll, { passive: true });
+
 function scrollControlIntoView(node) {
   const margin = 28;
+  // Home hero and the top menu belong to the same vertical stop: reveal the
+  // whole hero instead of only the focused Play button, and keep it fully in
+  // view while the sticky top menu owns focus.
+  if (node.closest(".home-hero")) {
+    smoothScrollPageTo(0);
+    return;
+  }
+  if (node.closest(".topbar")) {
+    if (appView === "home") smoothScrollPageTo(0);
+    return;
+  }
   // Horizontal rails scroll themselves; the page must not move sideways.
   let horizontal = node.parentElement;
   while (horizontal && horizontal !== document.body && horizontal !== document.documentElement) {
@@ -2284,9 +2357,9 @@ function scrollControlIntoView(node) {
     else if (rect.bottom > box.bottom - 16) delta = rect.bottom - box.bottom + 16;
     if (delta) vertical.scrollBy({ top: Math.round(delta), behavior: "smooth" });
   } else if (rect.top < header + 16) {
-    window.scrollBy({ top: rect.top - header - 16, behavior: "smooth" });
+    smoothScrollPageTo(pageScrollTop() + rect.top - header - 16);
   } else if (rect.bottom > window.innerHeight - 16) {
-    window.scrollBy({ top: rect.bottom - (window.innerHeight - 16), behavior: "smooth" });
+    smoothScrollPageTo(pageScrollTop() + rect.bottom - (window.innerHeight - 16));
   }
 }
 
