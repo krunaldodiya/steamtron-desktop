@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 mod artwork;
@@ -3306,6 +3307,43 @@ fn emit_operation(app: &tauri::AppHandle, operation: &str, game_id: &str, stage:
     }));
 }
 
+fn emit_operation_at(app: &tauri::AppHandle, operation: &str, game_id: &str, stage: &str, status: &str, message: &str, percent: f64) {
+    let _ = app.emit("operation-progress", serde_json::json!({
+        "operation": operation,
+        "gameId": game_id,
+        "stage": stage,
+        "status": status,
+        "message": message,
+        "percent": percent.clamp(0.0, 100.0),
+    }));
+}
+
+fn collect_backup_entries(
+    root: &Path,
+    directory: &Path,
+    directories: &mut Vec<PathBuf>,
+    files: &mut Vec<(PathBuf, u64)>,
+    total: &mut u64,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(directory).map_err(|error| format!("{}: {error}", directory.display()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let relative = path.strip_prefix(root).map_err(|_| "backup path escaped the game folder".to_string())?.to_path_buf();
+        if metadata.is_dir() {
+            directories.push(relative);
+            collect_backup_entries(root, &path, directories, files, total)?;
+        } else if metadata.is_file() {
+            *total = total.saturating_add(metadata.len());
+            files.push((relative, metadata.len()));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::Library;
@@ -3340,7 +3378,11 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
     let emit_app = app.clone();
     let emit_game = game_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        emit_operation(&emit_app, "backup", &emit_game, "write", "running", "Writing backup archive…");
+        let mut directories = Vec::new();
+        let mut files = Vec::new();
+        let mut total_bytes = 0u64;
+        collect_backup_entries(&root, &root, &mut directories, &mut files, &mut total_bytes)?;
+        emit_operation_at(&emit_app, "backup", &emit_game, "write", "running", "Writing backup archive…", 0.0);
         let file = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
         let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
         let mut archive = tar::Builder::new(encoder);
@@ -3350,13 +3392,34 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String) -> Result<O
         header.set_mode(0o644);
         header.set_cksum();
         archive.append_data(&mut header, ".steamtron-backup.json", payload.as_slice()).map_err(|error| error.to_string())?;
-        archive.append_dir_all(".", &root).map_err(|error| error.to_string())?;
+        for relative in &directories {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_size(0);
+            header.set_mode(0o755);
+            header.set_cksum();
+            archive.append_data(&mut header, relative, std::io::empty()).map_err(|error| error.to_string())?;
+        }
+        let mut written = 0u64;
+        let mut last_emit = std::time::Instant::now();
+        for (relative, size) in &files {
+            let source = root.join(relative);
+            let mut input = std::fs::File::open(&source).map_err(|error| format!("{}: {error}", source.display()))?;
+            archive.append_file(relative, &mut input).map_err(|error| format!("{}: {error}", source.display()))?;
+            written = written.saturating_add(*size);
+            if last_emit.elapsed() >= std::time::Duration::from_millis(250) || written >= total_bytes {
+                let percent = if total_bytes > 0 { written as f64 / total_bytes as f64 * 100.0 } else { 100.0 };
+                emit_operation_at(&emit_app, "backup", &emit_game, "write", "running", "Writing backup archive…", percent);
+                last_emit = std::time::Instant::now();
+            }
+        }
         archive.finish().map_err(|error| error.to_string())?;
+        emit_operation_at(&emit_app, "backup", &emit_game, "write", "running", "Finalizing backup…", 100.0);
         Ok::<_, String>(())
     })
     .await
     .map_err(|error| format!("backup task failed: {error}"))??;
-    emit_operation(&app, "backup", &game_id, "done", "done", "Backup complete");
+    emit_operation_at(&app, "backup", &game_id, "done", "done", "Backup complete", 100.0);
     Ok(Some(serde_json::json!({ "path": path.display().to_string() })))
 }
 
@@ -3385,19 +3448,23 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     };
     emit_operation(&app, "restore", "", "read", "running", "Reading backup metadata…");
     let archive_path = path.clone();
-    let metadata = tauri::async_runtime::spawn_blocking(move || -> Result<BackupMetadata, String> {
+    let (metadata, total_bytes) = tauri::async_runtime::spawn_blocking(move || -> Result<(BackupMetadata, u64), String> {
         let file = std::fs::File::open(&archive_path).map_err(|error| error.to_string())?;
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
+        let mut metadata = None;
+        let mut total = 0u64;
         for entry in archive.entries().map_err(|error| error.to_string())? {
             let mut entry = entry.map_err(|error| error.to_string())?;
             if entry.path().map(|path| path == std::path::Path::new(".steamtron-backup.json")).unwrap_or(false) {
                 let mut bytes = Vec::new();
                 std::io::Read::read_to_end(&mut entry, &mut bytes).map_err(|error| error.to_string())?;
-                return serde_json::from_slice::<BackupMetadata>(&bytes).map_err(|error| error.to_string());
+                metadata = Some(serde_json::from_slice::<BackupMetadata>(&bytes).map_err(|error| error.to_string())?);
+            } else if !entry.header().entry_type().is_dir() {
+                total = total.saturating_add(entry.size());
             }
         }
-        Err("This is not a SteamTron game backup.".into())
+        Ok((metadata.ok_or_else(|| "This is not a SteamTron game backup.".to_string())?, total))
     })
     .await
     .map_err(|error| format!("backup read failed: {error}"))??;
@@ -3436,11 +3503,14 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     std::fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
     let extract_root = target_root.clone();
     let restore_path = path.clone();
-    emit_operation(&app, "restore", "", "extract", "running", "Extracting game files…");
+    let emit_app = app.clone();
+    emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files…", 0.0);
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let file = std::fs::File::open(&restore_path).map_err(|error| error.to_string())?;
         let decoder = flate2::read::GzDecoder::new(file);
         let mut archive = tar::Archive::new(decoder);
+        let mut written = 0u64;
+        let mut last_emit = std::time::Instant::now();
         for entry in archive.entries().map_err(|error| error.to_string())? {
             let mut entry = entry.map_err(|error| error.to_string())?;
             let entry_path = entry.path().map_err(|error| error.to_string())?.into_owned();
@@ -3459,16 +3529,23 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
                 std::fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
             } else {
                 let mut output = std::fs::File::create(&destination).map_err(|error| error.to_string())?;
-                std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+                let copied = std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+                written = written.saturating_add(copied);
+                if last_emit.elapsed() >= std::time::Duration::from_millis(200) || written >= total_bytes {
+                    let percent = if total_bytes > 0 { written as f64 / total_bytes as f64 * 100.0 } else { 100.0 };
+                    emit_operation_at(&emit_app, "restore", "", "extract", "running", "Extracting game files…", percent);
+                    last_emit = std::time::Instant::now();
+                }
             }
         }
         Ok(())
     })
     .await
     .map_err(|error| format!("restore task failed: {error}"))??;
-    emit_operation(&app, "restore", "", "register", "running", "Finalizing library entry…");
+    emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files…", 100.0);
+    emit_operation_at(&app, "restore", "", "register", "running", "Finalizing library entry…", 100.0);
     let library = Library::load().map_err(|error| error.to_string())?;
-    emit_operation(&app, "restore", "", "done", "done", "Restore complete");
+    emit_operation_at(&app, "restore", "", "done", "done", "Restore complete", 100.0);
     Ok(Some(serde_json::json!({
         "title": metadata.title,
         "root": target_root.display().to_string(),
@@ -3754,31 +3831,73 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
     let logs = steamtron_core::paths::layout().diagnostics_for(&game_id);
     std::fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
     let log = logs.join(format!("verify-{}.log", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0)));
-    emit_operation(&app, "verify", &game_id, "check", "running", "Checking files against depot manifests…");
+    emit_operation_at(&app, "verify", &game_id, "check", "running", "Checking files against depot manifests…", 0.0);
     let emit_app = app.clone();
     let emit_game = game_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        emit_operation(&emit_app, "verify", &emit_game, "repair", "running", "Repairing missing or damaged files…");
+        use std::io::{BufRead, BufReader, Write};
         let smd = download::resolve_smd()?;
-        let output = std::process::Command::new(&smd)
+        let stderr_log = log.with_extension("stderr.log");
+        let stderr = std::fs::File::create(&stderr_log).map_err(|error| error.to_string())?;
+        let mut child = std::process::Command::new(&smd)
             .arg("--data-dir")
             .arg(cache.join("data"))
             .arg("download")
             .arg(&smd_lua)
-            .args(["--update", &root.display().to_string(), "--repair", "--like-steam", "--platform", "windows", "--language", "english"])
+            .args(["--update", &root.display().to_string(), "--repair", "--like-steam", "--platform", "windows", "--language", "english", "--json", "-v"])
             .stdin(std::process::Stdio::null())
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::from(stderr))
+            .spawn()
             .map_err(|error| format!("could not start smd: {error}"))?;
-        let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-        std::fs::write(&log, &text).map_err(|error| error.to_string())?;
-        if !output.status.success() {
-            let tail = text.lines().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ");
-            return Err(format!("Integrity verification failed: {tail}"));
+        let stdout = child.stdout.take().ok_or("smd stdout unavailable")?;
+        let mut file = std::fs::File::create(&log).map_err(|error| error.to_string())?;
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        let mut depots_total = 0u32;
+        let mut depots_done = 0u32;
+        let mut file_percent = 0.0f64;
+        let mut last_emit = std::time::Instant::now();
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            let _ = write!(file, "{line}");
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else { line.clear(); continue };
+            if let Some(depots) = value.get("depots").and_then(|depots| depots.as_array()) {
+                depots_total = depots.len() as u32;
+            }
+            if let Some(total) = value.get("total").and_then(|total| total.as_u64()) {
+                if total > 0 { depots_total = total as u32; }
+            }
+            if let Some(output) = value.get("output").and_then(|output| output.as_str()) {
+                if let Some(position) = output.find('%') {
+                    if let Ok(percent) = output[..position].trim().parse::<f64>() {
+                        file_percent = percent.clamp(0.0, 100.0);
+                    }
+                }
+            }
+            if value.get("type").and_then(|kind| kind.as_str()) == Some("depot_complete") {
+                depots_done = depots_done.saturating_add(1);
+                file_percent = 0.0;
+            }
+            let percent = if depots_total > 0 {
+                ((depots_done as f64 + file_percent / 100.0) / depots_total as f64 * 100.0).min(100.0)
+            } else {
+                file_percent
+            };
+            if last_emit.elapsed() >= std::time::Duration::from_millis(250) {
+                emit_operation_at(&emit_app, "verify", &emit_game, "check", "running", "Checking files against depot manifests…", percent);
+                last_emit = std::time::Instant::now();
+            }
+            line.clear();
+        }
+        let status = child.wait().map_err(|error| error.to_string())?;
+        if !status.success() {
+            return Err("Integrity verification failed. See the diagnostic log.".into());
         }
         Ok::<_, String>(log)
     })
     .await
     .map_err(|error| format!("verification task failed: {error}"))??;
+    emit_operation_at(&app, "verify", &game_id, "done", "done", "Verification complete", 100.0);
     emit_operation(&app, "verify", &game_id, "done", "done", "Verification complete");
     Ok(serde_json::json!({ "verified": true, "log": result.display().to_string() }))
 }

@@ -1259,27 +1259,25 @@ function setOperationButton(operation, running) {
   button.disabled = running;
 }
 
-function setOperationInline(operation, gameId, message, status) {
+function setOperationInline(operation, gameId, message, status, percent) {
   for (const node of operationInlineNodes(operation, gameId)) {
     const timer = operationInlineTimers.get(node);
     if (timer) clearTimeout(timer);
     const track = node.querySelector(".download-inline-track");
     const text = node.querySelector(".operation-inline-text");
-    node.classList.remove("hidden", "indeterminate", "error");
+    node.classList.remove("hidden", "error");
+    const bar = track?.querySelector("span");
     if (status === "done") {
-      node.classList.remove("indeterminate");
-      if (track) track.querySelector("span").style.width = "100%";
+      if (bar) bar.style.width = "100%";
       if (text) text.textContent = message || "Complete";
       operationInlineTimers.set(node, setTimeout(() => node.classList.add("hidden"), 3500));
       setOperationButton(operation, false);
     } else if (status === "error") {
-      node.classList.remove("indeterminate");
       node.classList.add("error");
       if (text) text.textContent = message || "Failed";
       setOperationButton(operation, false);
     } else {
-      node.classList.add("indeterminate");
-      if (track) track.querySelector("span").style.width = "35%";
+      if (bar) bar.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
       if (text) text.textContent = message || "Starting…";
       setOperationButton(operation, true);
     }
@@ -1287,7 +1285,7 @@ function setOperationInline(operation, gameId, message, status) {
 }
 
 function beginOperation(operation, gameId) {
-  setOperationInline(operation, gameId, "Starting…", "running");
+  setOperationInline(operation, gameId, "Starting…", "running", 0);
   setOperationButton(operation, true);
 }
 
@@ -1307,122 +1305,62 @@ function cancelOperation(operation, gameId) {
   setOperationButton(operation, false);
 }
 
-const OPERATION_STEPS = {
-  backup: [
-    ["prepare", "Collect game files"],
-    ["write", "Write backup archive"],
-    ["done", "Finish"],
-  ],
-  restore: [
-    ["read", "Read backup metadata"],
-    ["extract", "Extract game files"],
-    ["register", "Finalize library entry"],
-    ["done", "Finish"],
-  ],
-  verify: [
-    ["check", "Check files against manifests"],
-    ["repair", "Repair missing or damaged files"],
-    ["done", "Finish"],
-  ],
-};
-
 function openOperationManager(options = {}) {
   const operation = options.operation || "operation";
   const title = options.title || "Working";
-  const gameName = options.gameName || "";
-  const steps = OPERATION_STEPS[operation] || [["run", "Working"], ["done", "Finish"]];
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal download-modal operation-modal" id="operation-manager"><div class="modal-head"><h2>${escape(title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <p class="download-stage" id="operation-stage">Starting…</p>
-    <div class="download-progress-row"><div class="download-bar operation-bar indeterminate"><span></span></div></div>
-    <div class="download-stats operation-stats">
-      <div class="download-stat"><span>Operation</span><strong>${escape(operation[0].toUpperCase() + operation.slice(1))}</strong></div>
-      <div class="download-stat"><span>Game</span><strong>${escape(gameName || "—")}</strong></div>
-      <div class="download-stat"><span>Elapsed</span><strong id="operation-elapsed">0s</strong></div>
-      <div class="download-stat"><span>Status</span><strong id="operation-status">Running</strong></div>
-    </div>
-    <div class="download-next-head"><h3>Steps</h3><span id="operation-step-count"></span></div>
-    <div class="download-next-list" id="operation-steps-list"></div>
+    <div class="download-progress-row"><div class="download-bar operation-bar"><span></span></div><strong class="operation-percent" id="operation-percent">0%</strong></div>
     </div>`;
   document.body.appendChild(backdrop);
   registerDialog(backdrop, { title });
   const stage = backdrop.querySelector("#operation-stage");
-  const bar = backdrop.querySelector(".operation-bar");
-  const elapsedNode = backdrop.querySelector("#operation-elapsed");
-  const statusNode = backdrop.querySelector("#operation-status");
-  const list = backdrop.querySelector("#operation-steps-list");
-  const count = backdrop.querySelector("#operation-step-count");
+  const fill = backdrop.querySelector(".operation-bar span");
+  const percentNode = backdrop.querySelector("#operation-percent");
   const closeButton = backdrop.querySelector(".modal-close");
-  let started = Date.now();
-  let timer = setInterval(() => {
-    elapsedNode.textContent = `${Math.floor((Date.now() - started) / 1000)}s`;
-  }, 1000);
   let unlisten = null;
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
   let closed = false;
-  let currentStage = "";
-  const renderSteps = (activeKey, done = false, error = false) => {
-    const activeIndex = steps.findIndex(([key]) => key === activeKey);
-    list.innerHTML = steps.map(([key, label], index) => {
-      const isDone = done || (activeIndex >= 0 && index < activeIndex);
-      const isActive = !done && !error && index === activeIndex;
-      const stateLabel = isDone ? "Done" : error && isActive ? "Failed" : isActive ? "Running" : "Waiting";
-      return `<div class="download-depot-row ${isDone ? "done" : isActive ? "downloading" : ""}">
-        <div class="download-depot-head"><span>${escape(label)}</span><small>${stateLabel}</small></div>
-        <div class="download-depot-track"><span style="width:${isDone ? 100 : isActive ? 45 : 0}%"></span></div>
-      </div>`;
-    }).join("");
-    const finished = done ? steps.length : Math.max(0, activeIndex);
-    count.textContent = `${finished} / ${steps.length} complete`;
-  };
+  let currentPercent = 0;
   const close = () => {
     if (closed) return;
     closed = true;
-    if (timer) clearInterval(timer);
-    timer = null;
     if (unlisten) unlisten();
     unlisten = null;
     if (document.body.contains(backdrop)) backdrop.remove();
+    if (appView === "game" && managedSelectedId) renderManagedMode();
+  };
+  const setPercent = (value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      currentPercent = Math.max(0, Math.min(100, value));
+    }
+    fill.style.width = `${currentPercent}%`;
+    percentNode.textContent = `${currentPercent.toFixed(0)}%`;
   };
   const apply = (payload) => {
     if (!payload || payload.operation !== operation) return;
     if (payload.gameId && options.gameId && payload.gameId !== options.gameId) return;
-    currentStage = payload.stage || "";
     stage.textContent = payload.message || "Working…";
     stage.classList.toggle("error", payload.status === "error");
-    renderSteps(currentStage, payload.status === "done");
+    setPercent(payload.percent);
     if (payload.status === "done") complete(payload.message);
   };
   const complete = (message) => {
     if (closed) return;
-    bar.classList.remove("indeterminate");
-    bar.querySelector("span").style.width = "100%";
+    setPercent(100);
     stage.textContent = message || "Complete";
-    statusNode.textContent = "Complete";
-    renderSteps("done", true);
-    if (timer) clearInterval(timer);
-    timer = null;
+    stage.classList.remove("error");
   };
   const fail = (message) => {
     if (closed) return;
-    bar.classList.remove("indeterminate");
-    bar.querySelector("span").style.width = "100%";
     stage.textContent = String(message);
     stage.classList.add("error");
-    statusNode.textContent = "Failed";
-    renderSteps(currentStage, false, true);
-    if (timer) clearInterval(timer);
-    timer = null;
   };
-  closeButton.onclick = () => {
-    if (timer) {
-      showToast("The operation is still running; it will finish in the background.");
-    }
-    close();
-  };
-  renderSteps(steps[0][0]);
+  closeButton.onclick = close;
+  setPercent(0);
   if (window.__TAURI__?.event?.listen) {
     void window.__TAURI__.event.listen("operation-progress", (event) => apply(event.payload || {})).then((stop) => {
       if (closed) stop();
@@ -1460,7 +1398,7 @@ if (window.__TAURI__?.event?.listen) {
   window.__TAURI__.event.listen("operation-progress", (event) => {
     const payload = event.payload || {};
     if (!payload.operation) return;
-    setOperationInline(payload.operation, payload.gameId || "", payload.message || "Working…", payload.status || "running");
+    setOperationInline(payload.operation, payload.gameId || "", payload.message || "Working…", payload.status || "running", payload.percent);
   });
   window.__TAURI__.event.listen("download-complete", async (event) => {
     const payload = event.payload || {};

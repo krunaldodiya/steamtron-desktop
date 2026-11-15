@@ -8,17 +8,19 @@
 
 ## Problem
 
-Download uses a large manager with stages, progress, statistics, and a lower
-activity list. Backup game, restore game, and verify files only replace a button
-label or write a single inline status line. Long operations look frozen and do
-not share the download manager's window, hierarchy, or step feedback.
+Download uses a large manager with stages and progress. Backup game, restore
+game, and verify files only replace a button label or write a single inline
+status line. Long operations look frozen and do not share the download window.
+An early operation-manager draft showed an animated indeterminate bar, several
+stat boxes, and a step list with multiple bars; that is more UI than the task
+needs and does not show real progress.
 
 ## Goal
 
-Backup game, restore game, and verify files open the same 1100×760 operation
-window as downloads/global settings. Each shows the current stage, an
-indeterminate progress bar while work is running, elapsed time, status, and a
-step list that advances from the backend.
+Backup game, restore game, and verify files open a large operation window with
+one real 0–100% progress bar, a stage message, and nothing else. The same
+single-bar progress appears inline under each action while the button uses a
+present-participle label.
 
 ## Non-goals
 
@@ -29,34 +31,35 @@ step list that advances from the backend.
 
 ## Requirements
 
-- R1: Download, backup, restore, and verify use the same large modal dimensions
-  as global Settings (up to 1100×760).
+- R1: Download, backup, restore, and verify use a large 1100px-wide modal.
+  Download remains 1100×760; operations size to their single-bar content.
 - R2: Backup, restore, and verify open an operation manager rather than only a
   busy button.
 - R3: Backend emits `operation-progress` with operation, game ID, stage, status,
-  and message.
-- R4: The manager shows operation, game, elapsed, and status stat cells in one
-  row.
-- R5: The lower step list marks prior stages done, the current stage running,
-  and later stages waiting.
-- R6: Success shows Complete with a full bar; failure keeps the window open with
-  the error stage.
+  message, and a real percent where available.
+- R4: The operation window shows exactly one progress bar and one stage line; no
+  stat boxes, elapsed timer, or step list.
+- R5: Backup computes percent from archive bytes; restore from extracted bytes;
+  verify from depot/file progress.
+- R6: Success shows 100% and Complete; failure keeps the window open with the
+  error stage.
 - R7: Closing a running operation window does not cancel the backend operation;
   it finishes in the background.
-- R8: Download manager retains its depot list and icon controls inside the same
+- R8: Download manager retains its own depot list and icon controls inside the
   large shell.
-- R9: Backup, verify, and restore buttons switch to present-participle labels
-  while running (`Backing up…`, `Verifying…`, `Restoring…`) and revert after.
-- R10: Each action shows an inline indeterminate progress bar under its button,
-  matching download's inline bar; the bar shows the backend stage and final
-  message, then hides.
+- R9: Buttons switch to running labels (`Backing up…`, `Verifying…`,
+  `Restoring…`) and revert afterward.
+- R10: An inline 0–100% bar appears under each action, matching download's
+  inline bar.
+- R11: The inline bar shows the backend stage and final message, then hides.
 
 ## Acceptance criteria
 
 - [ ] Download, backup, restore, and verify open the same large window size.
-- [ ] Backup progresses through collect/write/finish steps.
-- [ ] Restore progresses through read/extract/register/finish steps.
-- [ ] Verify progresses through check/repair/finish steps.
+- [ ] Backup advances a real percent from archive bytes.
+- [ ] Restore advances a real percent from extracted bytes.
+- [ ] Verify advances a real percent from depot/file progress.
+- [ ] The operation window has one bar and no stat/step boxes.
 - [ ] A failure remains visible in the manager.
 - [ ] Closing the manager does not cancel the backend task.
 - [ ] Buttons change to running labels and back.
@@ -66,11 +69,11 @@ step list that advances from the backend.
 
 - `cargo check -p steamtron-desktop` passed.
 - Rust tests 11/11 passed.
-- JSDOM operation harness passed: manager opens, four stat cells and three steps
-  render, stage event marks the prior step done, completion sets the bar
-  determinate and status Complete, close removes the window.
+- JSDOM operation harness passed: manager opens with a single percent bar and no
+  stat boxes, a 42% event updates the bar/percent, completion shows 100%, and
+  close removes the window.
 - JSDOM inline harness passed: the verify button switches to "Verifying files
-  integrity…", the inline bar appears, receives the stage, returns the button to
+  integrity…", the inline bar receives 55% and the stage, returns the button to
   its idle label, and shows the completion message.
 - Existing navigation suites still pass.
 - Release built and installed; the download/operation windows use the same
@@ -78,13 +81,13 @@ step list that advances from the backend.
 
 ## Decisions and risks
 
-- Backup/restore/verify are monolithic blocking commands, so the manager starts
-  with an indeterminate bar. Stage events are emitted at command boundaries and
-  inside the blocking worker where possible.
+- Backup enumerates files first and reports percent by written bytes. Restore
+  counts archive bytes first, then reports extracted bytes. Verify streams SMD
+  JSON and reports depot/file progress.
 - Closing the operation window leaves the backend command running; there is no
   cancel protocol for these commands.
-- The download manager keeps pause/resume/cancel and per-depot rows; the shared
-  shell only standardizes size, stats, progress, and the lower list.
+- The download manager keeps pause/resume/cancel and per-depot rows; operation
+  windows stay minimal like Steam's validation progress.
 
 ## Links
 

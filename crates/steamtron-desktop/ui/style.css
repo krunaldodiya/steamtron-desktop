@@ -678,16 +678,10 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-stat span { display:block; margin-bottom:4px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
 .download-stat strong { display:block; color:var(--text); font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .download-meta { margin:0 0 2px; color:var(--muted); font-size:12px; min-height:16px; }
-.operation-modal { width:min(1100px, 94vw); height:min(760px, 88vh); display:flex; flex-direction:column; }
-.operation-modal .download-next-list { max-height:none; flex:1; }
+.operation-modal { width:min(1100px, 94vw); height:auto; min-height:240px; }
+.operation-modal .download-progress-row { margin-bottom:0; }
+.operation-percent { min-width:44px; text-align:right; color:var(--text); font-size:13px; }
 .operation-inline { margin-top:8px; }
-.operation-inline.indeterminate .download-inline-track span { width:35%; animation:operation-progress 1.2s ease-in-out infinite; }
 .operation-inline.error .download-inline-meta-text { color:var(--error); }
-.operation-bar.indeterminate span { width:35%; animation:operation-progress 1.2s ease-in-out infinite; }
-.operation-bar:not(.indeterminate) span { animation:none; }
-@keyframes operation-progress {
-  0% { transform:translateX(-100%); }
-  100% { transform:translateX(290%); }
-}
 .download-drive-meta { color:var(--muted); font-size:12px; margin:4px 0 14px; }
 .download-drive-meta.error { color:#ff9b9b; }
