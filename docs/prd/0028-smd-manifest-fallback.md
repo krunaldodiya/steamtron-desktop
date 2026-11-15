@@ -1,6 +1,6 @@
 # SMD manifest fallback completes in verbose mode
 
-- Status: active
+- Status: done
 - Date: 2026-11-15
 - Areas: `crates/steamtron-desktop/src/download.rs`
 
@@ -57,6 +57,8 @@ manifest-code fallback, and a real SMD failure is surfaced instead of the generi
   49 chunks, and built the chunk queue.
 - App command updated to `--json -v`; stderr already goes to
   `download-<stamp>.stderr.log`.
+- Installed-app run on App 113200 logged `resolved depot 113201 via steam.run`
+  and reached DepotDownloaderMod.
 
 ## Decisions and risks
 

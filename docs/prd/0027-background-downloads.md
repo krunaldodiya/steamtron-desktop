@@ -1,6 +1,6 @@
 # Downloads continue after SteamTron exits
 
-- Status: active
+- Status: done
 - Date: 2026-11-15
 - Areas: `crates/steamtron-desktop/src/download.rs`,
   `crates/steamtron-desktop/src/main.rs`,
@@ -63,9 +63,11 @@ finalizes the install and marks the game playable.
 - The per-game sidecar contained the live PID, JSON log, and game root.
 - Relaunched SteamTron; the game detail restored to "Downloading", the manager
   reopened, and depot state was rebuilt from the persisted log.
-- Full completion-while-closed adoption and post-restart pause/cancel were not
-  exercised in this run; they use the same monitor/finalize path as live
-  downloads.
+- A later DDM download completed end to end: the content folder remained,
+  the library entry became confirmed, a launch target was detected, the setup
+  stamp was written, and the active sidecar was removed.
+- Post-restart pause/resume was not separately exercised; it uses the restored
+  PID and the same signal path tested for live downloads.
 
 ## Decisions and risks
 

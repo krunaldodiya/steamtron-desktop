@@ -1,6 +1,6 @@
 # Use DepotDownloaderMod instead of SMD's native engine
 
-- Status: active
+- Status: done
 - Date: 2026-11-15
 - Areas: `crates/steamtron-desktop/src/download.rs`
 
@@ -40,8 +40,8 @@ the existing Lua/manifest flow, progress events, pause/resume, and persistence.
 
 ## Acceptance criteria
 
-- [ ] The Binding of Isaac downloads real bytes and completes with DDM.
-- [ ] A successful DDM result with `"error": null` is treated as success.
+- [x] The Binding of Isaac downloads real bytes and completes with DDM.
+- [x] A successful DDM result with `"error": null` is treated as success.
 - [ ] The manager shows progress and the final installed state.
 - [ ] Pause/resume/cancel and app-exit reconnect still work.
 
@@ -58,6 +58,9 @@ the existing Lua/manifest flow, progress events, pause/resume, and persistence.
 - App DDM run reached 100% but was marked failed: SMD's completion result uses
   `"error": null`, and `Option::is_none()` on the present JSON key returned
   false. Completion now accepts a null error, and completed depots report 100%.
+- After the fix, an installed-app download completed: the content root is 47 MiB,
+  the library entry is confirmed, the detected `Isaac.exe` target is primary,
+  `setup_completed_at` is set, and the active sidecar is removed.
 
 ## Decisions and risks
 
