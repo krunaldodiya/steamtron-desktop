@@ -1080,6 +1080,10 @@ function openDownloadManager(game) {
       <button class="game-icon-button" id="download-manager-pause" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
       <button class="game-icon-button download-cancel-icon" id="download-manager-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
     </div>
+    <div class="download-depots hidden" id="download-manager-depots">
+      <div class="download-bar"><span id="download-manager-depot-fill"></span></div>
+      <p class="download-depot-label" id="download-manager-depot-label"></p>
+    </div>
     <div class="download-stats">
       <div class="download-stat"><span>Progress</span><strong id="download-manager-percent">—</strong></div>
       <div class="download-stat"><span>Downloaded</span><strong id="download-manager-completed">—</strong></div>
@@ -1097,6 +1101,9 @@ function openDownloadManager(game) {
   const totalNode = backdrop.querySelector("#download-manager-total");
   const speedNode = backdrop.querySelector("#download-manager-speed");
   const etaNode = backdrop.querySelector("#download-manager-eta");
+  const depotsBox = backdrop.querySelector("#download-manager-depots");
+  const depotFill = backdrop.querySelector("#download-manager-depot-fill");
+  const depotLabel = backdrop.querySelector("#download-manager-depot-label");
   const meta = backdrop.querySelector("#download-manager-meta");
   const pauseButton = backdrop.querySelector("#download-manager-pause");
   const cancelButton = backdrop.querySelector("#download-manager-cancel");
@@ -1126,8 +1133,24 @@ function openDownloadManager(game) {
     totalNode.textContent = total ? formatBytes(total) : "Calculating…";
     speedNode.textContent = speed > 0 ? `${formatBytes(speed)}/s` : "—";
     etaNode.textContent = eta || "—";
-    stage.textContent = state.message || (state.status === "paused" ? "Download paused" : "Preparing download…");
+    const stalled = Number(state.stalledSeconds) || 0;
+    const stalledNow = state.status === "downloading" && stalled >= 20;
+    stage.textContent = stalledNow
+      ? `No progress for ${stalled}s · ${state.message || "Waiting for the Steam CDN"}`
+      : state.message || (state.status === "paused" ? "Download paused" : "Preparing download…");
     stage.classList.toggle("error", state.status === "error");
+    stage.classList.toggle("warning", stalledNow);
+    const depotsTotal = Number(state.depotsTotal) || 0;
+    const depotsDone = Number(state.depotsDone) || 0;
+    const depotsCurrent = Number(state.depotsCurrent) || 0;
+    depotsBox.classList.toggle("hidden", depotsTotal === 0);
+    if (depotsTotal > 0) {
+      const done = depotsDone || Math.max(0, depotsCurrent - 1);
+      depotFill.style.width = `${Math.min(100, done / depotsTotal * 100)}%`;
+      depotLabel.textContent = depotsDone
+        ? `Installing files · ${depotsDone} / ${depotsTotal} depots`
+        : `Files · depot ${depotsCurrent || 1} of ${depotsTotal}`;
+    }
     meta.textContent = state.status === "paused"
       ? "The downloader is paused; partial files are kept."
       : terminal

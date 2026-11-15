@@ -24,6 +24,12 @@ pub struct DownloadState {
     pub total: u64,
     pub speed: f64,
     pub average_speed: f64,
+    pub depots_total: u32,
+    pub depots_done: u32,
+    pub depots_current: u32,
+    pub stalled_seconds: u64,
+    #[serde(skip)]
+    pub last_event_at: f64,
     pub message: String,
     pub log: String,
 }
@@ -425,6 +431,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         total: 0,
         speed: 0.0,
         average_speed: 0.0,
+        depots_total: 0,
+        depots_done: 0,
+        depots_current: 0,
+        stalled_seconds: 0,
+        last_event_at: unix_now(),
         message: "Starting smd…".into(),
         log: return_log.clone(),
     };
@@ -455,6 +466,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             total: 0,
             speed: 0.0,
             average_speed: 0.0,
+            depots_total: 0,
+            depots_done: 0,
+            depots_current: 0,
+            stalled_seconds: 0,
+            last_event_at: unix_now(),
             message: "Preparing depots…".into(),
             log: log_path.display().to_string(),
         };
@@ -479,6 +495,10 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         let mut plan_total: u64 = 0;
         let mut total: u64 = 0;
         let mut last_emit = Instant::now();
+        let mut last_event = Instant::now();
+        let mut depots_total = 0u32;
+        let mut depots_done = 0u32;
+        let mut depots_current = 0u32;
         let mut last_bytes = 0u64;
         let mut last_time = Instant::now();
         let mut speed = 0.0f64;
@@ -493,6 +513,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                 let _ = writeln!(file, "{line}");
             }
             let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+            last_event = Instant::now();
             match value.get("type").and_then(|kind| kind.as_str()) {
                 Some("plan") => {
                     if let Some(depots) = value.get("depots").and_then(|d| d.as_array()) {
@@ -500,6 +521,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                             .iter()
                             .map(|depot| depot.get("sizeBytes").and_then(|size| size.as_u64()).unwrap_or(0))
                             .sum();
+                        depots_total = depots.len() as u32;
                     }
                     stage_message = "Preparing depot downloads…".into();
                 }
@@ -510,6 +532,12 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                     stage_message = "Starting downloader…".into();
                 }
                 Some("status") => {
+                    if let Some(total) = value.get("total").and_then(|total| total.as_u64()) {
+                        if total > 0 { depots_total = total as u32; }
+                    }
+                    if let Some(current) = value.get("current").and_then(|current| current.as_u64()) {
+                        if current > 0 { depots_current = current as u32; }
+                    }
                     stage_message = match value.get("step").and_then(|step| step.as_str()) {
                         Some("disk_space") => "Checking disk space…",
                         Some("downloading_manifests") => "Fetching depot manifests…",
@@ -539,6 +567,8 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                     }
                 }
                 Some("depot_complete") => {
+                    depots_done = depots_done.saturating_add(1);
+                    depots_current = depots_done;
                     stage_message = "Finalizing depot…".into();
                 }
                 Some("error") => {
@@ -622,6 +652,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                             state.speed = speed;
                             state.average_speed = completed as f64
                                 / started.elapsed().as_secs_f64().max(0.001);
+                            state.depots_total = depots_total;
+                            state.depots_done = depots_done;
+                            state.depots_current = depots_current;
+                            state.stalled_seconds = last_event.elapsed().as_secs();
+                            state.last_event_at = unix_now();
                             state.status = "downloading".into();
                             state.message = if completed == 0 {
                                 if reported_percent > 0.0 {
@@ -651,6 +686,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         total: 0,
         speed: 0.0,
         average_speed: 0.0,
+        depots_total: 0,
+        depots_done: 0,
+        depots_current: 0,
+        stalled_seconds: 0,
+        last_event_at: unix_now(),
         message: "Starting smd…".into(),
         log: return_log,
     })
@@ -723,6 +763,13 @@ pub fn resume(game_id: &str) -> Result<(), String> {
     }
 }
 
+fn unix_now() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
 fn elapsed_text(duration: Duration) -> String {
     let seconds = duration.as_secs();
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
@@ -788,6 +835,9 @@ pub fn status(game_id: &str) -> Option<DownloadState> {
         state.message = "Download stopped unexpectedly. Start it again.".into();
         state.speed = 0.0;
     }
+    if state.status == "downloading" && state.last_event_at > 0.0 {
+        state.stalled_seconds = (unix_now() - state.last_event_at).max(0.0) as u64;
+    }
     Some(state.clone())
 }
 
@@ -808,6 +858,11 @@ mod tests {
                 total: 0,
                 speed: 0.0,
                 average_speed: 0.0,
+                depots_total: 0,
+                depots_done: 0,
+                depots_current: 0,
+                stalled_seconds: 0,
+                last_event_at: unix_now(),
                 message: String::new(),
                 log: String::new(),
             },
@@ -872,6 +927,26 @@ mod tests {
     }
 
     #[test]
+    fn status_reports_a_live_download_with_no_recent_output_as_stalled() {
+        let game_id = "test-stalled";
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        seed(game_id, child.id(), "downloading");
+        if let Some(state) = states().lock().unwrap().get_mut(game_id) {
+            state.last_event_at = unix_now() - 30.0;
+        }
+        let state = status(game_id).unwrap();
+        assert_eq!(state.status, "downloading");
+        assert!(state.stalled_seconds >= 29);
+        let _ = child.kill();
+        let _ = child.wait();
+        cleanup(game_id);
+    }
+
+    #[test]
     fn status_marks_a_download_with_a_dead_pid_as_failed() {
         let game_id = "test-dead-pid";
         seed(game_id, u32::MAX, "downloading");
@@ -892,6 +967,11 @@ mod tests {
                 total: 20,
                 speed: 1.0,
                 average_speed: 1.0,
+                depots_total: 0,
+                depots_done: 0,
+                depots_current: 0,
+                stalled_seconds: 0,
+                last_event_at: unix_now(),
                 message: "Preparing depot downloads…".into(),
                 log: String::new(),
             },

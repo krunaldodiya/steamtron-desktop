@@ -649,12 +649,16 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-inline-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:7px; color:var(--muted); font-size:12px; }
 .download-inline-meta button { padding:5px 10px; font-size:11px; }
 .download-drive-modal #download-drive-select { width:100%; margin:14px 0 10px; }
-.download-modal { width:min(900px, 94vw); }
+.download-modal { width:min(1100px, 94vw); max-height:86vh; }
 .download-stage { margin:10px 0 0; color:var(--text); font-size:15px; font-weight:600; }
 .download-stage.error { color:var(--error); }
+.download-stage.warning { color:var(--warning); }
 .download-bar { height:10px; margin:12px 0 16px; border-radius:999px; background:#141c26; overflow:hidden; border:1px solid var(--border); }
 .download-bar span { display:block; height:100%; width:0; background:var(--accent); transition:width .25s ease; }
 .download-actions-inline { display:flex; justify-content:flex-end; gap:8px; margin:-4px 0 14px; }
+.download-depots { margin:0 0 14px; }
+.download-depots .download-bar { margin:0 0 6px; height:8px; }
+.download-depot-label { margin:0; color:var(--muted); font-size:12px; }
 .download-actions-inline .game-icon-button { width:36px; height:36px; }
 .download-cancel-icon:hover { border-color:var(--error); color:var(--error); }
 .download-stats { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:8px; margin:0 0 14px; }
