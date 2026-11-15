@@ -32,3 +32,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0005](0005-route-focus.md) | Independent route focus and Home rail looping | done | 2026-11-15 |
 | [0006](0006-store-cache.md) | Use the local Store catalogue cache | done | 2026-11-15 |
 | [0007](0007-detail-focus.md) | One visible focus and detail-page action focus | done | 2026-11-15 |
+| [0008](0008-panel-nav-focus.md) | Store pane isolation and route-tab Up focus | done | 2026-11-15 |

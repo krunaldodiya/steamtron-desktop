@@ -1688,6 +1688,16 @@ function enterContentFromHeader() {
     const card = document.querySelector("#store-results .cover-card")
       || document.querySelector(".store-content .cover-card");
     if (card) { focusControl(card); return true; }
+    if (storeLoading) {
+      // Catalogue is still painting: keep the tab focused and let the first
+      // card take over when results arrive, rather than dropping into the
+      // filter sidebar.
+      focusRouteOnEntry("store", "first");
+      return true;
+    }
+    const retry = document.querySelector("#store-retry");
+    if (retry) { focusControl(retry); return true; }
+    return false;
   }
   const search = document.querySelector("#store-search");
   if (search) { focusControl(search); return true; }
@@ -1849,6 +1859,7 @@ function focusRouteOnEntry(view, mode = "first") {
 
 function applyPendingRouteFocus(view = appView) {
   if (!pendingRouteFocus || pendingRouteFocus.view !== view) return false;
+  if (appView !== view) return false;
   if (visibleModal() || document.querySelector("#settings-page:not(.hidden)")) return false;
   // The store paints a loading skeleton first. Wait for cards instead of
   // parking focus on the search box.
@@ -2120,6 +2131,7 @@ function moveNavigation(action) {
             ? "modal"
             : "page";
   const [x, y] = center(current);
+  const currentRect = current.getBoundingClientRect();
   const bestIn = (nodes) => {
     let best = null;
     for (const node of nodes) {
@@ -2127,31 +2139,55 @@ function moveNavigation(action) {
       const [cx, cy] = center(node);
       const dx = cx - x;
       const dy = cy - y;
-      const along = action === "right" ? dx : action === "left" ? -dx : action === "down" ? dy : -dy;
-      const across = action === "left" || action === "right" ? Math.abs(dy) : Math.abs(dx);
+      const horizontal = action === "left" || action === "right";
+      if (horizontal) {
+        // Left/Right stays on the visual row; a chip or pager above/below is
+        // not a horizontal neighbour.
+        const nodeRect = node.getBoundingClientRect();
+        if (Math.abs(dy) > (currentRect.height + nodeRect.height) / 2) continue;
+      }
+      const along = horizontal ? (action === "right" ? dx : -dx) : (action === "down" ? dy : -dy);
+      const across = horizontal ? Math.abs(dy) : Math.abs(dx);
       if (along <= 1) continue;
       const score = along + across * 3;
       if (!best || score < best.score) best = { score, node };
     }
     return best;
   };
-  // Keep focus inside the current region first (store sidebar vs catalogue),
-  // so pressing Down at the end of the grid reaches the pager instead of the
-  // sidebar. Cross-region moves only happen when the region has no candidate.
+  // Keep focus inside the current region (store sidebar vs catalogue).
+  // Up/Down never cross regions; Left/Right is the explicit pane switch.
   const region = regionOf(current);
   const regional = controls.filter((node) => regionOf(node) === region);
-  const best = bestIn(regional) || bestIn(controls);
+  if (action === "left" || action === "right") {
+    if (region === "sidebar") {
+      // The sidebar is a vertical stack; Right is the way out.
+      return action === "right" ? focusStoreContent() : false;
+    }
+    if (region === "content") {
+      // Horizontal movement still walks the catalogue grid; only the left
+      // edge leaves for the sidebar.
+      const best = bestIn(regional);
+      if (best) {
+        focusControl(best.node);
+        return true;
+      }
+      return action === "left" ? focusStoreSidebar() : false;
+    }
+    const best = bestIn(regional);
+    if (best) {
+      focusControl(best.node);
+      return true;
+    }
+    return false;
+  }
+  const best = bestIn(regional);
   if (best) {
     focusControl(best.node);
     return true;
   }
-  if (action === "right" && current.closest(".store-sidebar")) {
-    return focusStoreContent();
-  }
-  if (action === "left" && current.closest(".store-content")) {
-    return focusStoreSidebar();
-  }
-  if (action === "up") {
+  // At the top of a route body, Up reaches that route's own tab. Focus never
+  // leaks sideways into the Store's other pane or a sibling tab.
+  if (action === "up" && region !== "header") {
     const nav = activeNavControl();
     if (nav) { focusControl(nav); return true; }
   }
