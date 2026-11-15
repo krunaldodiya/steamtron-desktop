@@ -4134,13 +4134,21 @@ async function openStoreItem(id) {
     return;
   }
   let item = base;
-  try {
-    const full = await invoke("store_game", { id: Number(id) });
-    if (full && full.id) item = full;
-  } catch (_error) { /* the list entry is enough for the detail page */ }
+  // Paint from the list entry immediately. The full request can be slow when
+  // the catalogue came from the cache and the API is unreachable.
   storeDetail = item;
   appView = "store-game";
   renderStoreDetail();
+  try {
+    const full = await invoke("store_game", { id: Number(id) });
+    if (!full || !full.id) return;
+    if (appView !== "store-game" || String(storeDetail?.id) !== String(id)) return;
+    item = full;
+    storeDetail = item;
+    renderStoreDetail({ focus: false });
+  } catch (_error) {
+    // The list entry is enough for the detail page.
+  }
 }
 
 function openAddProgress(title) {
@@ -4216,9 +4224,18 @@ async function addStoreItemToLibrary(item, button) {
   }
 }
 
-function renderStoreDetail() {
+function renderStoreDetail({ focus = true } = {}) {
   const item = storeDetail;
   if (!item) { setView("store"); return; }
+  // A background refresh replaces the detail DOM; remember the focused
+  // control so the user's focus survives the repaint.
+  const previousFocus = !focus && detailEl.contains(document.activeElement)
+    ? document.activeElement.id
+      ? `#${CSS.escape(document.activeElement.id)}`
+      : document.activeElement.dataset?.copy
+        ? `[data-copy="${CSS.escape(document.activeElement.dataset.copy)}"]`
+        : null
+    : null;
   // Managed titles always open the library detail directly.
   const managedEntry = managedGameForStoreItem(item);
   if (managedEntry) {
@@ -4263,7 +4280,7 @@ function renderStoreDetail() {
       storeDetail = { ...storeDetail, steam_app_id: appid };
       const managed = managedGameForStoreItem(storeDetail);
       if (managed) { openManagedGame(managed.id, "store", storeDetail); return; }
-      renderStoreDetail();
+      renderStoreDetail({ focus: false });
     }).catch(() => {});
   }
   if (item.steam_app_id) {
@@ -4285,9 +4302,15 @@ function renderStoreDetail() {
   const coverNode = detailEl.querySelector(".game-cover");
   if (coverNode) coverNode.addEventListener("error", () => { coverNode.style.visibility = "hidden"; });
   // Land on Add to library so a Store title can be added without hunting for
-  // the button. Titles without a Steam build fall back to Back.
-  const focusTarget = firstContentControl("store-game");
-  if (focusTarget) focusControl(focusTarget);
+  // the button. Titles without a Steam build fall back to Back. Background
+  // refreshes must not move the user's focus.
+  if (focus) {
+    const focusTarget = firstContentControl("store-game");
+    if (focusTarget) focusControl(focusTarget);
+  } else if (previousFocus) {
+    const restored = detailEl.querySelector(previousFocus);
+    if (restored && !restored.disabled) focusControl(restored);
+  }
 }
 
 async function mapLimit(items, limit, worker) {

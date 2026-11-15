@@ -33,3 +33,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0006](0006-store-cache.md) | Use the local Store catalogue cache | done | 2026-11-15 |
 | [0007](0007-detail-focus.md) | One visible focus and detail-page action focus | done | 2026-11-15 |
 | [0008](0008-panel-nav-focus.md) | Store pane isolation and route-tab Up focus | done | 2026-11-15 |
+| [0009](0009-store-card-open.md) | Open Store cards without waiting for the detail request | done | 2026-11-15 |
+| [0010](0010-chip-focus-ring.md) | One focus ring on pill chips | done | 2026-11-15 |
