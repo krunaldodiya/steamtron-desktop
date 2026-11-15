@@ -452,7 +452,7 @@ button.primary:hover { filter:brightness(1.06); }
 .store-grid { margin-top:0; }
 
 
-.store-recent { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+.store-recent { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:18px; padding-top:4px; }
 .store-recent-label { color:var(--muted); font-size:12px; margin-right:4px; }
 .store-chip { padding:7px 12px; border-radius:999px; border:1px solid var(--border); background:var(--surface-raised); color:var(--text); font-size:12px; }
 .store-chip:hover, .store-chip.nav-focus { border-color:var(--accent); }
