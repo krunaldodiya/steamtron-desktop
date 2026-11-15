@@ -57,7 +57,15 @@ finalizes the install and marks the game playable.
 
 ## Verification
 
-Pending.
+- Started a managed download for App 113200 in the installed build.
+- Sent SIGTERM to the SteamTron process. `ps` showed SMD still alive with PPID
+  1 and established Steam CDN sockets, confirming it outlived the app.
+- The per-game sidecar contained the live PID, JSON log, and game root.
+- Relaunched SteamTron; the game detail restored to "Downloading", the manager
+  reopened, and depot state was rebuilt from the persisted log.
+- Full completion-while-closed adoption and post-restart pause/cancel were not
+  exercised in this run; they use the same monitor/finalize path as live
+  downloads.
 
 ## Decisions and risks
 

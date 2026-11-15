@@ -35,13 +35,14 @@ button, and a cancelled download removes its partial files.
 
 - R1: The Downloading button is enabled and opens a download manager.
 - R2: The manager uses a large broad download-modal layout (up to 1100px) with
-  a progress bar, current stage message, depot/install progress, and five stat
-  cells in one row for progress, downloaded bytes, total size, average speed,
-  and ETA. It updates without closing.
+  one overall progress bar, current stage message, and five stat cells in one
+  row for progress, downloaded bytes, total size, average speed, and ETA. It
+  updates without closing.
 - R2a: Pause/Resume and Cancel are small icon-only controls on the right side of
   the overall progress bar, sized to sit at the bar's height.
 - R2b: The bottom section lists every content group/depot with its own progress
-  bar, bytes, and status. It is not an explanatory text block.
+  bar, bytes, and status. It is not an explanatory text block. There is no
+  second aggregate progress bar.
 - R2c: The manager has no bottom Close button; the top-right window close is
   the only close control. The informative text block is removed.
 - R2c: A live download with no output for 20 seconds reports its stalled time
@@ -63,9 +64,9 @@ button, and a cancelled download removes its partial files.
 
 ## Acceptance criteria
 
-- [ ] Downloading opens a large manager with the five stats in one row, progress
-  bar, small right-side icon controls, and one row per depot with its own
-  progress.
+- [ ] Downloading opens a large manager with the five stats in one row, one
+  overall progress bar, small right-side icon controls, and one row per depot
+  with its own progress.
 - [ ] A stalled live download shows the elapsed no-progress time.
 - [ ] Pause freezes the downloader; Resume continues it from the same files.
 - [ ] Cancel removes partial content and shows Download again.
@@ -102,8 +103,8 @@ button, and a cancelled download removes its partial files.
   the CDN connection time out. Resume relies on SMD's chunk retries.
 - The broad modal restores the pre-`0101ca2` download window, extended with
   pause/resume, average speed, ETA, depot progress, and stalled reporting.
-  UmuTron's `open_download_manager` supplied the data/install bar split and
-  stalled-stage behavior. The old window was removed when downloads became
+  UmuTron's `open_download_manager` supplied the per-depot list and stalled-stage
+  behavior; SteamTron keeps one aggregate top bar instead of its second bar. The old window was removed when downloads became
   inline; both now coexist: inline progress stays on the game card and the
   Downloading button reopens the full manager.
 - Queue/up-next is not implemented because SteamTron currently runs one

@@ -1082,10 +1082,6 @@ function openDownloadManager(game) {
         <button class="game-icon-button download-cancel-icon" id="download-manager-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
       </div>
     </div>
-    <div class="download-depots hidden" id="download-manager-depots">
-      <div class="download-bar"><span id="download-manager-depot-fill"></span></div>
-      <p class="download-depot-label" id="download-manager-depot-label"></p>
-    </div>
     <div class="download-stats">
       <div class="download-stat"><span>Progress</span><strong id="download-manager-percent">—</strong></div>
       <div class="download-stat"><span>Downloaded</span><strong id="download-manager-completed">—</strong></div>
@@ -1107,9 +1103,6 @@ function openDownloadManager(game) {
   const totalNode = backdrop.querySelector("#download-manager-total");
   const speedNode = backdrop.querySelector("#download-manager-speed");
   const etaNode = backdrop.querySelector("#download-manager-eta");
-  const depotsBox = backdrop.querySelector("#download-manager-depots");
-  const depotFill = backdrop.querySelector("#download-manager-depot-fill");
-  const depotLabel = backdrop.querySelector("#download-manager-depot-label");
   const nextSection = backdrop.querySelector("#download-manager-next");
   const nextCount = backdrop.querySelector("#download-manager-next-count");
   const depotList = backdrop.querySelector("#download-manager-depots-list");
@@ -1148,17 +1141,6 @@ function openDownloadManager(game) {
       : state.message || (state.status === "paused" ? "Download paused" : "Preparing download…");
     stage.classList.toggle("error", state.status === "error");
     stage.classList.toggle("warning", stalledNow);
-    const depotsTotal = Number(state.depotsTotal) || 0;
-    const depotsDone = Number(state.depotsDone) || 0;
-    const depotsCurrent = Number(state.depotsCurrent) || 0;
-    depotsBox.classList.toggle("hidden", depotsTotal === 0);
-    if (depotsTotal > 0) {
-      const done = depotsDone || Math.max(0, depotsCurrent - 1);
-      depotFill.style.width = `${Math.min(100, done / depotsTotal * 100)}%`;
-      depotLabel.textContent = depotsDone
-        ? `Installing files · ${depotsDone} / ${depotsTotal} depots`
-        : `Files · depot ${depotsCurrent || 1} of ${depotsTotal}`;
-    }
     const depots = Array.isArray(state.depots) ? state.depots : [];
     nextSection.classList.toggle("hidden", depots.length === 0);
     if (depots.length) {
