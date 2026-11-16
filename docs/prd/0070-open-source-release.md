@@ -135,23 +135,19 @@ Recorded after implementation:
   GitHub Releases page.
 - `cargo test -p steamtron-desktop`: 26 passed before the packaging-only
   changes.
-- GitHub Actions workflow added, but not executed from this workstation.
 - GitHub Actions workflow added and `v0.1.0` tag pushed to trigger the Linux and
   Windows build jobs. CI status could not be inspected because `gh` is not
   authenticated.
 - Windows NSIS installer was not built locally because Tauri requires a Windows
-  runner and WinFsp.
   runner and WinFsp; the Windows job is part of the tag workflow.
 - Local Linux artifact hashes:
   - deb `884fc2542736fee0e7305982eac845e7406d214c1d53a1d9e99f45b5d01826ae`
   - rpm `eff5a395430eb0a6ffe14594bbb21623aff76f81494054df59a926e2abca10d7`
   - AppImage `ffe7f4739db00de9b8db551459004be6be8793351536c2b0d61eda1b7eb86f50`
 - GitHub repository rename/visibility/metadata was not applied: `gh` is not
-  authenticated and the repository is not readable unauthenticated.
   authenticated and the repository is not readable unauthenticated. The
   ready-to-run script is `scripts/set-github-metadata.sh`.
 - Vercel deployment was not applied: Vercel CLI is logged out. The landing
-  project is ready under `site/` with `vercel.json`.
   project is ready under `site/` with `vercel.json`; `vercel deploy --temporary`
   also required login.
 
