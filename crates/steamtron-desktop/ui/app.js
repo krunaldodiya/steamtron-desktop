@@ -1232,7 +1232,12 @@ function openDownloadManager(game) {
     catch {}
     if (closed) return;
     if (!state) {
-      render({ ...(managedDownloads.get(game.id) || {}), status: "error", message: "The download is no longer running." });
+      const local = managedDownloads.get(game.id);
+      if (local && !downloadTerminal(local)) {
+        render(local);
+        return;
+      }
+      render({ ...local, status: "error", message: "The download is no longer running." });
       settle(null);
       return;
     }

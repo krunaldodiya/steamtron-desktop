@@ -75,6 +75,13 @@ pub(crate) fn publish(app: &AppHandle, state: &DownloadState) {
     let _ = app.emit("download-progress", state.clone());
 }
 
+pub(crate) fn publish_and_store(app: &AppHandle, state: &DownloadState) {
+    if let Ok(mut states) = states().lock() {
+        states.insert(state.game_id.clone(), state.clone());
+    }
+    publish(app, state);
+}
+
 const SMD_VERSION: &str = "1.5.0";
 
 #[cfg(target_os = "linux")]

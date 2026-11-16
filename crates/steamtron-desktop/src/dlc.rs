@@ -443,14 +443,14 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         message: "Downloading DLC…".into(),
         log: String::new(),
     };
-    download::publish(&app, &dl_state);
+    download::publish_and_store(&app, &dl_state);
     for (index, app_id) in pending.iter().enumerate() {
         let title = format!("DLC {app_id}");
         dl_state.message = format!("Downloading {title} ({} of {total})…", index + 1);
         dl_state.percent = index as f64 / total as f64 * 100.0;
         dl_state.depots_current = index as u32;
         dl_state.depots_done = index as u32;
-        download::publish(&app, &dl_state);
+        download::publish_and_store(&app, &dl_state);
         let depots = pics.depots.get(app_id).filter(|depots| !depots.is_empty()).cloned();
         let base = index as f64 / total as f64 * 100.0;
         let span = 100.0 / total as f64;
@@ -479,7 +479,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                             dl_state.completed = (dl_state.percent * total as f64 / 100.0) as u64;
                             dl_state.depots_current = current as u32;
                             dl_state.depots_done = current as u32;
-                            download::publish(&app, &dl_state);
+                            download::publish_and_store(&app, &dl_state);
                         }
                     }
                 }
@@ -488,7 +488,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             if !status.success() {
                 dl_state.status = "error".into();
                 dl_state.message = format!("{title} download failed.");
-                download::publish(&app, &dl_state);
+                download::publish_and_store(&app, &dl_state);
                 let _ = app.emit("download-complete", serde_json::json!({"gameId":game_id,"success":false,"cancelled":false,"message":dl_state.message}));
                 return Err(dl_state.message);
             }
@@ -514,7 +514,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     dl_state.depots_done = total as u32;
     dl_state.depots_current = total as u32;
     dl_state.message = "DLC download complete.".into();
-    download::publish(&app, &dl_state);
+    download::publish_and_store(&app, &dl_state);
     let _ = app.emit("download-complete", serde_json::json!({"gameId":game_id,"success":true,"cancelled":false,"message":dl_state.message}));
     Ok(dl_state)
 }
