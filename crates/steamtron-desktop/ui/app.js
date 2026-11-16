@@ -832,6 +832,13 @@ async function updateManagedDlcAction(game) {
   } catch (_error) { /* DLC state is optional */ }
 }
 
+function setManagedPrimaryDownloading(game) {
+  const button = detailEl.querySelector("#managed-play");
+  if (!button) return;
+  button.textContent = "Downloading";
+  button.onclick = () => openDownloadManager(game);
+}
+
 async function startManagedDlcUpdate(game) {
   managedDownloads.set(game.id, {
     gameId: game.id,
@@ -842,6 +849,7 @@ async function startManagedDlcUpdate(game) {
     speed: 0,
     message: "Downloading DLC…",
   });
+  setManagedPrimaryDownloading(game);
   openDownloadManager(game);
   try {
     await invoke("start_managed_dlc_download", { gameId: game.id });
@@ -1566,10 +1574,14 @@ function applyDownloadEvent(state) {
   managedDownloads.set(state.gameId, state);
   if (!downloadTerminal(state)) watchManagedDownload(state.gameId);
   if (appView === "game" && managedSelectedId === state.gameId) {
-    if (!document.querySelector("#managed-download-inline")) {
+    if (downloadTerminal(state)) {
+      renderManagedMode();
+    } else if (!document.querySelector("#managed-download-inline")) {
       renderManagedMode();
     } else {
       applyInlineDownload(state.gameId);
+      const game = managedLibrary?.games?.find((entry) => entry.id === state.gameId);
+      if (game) setManagedPrimaryDownloading(game);
     }
   }
 }
