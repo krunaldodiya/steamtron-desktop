@@ -32,7 +32,9 @@
     "active": true,
     "targets": [
       "deb",
-      "appimage"
+      "rpm",
+      "appimage",
+      "nsis"
     ],
     "icon": [
       "icons/32x32.png",
@@ -41,12 +43,21 @@
       "icons/512x512.png",
       "icons/icon.png"
     ],
+    "publisher": "Krunal Dodiya",
+    "copyright": "Copyright © 2026 Krunal Dodiya",
+    "homepage": "https://steamtron.vercel.app",
+    "license": "MIT",
     "category": "Utility",
-    "shortDescription": "Steam library and fixes manager",
-    "longDescription": "SteamTron manages Steam library entries, per-game fixes, archived builds, and SLSsteam integration.",
+    "shortDescription": "Open-source Steam library, fixes, and managed-game manager",
+    "longDescription": "SteamTron manages Steam library entries, per-game fixes, archived builds, managed downloads, Proton runtimes, backups, and SLSsteam integration.",
     "linux": {
       "deb": {
         "depends": []
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
       }
     }
   }

@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible SteamTron problem
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove account tokens, API keys, and personal paths before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: SteamTron version / commit
+      placeholder: v0.1.0 or commit hash
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and desktop session
+      placeholder: CachyOS / KDE Wayland, Ubuntu 24.04 X11, Windows 11 23H2
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact screen, focused control, game, and whether fixes/controller/fullscreen were active.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the relevant per-game diagnostics/log lines. Do not include tokens.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks completed
+      options:
+        - label: I searched existing issues.
+        - label: I removed tokens and sensitive paths from logs.
+        - label: I can reproduce this with the latest release.

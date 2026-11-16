@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose a scoped feature or parity item
+title: "[feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        SteamTron requires a PRD before implementation. This issue is for agreeing on the problem and scope first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user-visible problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the observable outcome, not only the implementation.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Library
+        - Store / IGDB
+        - Fixes / overlay
+        - Registration / Steam integration
+        - Proton / launch
+        - Downloads / DLC
+        - Backups / saves
+        - UI / focus / controller
+        - Packaging / release
+        - Documentation / API
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: platforms
+    attributes:
+      label: Platform impact
+      description: Linux, Windows, both, or platform-specific?
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks completed
+      options:
+        - label: I searched existing issues.
+        - label: I checked the PRD index and parity backlog.
+        - label: I can help test this change.
