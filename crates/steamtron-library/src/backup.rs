@@ -581,6 +581,18 @@ mod import_tests {
     }
 
     #[test]
+    fn fixes_tar_round_trips_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut files = BTreeMap::new();
+        files.insert("steam_api64.dll".to_owned(), vec![1, 2, 3]);
+        files.insert("steam_settings/steam_appid.txt".to_owned(), b"42".to_vec());
+        let digest = write_fixes_tar(temp.path(), "Game", &files).unwrap();
+        assert_eq!(digest.len(), 64);
+        let restored = read_fixes_tar(&temp.path().join("fixes.tar"), "Game");
+        assert_eq!(restored, files);
+    }
+
+    #[test]
     fn repaired_manifest_tar_contains_lua_and_manifests() {
         let temp = tempfile::tempdir().unwrap();
         let mut manifests = BTreeMap::new();
@@ -873,4 +885,135 @@ pub fn repair_backup_manifests_with_zips(
     }
     progress(total, total, "Backup metadata repair complete").map_err(LibraryError::Archive)?;
     Ok(BackupRepairSummary { scanned: total, repaired, complete, skipped, warnings })
+}
+
+#[derive(Debug, Serialize)]
+pub struct FixesRepairSummary {
+    pub scanned: usize,
+    pub updated: usize,
+    pub complete: usize,
+    pub skipped: usize,
+    pub warnings: Vec<String>,
+}
+
+fn collect_fix_files(root: &Path, base: &Path, files: &mut BTreeMap<String, Vec<u8>>) -> Result<(), LibraryError> {
+    let entries = fs::read_dir(root).map_err(|error| LibraryError::io(root, error))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_fix_files(&path, base, files)?;
+        } else if path.is_file() {
+            let relative = path.strip_prefix(base).map_err(|error| LibraryError::Archive(error.to_string()))?;
+            let key = relative.to_string_lossy().replace('\\', "/");
+            let data = fs::read(&path).map_err(|error| LibraryError::io(&path, error))?;
+            files.insert(key, data);
+        }
+    }
+    Ok(())
+}
+
+fn read_fixes_tar(path: &Path, folder: &str) -> BTreeMap<String, Vec<u8>> {
+    let mut files = BTreeMap::new();
+    let Ok(file) = fs::File::open(path) else { return files };
+    let mut archive = tar::Archive::new(file);
+    let Ok(entries) = archive.entries() else { return files };
+    for entry in entries.flatten() {
+        if entry.header().entry_type().is_dir() { continue; }
+        let Ok(path) = entry.path() else { continue };
+        let text = path.to_string_lossy().replace('\\', "/");
+        let prefix = format!("fixes/{folder}/");
+        let Some(relative) = text.strip_prefix(&prefix) else { continue };
+        let mut entry = entry;
+        let mut data = Vec::new();
+        if entry.read_to_end(&mut data).is_ok() {
+            files.insert(relative.to_owned(), data);
+        }
+    }
+    files
+}
+
+fn write_fixes_tar(folder: &Path, content_folder: &str, files: &BTreeMap<String, Vec<u8>>) -> Result<String, LibraryError> {
+    use sha2::Digest;
+    let path = folder.join("fixes.tar");
+    let temporary = folder.join(format!(".fixes.tar.repair-{}", std::process::id()));
+    let file = fs::File::create(&temporary).map_err(|error| LibraryError::io(&temporary, error))?;
+    let mut archive = tar::Builder::new(file);
+    let top = format!("fixes/{content_folder}");
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Directory);
+    header.set_size(0);
+    header.set_mode(0o755);
+    header.set_cksum();
+    archive.append_data(&mut header, &top, std::io::empty()).map_err(|error| LibraryError::Archive(error.to_string()))?;
+    for (relative, data) in files {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, format!("{top}/{relative}"), data.as_slice())
+            .map_err(|error| LibraryError::Archive(error.to_string()))?;
+    }
+    let file = archive.into_inner().map_err(|error| LibraryError::Archive(error.to_string()))?;
+    file.sync_data().map_err(|error| LibraryError::io(&temporary, error))?;
+    fs::rename(&temporary, &path).map_err(|error| LibraryError::io(&path, error))?;
+    let bytes = fs::read(&path).map_err(|error| LibraryError::io(&path, error))?;
+    let digest = sha2::Sha256::digest(&bytes);
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub fn repair_backup_fixes(
+    root: &Path,
+    progress: &mut dyn FnMut(usize, usize, &str) -> Result<(), String>,
+) -> Result<FixesRepairSummary, LibraryError> {
+    let library = Library::load().map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let mut folders = Vec::new();
+    for entry in fs::read_dir(root).map_err(|error| LibraryError::io(root, error))?.flatten() {
+        if entry.path().is_dir() && entry.path().join("content.tar").is_file() {
+            folders.push(entry.path());
+        }
+    }
+    let total = folders.len();
+    let mut updated = 0;
+    let mut complete = 0;
+    let mut skipped = 0;
+    let mut warnings = Vec::new();
+    for (index, folder) in folders.iter().enumerate() {
+        let manifest_path = fs::read_dir(folder).ok().into_iter().flatten().flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("appmanifest_") && name.ends_with(".json")));
+        let Some(manifest_path) = manifest_path else { skipped += 1; continue };
+        let mut manifest: Value = match fs::read(&manifest_path).ok().and_then(|data| serde_json::from_slice(&data).ok()) {
+            Some(value) => value,
+            None => { skipped += 1; continue; }
+        };
+        let Some(appid) = manifest.get("steam_app_id").and_then(|value| value.as_u64()).map(|value| value as u32) else { skipped += 1; continue };
+        let Some(game) = library.game_by_app_id(appid) else { skipped += 1; continue };
+        let drive = steamtron_core::library::drive_root_for(&game.installation.root);
+        let Some(layout) = drive.and_then(|drive| steamtron_core::library::game_layout(&drive, game).ok()) else { skipped += 1; continue };
+        if !layout.fixes.is_dir() { skipped += 1; continue; }
+        let content_folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game");
+        let existing = read_fixes_tar(&folder.join("fixes.tar"), content_folder);
+        let mut installed = BTreeMap::new();
+        collect_fix_files(&layout.fixes, &layout.fixes, &mut installed)?;
+        if installed.is_empty() { skipped += 1; continue; }
+        let needs_update = !folder.join("fixes.tar").is_file() || installed.keys().any(|name| !existing.contains_key(name));
+        if !needs_update { complete += 1; continue; }
+        let mut merged = existing;
+        for (name, data) in installed { merged.insert(name, data); }
+        progress(index, total, &format!("Repairing fixes {} of {} · {}", index + 1, total, game.title))
+            .map_err(LibraryError::Archive)?;
+        let digest = match write_fixes_tar(folder, content_folder, &merged) {
+            Ok(digest) => digest,
+            Err(error) => { skipped += 1; warnings.push(format!("Skipped {}: {error}", game.title)); continue; }
+        };
+        manifest["fixes_directory"] = Value::String(format!("fixes/{content_folder}"));
+        manifest["components"]["fixes"] = serde_json::json!({"name":"fixes.tar","sha256":digest});
+        let temporary = manifest_path.with_extension("json.steamtron.tmp");
+        fs::write(&temporary, serde_json::to_vec_pretty(&manifest).map_err(|error| LibraryError::Archive(error.to_string()))?)
+            .map_err(|error| LibraryError::io(&temporary, error))?;
+        fs::rename(&temporary, &manifest_path).map_err(|error| LibraryError::io(&manifest_path, error))?;
+        updated += 1;
+    }
+    progress(total, total, "Backup fixes repair complete").map_err(LibraryError::Archive)?;
+    Ok(FixesRepairSummary { scanned: total, updated, complete, skipped, warnings })
 }

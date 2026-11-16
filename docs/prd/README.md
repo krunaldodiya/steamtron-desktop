@@ -77,3 +77,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0050](0050-backup-restore-activity-line.md) | Current-file activity for backup and restore | done | 2026-11-16 |
 | [0051](0051-backup-fdatasync.md) | Faster backup archives with fdatasync | done | 2026-11-16 |
 | [0052](0052-repair-backup-metadata.md) | Repair backup metadata without redoing content | done | 2026-11-16 |
+| [0053](0053-repair-backup-fixes.md) | Repair backup fixes from installed fixes | done | 2026-11-16 |
