@@ -305,7 +305,7 @@ fn read_bundle_file(path: &Path) -> Option<Bundle> {
     }
 }
 
-fn store_persistent_bundle(appid: &str, bytes: &[u8]) {
+pub(crate) fn store_persistent_bundle(appid: &str, bytes: &[u8]) {
     let path = persistent_bundle_path(appid);
     let Some(parent) = path.parent() else { return };
     if fs::create_dir_all(parent).is_err() { return; }
@@ -335,6 +335,10 @@ pub fn migrate_manifest_cache() {
             let _ = fs::copy(&path, &destination);
         }
     }
+}
+
+pub(crate) fn read_persistent_bundle(appid: &str) -> Option<Bundle> {
+    read_bundle_file(&persistent_bundle_path(appid))
 }
 
 pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {

@@ -4249,15 +4249,14 @@ async fn regenerate_managed_manifests(game_id: String) -> Result<serde_json::Val
     let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     let app_id = game.metadata_app_id.ok_or_else(|| "This game has no Steam App ID.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        use steamtron_library::managed::{write_managed_lua, write_managed_manifests};
+        use steamtron_library::managed::write_managed_manifests;
 
         let bundle = steamtron_library::download_bundle(&app_id.to_string()).map_err(|error| error.to_string())?;
-        let (_, lua_path) = write_managed_lua(&game, &bundle.lua).map_err(|error| error.to_string())?;
         write_managed_manifests(&bundle.manifests).map_err(|error| error.to_string())?;
         Ok::<_, String>(serde_json::json!({
             "appid": app_id,
             "manifests": bundle.manifests.len(),
-            "lua": lua_path.display().to_string(),
+            "lua": format!("manifest-bundles/{app_id}.zip"),
         }))
     })
     .await
@@ -4556,6 +4555,7 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
     if !root.is_dir() {
         return Err("The installation folder does not exist.".into());
     }
+    let cache = steamtron_core::paths::layout().cache_dir().join("smd");
     let lua = steamtron_core::library::managed_lua_path(game)
         .filter(|path| path.is_file())
         .or_else(|| {
@@ -4563,16 +4563,24 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
                 .ok()
                 .map(|root| root.join("config/stplug-in").join(format!("{app_id}.lua")))
                 .filter(|path| path.is_file())
-        })
-        .ok_or_else(|| "The Lua manifest is missing. Regenerate manifests or re-add the game first.".to_string())?;
-    let cache = steamtron_core::paths::layout().cache_dir().join("smd");
-    let smd_lua = download::smd_lua(app_id, &lua, &cache)?;
+        });
+    let lua_path = if let Some(path) = lua {
+        path
+    } else {
+        let bundle = steamtron_library::download_bundle(&app_id.to_string())
+            .map_err(|error| format!("Could not read the Lua manifest bundle: {error}"))?;
+        std::fs::create_dir_all(&cache).map_err(|error| error.to_string())?;
+        let path = cache.join(format!("{app_id}.verify.lua"));
+        std::fs::write(&path, bundle.lua.as_bytes()).map_err(|error| error.to_string())?;
+        path
+    };
+    let smd_lua = download::smd_lua(app_id, &lua_path, &cache)?;
     let logs = steamtron_core::paths::layout().diagnostics_for(&game_id);
     std::fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
     let log = logs.join(format!("verify-{}.log", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0)));
     if let Some(ddm) = depot_downloader_path() {
         emit_operation_at(&app, "verify", &game_id, "check", "running", "Preparing depot metadata…", 0.0);
-        let lua_path = lua.clone();
+        let lua_path = lua_path.clone();
         let root_path = root.clone();
         let metadata = tauri::async_runtime::spawn_blocking(move || ensure_verify_metadata(app_id, &lua_path, &root_path))
             .await
@@ -5560,7 +5568,10 @@ fn main() {
             std::thread::spawn(|| {
                 let _ = download::resolve_smd();
             });
-            std::thread::spawn(steamtron_library::migrate_manifest_cache);
+            std::thread::spawn(|| {
+                steamtron_library::migrate_manifest_cache();
+                steamtron_library::managed::cleanup_legacy_lua_files();
+            });
             download::restore(app.handle());
             Ok(())
         })

@@ -47,8 +47,16 @@ pub fn download_steamml(appid: &str) -> Result<Bundle, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
     }
+    if let Some(bundle) = crate::read_persistent_bundle(appid) {
+        if lua_declares_appid(&bundle.lua, appid) {
+            return Ok(bundle);
+        }
+    }
     if let Some(bundle) = crate::read_cached_manifest(appid, "steamml") {
         if lua_declares_appid(&bundle.lua, appid) {
+            if let Ok(bytes) = fs::read(crate::manifest_cache_path(appid, "steamml")) {
+                crate::store_persistent_bundle(appid, &bytes);
+            }
             return Ok(bundle);
         }
         crate::invalidate_cached_manifest(appid, "steamml");
@@ -78,6 +86,7 @@ pub fn download_steamml(appid: &str) -> Result<Bundle, LibraryError> {
             "Lua manifest is for a different App ID".into(),
         ));
     }
+    crate::store_persistent_bundle(appid, &bytes);
     crate::store_cached_manifest(appid, "steamml", &bytes);
     Ok(bundle)
 }
@@ -583,20 +592,24 @@ pub struct ManagedAdded {
     pub warning: Option<String>,
 }
 
-/// Normalize and store the game's Lua manifest in the managed folder.
-pub fn write_managed_lua(game: &Game, raw_lua: &str) -> Result<(String, PathBuf), LibraryError> {
-    let appid = game
-        .metadata_app_id
-        .ok_or_else(|| LibraryError::Invalid("this game has no Steam App ID".into()))?;
-    let lua = windows_only_lua(&appid.to_string(), raw_lua)
-        .unwrap_or_else(|_| canonical_lua(raw_lua));
-    let path = managed_lua_path(game)
-        .ok_or_else(|| LibraryError::Invalid("managed game has no Lua path".into()))?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
+/// Remove legacy per-library Lua files once their global bundle exists.
+pub fn cleanup_legacy_lua_files() {
+    let Ok(library) = Library::load() else { return };
+    let mut directories = std::collections::BTreeSet::new();
+    for game in library.games() {
+        let Some(appid) = game.metadata_app_id else { continue };
+        let Some(path) = managed_lua_path(game) else { continue };
+        if !path.is_file() { continue; }
+        if crate::read_persistent_bundle(&appid.to_string()).is_some() {
+            let _ = fs::remove_file(&path);
+            if let Some(parent) = path.parent() {
+                directories.insert(parent.to_path_buf());
+            }
+        }
     }
-    fs::write(&path, lua.as_bytes()).map_err(|error| LibraryError::io(&path, error))?;
-    Ok((lua, path))
+    for directory in directories {
+        let _ = fs::remove_dir(directory);
+    }
 }
 
 /// Store provider depot manifests in SteamTron's Steam-independent store.
@@ -727,12 +740,6 @@ pub fn add_managed_game_at(
     // registration, so the provider Lua is kept unchanged in that case.
     let lua = windows_only_lua(&appid, &bundle.lua)
         .unwrap_or_else(|_| canonical_lua(&bundle.lua));
-    let local_lua = managed_lua_path(&game)
-        .ok_or_else(|| LibraryError::Invalid("managed game has no Lua path".into()))?;
-    if let Some(parent) = local_lua.parent() {
-        fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
-    }
-    fs::write(&local_lua, lua.as_bytes()).map_err(|error| LibraryError::io(&local_lua, error))?;
     let manifest_dir = steamtron_core::paths::layout().manifests();
     fs::create_dir_all(&manifest_dir).map_err(|error| LibraryError::io(&manifest_dir, error))?;
     for (name, data) in &bundle.manifests {
@@ -748,7 +755,7 @@ pub fn add_managed_game_at(
     let mut registered = false;
     let mut pending_restart = false;
     let mut backend_id = String::new();
-    let mut lua_result = local_lua.display().to_string();
+    let mut lua_result = format!("manifest-bundles/{appid}.zip");
     let mut warning = None;
     if let Some(backend) = backend {
         match backend.register(&RegistrationRequest {

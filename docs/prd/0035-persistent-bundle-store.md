@@ -26,6 +26,10 @@ Existing disposable-cache bundles migrate automatically.
 - R4: New API downloads write both the persistent store and the legacy cache.
 - R5: Removing a game never deletes the persistent bundle.
 - R6: Startup runs the migration asynchronously.
+- R7: Add, export, regenerate, verify, and download read Lua from the persistent
+  bundle; no new `SteamTronLibrary/steamtronapps/lua` files are written.
+- R8: Existing library Lua files are removed once their global bundle exists,
+  and an empty `lua` folder is removed.
 
 ## Acceptance criteria
 
@@ -39,9 +43,14 @@ Existing disposable-cache bundles migrate automatically.
 - Result: 21 ZIPs moved to
   `/home/krunaldodiya/.local/share/steamtron/manifest-bundles`.
 - The per-game export test also populated this store for missing games.
+- Ran `cleanup_legacy_lua_files` with all 21 bundles present; the remaining
+  `steamtronapps/lua/424840.lua` was removed and the empty `lua` folder deleted.
+- `rg write_managed_lua` returns no callers.
 
 ## Decisions and risks
 
+- Lua is read from the persistent ZIP into cache/working paths when SMD or
+  verification needs a file; the library folder is no longer a Lua store.
 - Bundles are intentionally retained across library removal.
 - No TTL is applied; a stale bundle can be refreshed only when it is missing or
   malformed. A future explicit refresh action can replace it.

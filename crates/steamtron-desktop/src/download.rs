@@ -719,16 +719,18 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
     }));
 }
 
-fn regenerate_lua(game: &steamtron_core::library::Game) -> Result<PathBuf, String> {
+fn bundle_lua_path(game: &steamtron_core::library::Game, cache: &Path) -> Result<PathBuf, String> {
     let app_id = game
         .metadata_app_id
         .ok_or_else(|| "this game has no Steam App ID".to_string())?;
     let bundle = steamtron_library::download_bundle(&app_id.to_string()).map_err(|error| {
-        format!("The Lua manifest is missing and could not be regenerated: {error}. Re-add the game first.")
+        format!("The Lua manifest is missing and could not be read from the bundle store: {error}")
     })?;
-    steamtron_library::managed::write_managed_lua(game, &bundle.lua)
-        .map(|(_, path)| path)
-        .map_err(|error| format!("The Lua manifest could not be saved: {error}"))
+    let directory = cache.join("bundles");
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let path = directory.join(format!("{app_id}.lua"));
+    std::fs::write(&path, bundle.lua.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(path)
 }
 
 /// Reconnect to downloader processes that outlived a previous SteamTron run.
@@ -813,6 +815,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         .metadata_app_id
         .ok_or_else(|| "this game has no Steam App ID".to_string())?;
     let root = game.installation.root.clone();
+    let cache = steamtron_core::paths::layout().cache_dir().join("smd");
     let local_lua = steamtron_core::library::managed_lua_path(game)
         .filter(|path| path.is_file());
     let lua = if let Some(path) = local_lua {
@@ -822,15 +825,14 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         if steam_lua.is_file() {
             steam_lua
         } else {
-            regenerate_lua(game)?
+            bundle_lua_path(game, &cache)?
         }
     } else {
-        regenerate_lua(game)?
+        bundle_lua_path(game, &cache)?
     };
     if !lua.is_file() {
-        return Err("The Lua manifest is missing and could not be regenerated. Re-add the game first.".into());
+        return Err("The Lua manifest is missing and could not be read from the bundle store.".into());
     }
-    let cache = steamtron_core::paths::layout().cache_dir().join("smd");
     configure_smd(&cache.join("data"))?;
     let smd_lua = smd_lua(app_id, &lua, &cache)?;
     let smd = resolve_smd()?;

@@ -384,14 +384,12 @@ pub fn export_game_backups(
             fs::read_to_string(&path).map_err(|error| LibraryError::io(&path, error))?
         } else {
             let bundle = crate::download_bundle(&appid)?;
-            let (lua, _) = crate::managed::write_managed_lua(game, &bundle.lua)
-                .map_err(|error| LibraryError::Archive(error.to_string()))?;
             generated_lua += 1;
             for (name, data) in &bundle.manifests {
                 let safe = Path::new(name).file_name().and_then(|value| value.to_str()).unwrap_or("manifest");
                 let _ = fs::write(manifests_dir.join(safe), data);
             }
-            lua
+            bundle.lua
         };
         let mut manifest_data = Vec::new();
         for (depot, manifest) in lua_manifest_ids(&lua) {
