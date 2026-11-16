@@ -1,6 +1,6 @@
 # Separate appmanifest and Lua/manifest generation
 
-- Status: active
+- Status: done
 - Date: 2026-11-16
 - Areas: `crates/steamtron-desktop/src/main.rs`,
   `crates/steamtron-desktop/ui/app.js`
@@ -46,6 +46,8 @@ Game Settings exposes two actions:
 - `cargo check` passes.
 - Persistent bundle store contains 21 bundles from the export/migration test.
 - Both commands are registered in the Tauri handler.
+- Release built and installed; the Files tab exposes Generate app manifest and
+  Generate Lua/manifests separately.
 
 ## Decisions and risks
 

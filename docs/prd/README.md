@@ -60,4 +60,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0033](0033-portable-backup.md) | Portable backup folders (format 2) | active | 2026-11-15 |
 | [0034](0034-per-game-library-export.md) | Per-game library metadata export | done | 2026-11-16 |
 | [0035](0035-persistent-bundle-store.md) | Persistent global Lua/manifest bundle store | done | 2026-11-16 |
-| [0036](0036-separate-appmanifest-lua-actions.md) | Separate appmanifest and Lua/manifest generation | active | 2026-11-16 |
+| [0036](0036-separate-appmanifest-lua-actions.md) | Separate appmanifest and Lua/manifest generation | done | 2026-11-16 |
