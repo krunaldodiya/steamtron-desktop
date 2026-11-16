@@ -6,17 +6,16 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 const IGDB_BASE: &str = "https://api.igdb.com/v4";
 const IGDB_MAX_BYTES: usize = 1_048_576;
 const MAX_PAGE: u32 = 1000;
 const PAGE_SIZE: u32 = 36;
 const REFRESH_SKEW_SECONDS: i64 = 120;
-const REQUEST_SPACING: Duration = Duration::from_millis(260);
 const GAME_FIELDS: &str = "name,summary,storyline,first_release_date,genres.name,cover.image_id,artworks.image_id,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,version_title,game_type.type,platforms.name";
 const DETAIL_FIELDS: &str = "name,summary,storyline,first_release_date,genres.name,cover.image_id,artworks.image_id,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,version_title,game_type.type,platforms.name";
 
@@ -41,7 +40,7 @@ fn now() -> i64 {
 }
 
 static AUTH_CACHE: LazyLock<Mutex<Option<IgdbAuth>>> = LazyLock::new(|| Mutex::new(None));
-static LANE: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+static LANE: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(4));
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(12))
@@ -54,7 +53,7 @@ fn auth_cache() -> &'static Mutex<Option<IgdbAuth>> {
     &AUTH_CACHE
 }
 
-fn lane() -> &'static Mutex<Option<Instant>> {
+fn lane() -> &'static Semaphore {
     &LANE
 }
 
@@ -148,22 +147,8 @@ async fn clear_token() {
     *auth_cache().lock().await = None;
 }
 
-async fn wait_for_lane() {
-    let mut guard = lane().lock().await;
-    if let Some(previous) = *guard {
-        let elapsed = previous.elapsed();
-        if elapsed < REQUEST_SPACING {
-            tokio::time::sleep(REQUEST_SPACING - elapsed).await;
-        }
-    }
-    *guard = Some(Instant::now());
-}
-
 async fn query(endpoint: &str, body: &str) -> Result<Value, String> {
-    if !matches!(
-        endpoint,
-        "games" | "genres" | "external_games" | "games/count"
-    ) {
+    if !matches!(endpoint, "games" | "genres" | "external_games") {
         return Err("Unsupported IGDB endpoint.".into());
     }
     if body.len() > 10_000 {
@@ -172,7 +157,10 @@ async fn query(endpoint: &str, body: &str) -> Result<Value, String> {
     let mut retried = false;
     loop {
         let auth = cache_token().await?;
-        wait_for_lane().await;
+        let _permit = lane()
+            .acquire()
+            .await
+            .map_err(|_| "The IGDB request lane is unavailable.".to_string())?;
         let response = client()
             .post(format!("{IGDB_BASE}/{endpoint}"))
             .header("Client-ID", &auth.client_id)
@@ -367,10 +355,6 @@ fn browse_query(search: &str, genre: Option<u64>, sort: &str, page: u32) -> Stri
     )
 }
 
-fn count_query(genre: Option<u64>) -> String {
-    where_clause(genre)
-}
-
 fn validate_query(value: &str) -> Result<String, String> {
     let value = value.trim();
     if value.chars().count() > 200 || value.chars().any(|character| character.is_control()) {
@@ -455,7 +439,7 @@ pub async fn catalog(
         if let Ok(external) = query(
             "external_games",
             &format!(
-                "fields game,external_game_source.name,uid,url; where game = ({list}); limit 500;"
+                "fields game,external_game_source.name,uid; where game = ({list}) & external_game_source = 1; limit 100;"
             ),
         )
         .await
@@ -473,30 +457,11 @@ pub async fn catalog(
             }
         }
     }
-    let mut result = json!({
+    Ok(json!({
         "items": items,
         "page": page,
         "has_next": has_next,
-    });
-    if search.is_empty() {
-        if let Ok(count) = query("games/count", &count_query(genre)).await {
-            if let Some(total) = count.get("count").and_then(Value::as_u64) {
-                let expected = (PAGE_SIZE as u64)
-                    .min(total.saturating_sub((page as u64 - 1) * PAGE_SIZE as u64))
-                    as usize;
-                if games.len().min(PAGE_SIZE as usize) == expected {
-                    if let Some(object) = result.as_object_mut() {
-                        object.insert("total_items".into(), json!(total));
-                        object.insert(
-                            "total_pages".into(),
-                            json!(total.div_ceil(PAGE_SIZE as u64).max(1)),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    Ok(result)
+    }))
 }
 
 fn steam_uid(item: &Value) -> Option<u32> {

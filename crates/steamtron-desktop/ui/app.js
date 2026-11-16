@@ -5398,7 +5398,7 @@ function storeConnectMarkup() {
     return `<div class="status error store-connect"><strong>IGDB is not configured</strong><p>The SteamTron API has no Twitch credentials. Set them on the server, then retry.</p><button id="store-retry-connection">Retry</button></div>`;
   }
   if (!storeConnection) {
-    return '<div class="status">Checking IGDB connection…</div>';
+    return '<div class="status">Loading the Store…</div>';
   }
   if (storeConnecting) {
     return '<div class="status store-connect"><strong>Waiting for IGDB…</strong><p>Finish connecting in the browser, then return to SteamTron. The Store will load automatically.</p><button id="store-retry-connection">Check again</button></div>';
@@ -5535,11 +5535,7 @@ async function ensureStorePage(page, render = true) {
   }
   if (render || painted) renderStorePage();
 
-  if (!storeConnection || storeConnection.connected !== true) {
-    await loadIgdbStatus();
-  }
-  if (generation !== storeGeneration) return;
-  if (!storeConnection?.connected) {
+  if (storeConnection?.connected === false) {
     storeLoading = false;
     storeRefreshing = false;
     storeTried = true;
@@ -5547,13 +5543,13 @@ async function ensureStorePage(page, render = true) {
     return;
   }
 
-  await loadStoreGenres();
-  if (generation !== storeGeneration) return;
+  const genresPending = loadStoreGenres();
 
   // Cache-first. A missing page is fetched directly by its page number; the
   // local page map keeps pages independent, so page 4 does not require pages
   // 1-3 to be loaded and cannot inherit their filtered item counts.
   if (painted) {
+    await genresPending;
     storeLoading = false;
     storeRefreshing = false;
     storeTried = true;
@@ -5569,17 +5565,28 @@ async function ensureStorePage(page, render = true) {
       page: storePage,
     });
     if (generation !== storeGeneration) return;
+    storeConnection = {
+      connected: true,
+      configured: true,
+      connect_url: storeConnection?.connect_url || "",
+    };
     await absorbStorePage(data, storePage, generation);
   } catch (error) {
     const message = String(error);
     if (message.includes("IGDB_NOT_CONNECTED") || message.includes("IGDB_NOT_CONFIGURED")) {
-      storeConnection = { ...(storeConnection || {}), connected: false, configured: !message.includes("IGDB_NOT_CONFIGURED") };
+      await loadIgdbStatus();
+      storeConnection = {
+        ...(storeConnection || {}),
+        connected: false,
+        configured: !message.includes("IGDB_NOT_CONFIGURED"),
+      };
       storeConnectionError = "";
     } else if (generation === storeGeneration && !storeLoadedItems().length) {
       // A cached catalogue stays usable when the API is offline.
       storeError = message;
     }
   }
+  await genresPending;
   storeLoading = false;
   storeRefreshing = false;
   storeTried = true;
@@ -5617,7 +5624,7 @@ function renderStorePage() {
   if (!storeConnection && !storeLoadedItems().length) {
     detailEl.innerHTML = `<div class="page store-page">
       <header class="page-head"><h1>Discover your next game</h1><p>PC titles only. Game data by IGDB.</p></header>
-      <div class="store-connect-page"><div class="status">Checking IGDB connection…</div></div>
+      <div class="store-connect-page"><div class="status">Loading the Store…</div></div>
     </div>`;
     applyPendingRouteFocus("store");
     return;

@@ -126,8 +126,10 @@ Add `/ui/settings/igdb`:
   - An IGDB `401` invalidates the desktop cache, fetches a fresh backend token,
     and retries the request once.
   - A second `401` returns a reconnect-required error instead of looping.
-- Serialize direct IGDB requests through a small local lane with a 260 ms
-  minimum spacing, matching the previous backend lane.
+- Allow up to four concurrent IGDB requests instead of the old serial 260 ms
+  lane. Genres and the first catalogue page load in parallel.
+- A page uses one `games` query plus one Steam-filtered `external_games` query.
+  No `games/count` request is made; `has_next` drives the pager.
 - Direct IGDB calls use the fixed host `https://api.igdb.com/v4`, the
   `Client-ID` header, and the bearer token. No user-controlled URL is accepted.
 
@@ -205,6 +207,16 @@ Add `/ui/settings/igdb`:
   that is not cached is fetched directly by its page number; loading page 4
   must not depend on pages 1–3 or skip a page. Existing 24-item catalogue cache
   entries are invalidated by a versioned cache key.
+- R22: The normal Store page path must not call any FastAPI catalog, genre, or
+  detail route. FastAPI is limited to the cold-session token/status and refresh
+  paths; a valid in-process token must bypass the backend.
+- R23: A Store page must use at most the games query plus one Steam-filtered
+  `external_games` query. Do not issue a `games/count` request; `has_next`
+  drives pagination.
+- R24: Genres and the first catalogue page may load concurrently, and IGDB
+  requests may run with bounded concurrency (up to four) instead of a strict
+  serial 260 ms lane. The Steam external-ID query must filter
+  `external_game_source = 1` and must not fetch all external providers.
 
 ## Acceptance criteria
 
@@ -235,6 +247,12 @@ Add `/ui/settings/igdb`:
 - [ ] Page 4 fetches page 4 directly when uncached and does not skip page 5 or
   depend on pages 1–3.
 - [ ] Old 24-item cache entries are not reused as 36-item pages.
+- [ ] A warm Store page makes no FastAPI request; only the cold-session token
+  path may reach FastAPI.
+- [ ] A page request issues no `games/count` call and the external-ID query is
+  Steam-filtered.
+- [ ] Cold uncached loading is materially shorter than the old serial request
+  path; warm cached opens remain instant.
 - [ ] Direct IGDB browse, genre, detail, pagination, Steam resolution, and Add
   to library behavior remain intact.
 - [ ] No token appears in logs, URLs, backups, `localStorage`, or command
@@ -258,7 +276,7 @@ Recorded after implementation:
 - `node --check crates/steamtron-desktop/ui/app.js`: passed.
 - `bash scripts/build-linux.sh`: deb and AppImage built; installed binary
   SHA-256 matched the release build
-  (`8b573c78eca66e885ef6ee7def9a47bf1a4e5e385ec031187a974fd2937fbb48`).
+  (`a7521122d00dbcc2fdff36a0a8d01df7cc927ccb9db509d9f1898446d0c7e11a`).
 - Local UI verification against an isolated FastAPI instance and isolated app
   data/cache:
   - With no cached catalogue and no connection, the Store showed only the
@@ -290,6 +308,25 @@ Recorded after implementation:
   contiguous 1–5 prefetch.
 - Cache versioning: catalogue keys now include `v2|36`, so old 24-item cache
   entries are ignored rather than rendered as short pages.
+- Direct-IGDB timing measured from this workstation:
+  - Cold FastAPI token: 1.117 s.
+  - Genres: 0.794 s.
+  - Games page: 1.147 s.
+  - Old external-ID query: 1.267 s for 500 rows.
+  - Old `games/count`: 0.805 s.
+  - Steam-filtered external-ID query: 0.290 s for 40 rows.
+  - New page path: games + Steam-filtered external IDs only; no count.
+- Release UI timing after optimization:
+  - Cold uncached open showed the loading state at 1 s and full Store content
+    by 3 s, including the FastAPI token fetch.
+  - Warm cached reopen rendered the full page in under 0.5 s.
+- Store path audit:
+  - `igdb_store_status`/`igdb/token` are the only FastAPI calls in
+    `igdb.rs`; catalogue, genre, detail, and external-ID calls go to
+    `https://api.igdb.com/v4`.
+  - A warm token and warm page make no FastAPI request.
+  - No FastAPI `/v1/games`, `/v1/genres`, or `/v1/games/{id}` path remains in
+    the Store command path.
 - Production deployment verified after pushing backend `224efbf`:
   - `GET /v1/igdb/status` returned 200 with `configured=true` and
     `connected=false` before connection.
