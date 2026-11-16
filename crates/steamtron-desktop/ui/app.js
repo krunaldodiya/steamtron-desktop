@@ -4359,7 +4359,7 @@ async function renderGeneralSettings(host) {
       ${settingsRow(email, profile?.base_url || "SteamTron account", '<button id="setting-signout">Sign out</button>')}
     </div></section>
     <section class="settings-section"><h2>Maintenance</h2><p>Library backup, restore and desktop integration.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one ZIP per game with metadata.json, lua/&lt;appid&gt;.lua and all depot manifests. Missing Lua/manifests are generated first.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export games…</button><button id="setting-restore">Restore legacy backup…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one ZIP per game with metadata.json, lua/&lt;appid&gt;.lua and all depot manifests. Missing Lua/manifests are generated first.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export games…</button></div></div>
       ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
       ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
     </div></section>
@@ -4418,18 +4418,6 @@ async function renderGeneralSettings(host) {
       failOperation("library-export", "", String(error));
       operation.fail(String(error));
     }
-  };
-  host.querySelector("#setting-restore").onclick = async (event) => {
-    if (!(await confirmDialog({ title: "Restore backup", message: "Restore this backup? It replaces the current library index, drives and settings and may overwrite Lua and appmanifest files. Game content and fixes are not included. Steam is not required.", confirmLabel: "Restore" }))) return;
-    const stop = busy(event.target, "Restoring…");
-    try {
-      const result = await invoke("restore_backup");
-      stop();
-      if (!result) { showToast("Restore cancelled."); return; }
-      await load();
-      const warning = result.warnings?.length ? ` · ${result.warnings.length} skipped item${result.warnings.length === 1 ? "" : "s"}` : "";
-      showToast(`Restored ${result.library ? "library index + " : ""}${result.games} games (${result.lua_files} Lua, ${result.appmanifests} appmanifest)${warning}`);
-    } catch (error) { stop(); showToast(String(error), true); }
   };
   host.querySelector("#setting-shortcut").onclick = async (event) => {
     const stop = busy(event.target, "Installing…");

@@ -685,24 +685,6 @@ fn backend_status() -> Result<steamtron_register::BackendStatus, String> {
 }
 
 #[tauri::command]
-async fn export_backup() -> Result<Option<backup::BackupSummary>, String> {
-    require_auth()?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Save SteamTron library backup")
-        .set_file_name("steamtron-library-backup.zip")
-        .add_filter("SteamTron backup", &["zip"])
-        .save_file()
-    else {
-        return Ok(None);
-    };
-    tauri::async_runtime::spawn_blocking(move || {
-        backup::export_backup(&path, None).map(Some).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("Backup task failed: {error}"))?
-}
-
-#[tauri::command]
 async fn export_game_backups(app: tauri::AppHandle, destination: Option<String>) -> Result<Option<serde_json::Value>, String> {
     require_auth()?;
     let folder = if let Some(destination) = destination {
@@ -736,23 +718,6 @@ async fn export_game_backups(app: tauri::AppHandle, destination: Option<String>)
     serde_json::to_value(summary)
         .map(Some)
         .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn restore_backup() -> Result<Option<backup::RestoreSummary>, String> {
-    require_auth()?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Choose SteamTron library backup")
-        .add_filter("SteamTron backup", &["zip"])
-        .pick_file()
-    else {
-        return Ok(None);
-    };
-    tauri::async_runtime::spawn_blocking(move || {
-        backup::restore_backup(&path).map(Some).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("Restore task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -3530,7 +3495,6 @@ fn archive_component(
     started: std::time::Instant,
 ) -> Result<(String, u64), String> {
     use sha2::Digest;
-    use std::io::Write;
     let file = std::fs::File::create(component_path).map_err(|error| error.to_string())?;
     let writer = HashingWriter { inner: file, hasher: sha2::Sha256::new() };
     let mut archive = tar::Builder::new(writer);
@@ -3744,7 +3708,6 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         let manifest_tar = package.join("manifest-bundle.tar");
         let manifest_sha = if !manifest_files.is_empty() {
             use sha2::Digest;
-            use std::io::Write;
             let file = std::fs::File::create(&manifest_tar).map_err(|error| error.to_string())?;
             let writer = HashingWriter { inner: file, hasher: sha2::Sha256::new() };
             let mut archive = tar::Builder::new(writer);
@@ -5651,9 +5614,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             backend_status,
-            export_backup,
             export_game_backups,
-            restore_backup,
             game_artwork,
             search_games,
             add_game,
