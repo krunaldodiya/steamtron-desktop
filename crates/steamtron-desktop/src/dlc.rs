@@ -4,12 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use steamtron_core::library::Library;
+use steamtron_core::process::hidden_command;
 
 use crate::download::{self, DepotProgress, DownloadState};
 
@@ -186,7 +187,7 @@ fn download_with_ddm(
         let name = format!("{depot}_{manifest}.manifest");
         let data = bundle.manifests.get(&name).ok_or_else(|| format!("No manifest file for DLC depot {depot}."))?;
         fs::write(staging.join(&name), data).map_err(|error| error.to_string())?;
-        let mut command = Command::new(&ddm);
+        let mut command = hidden_command(&ddm);
         command
             .current_dir(staging)
             .args(["-app", &base_appid.to_string(), "-depot", depot, "-manifest", manifest, "-depotkeys", "steam.keys", "-manifestfile", &name, "-dir", ".", "-max-downloads", "8"])
@@ -373,7 +374,7 @@ fn steamcmd_dlc(base_appid: u32) -> PicsDlc {
         layout.tools().join("steamcmd/steamcmd.exe"),
     ];
     let Some(steamcmd) = candidates.into_iter().find(|path| path.is_file()) else { return PicsDlc::default() };
-    let output = Command::new(steamcmd)
+    let output = hidden_command(steamcmd)
         .args(["+login", "anonymous", "+app_info_print", &base_appid.to_string(), "+quit"])
         .output();
     let Ok(output) = output else { return PicsDlc::default() };
@@ -417,7 +418,7 @@ pub fn dlc_sizes(game_id: &str, app_ids: &[u32]) -> BTreeMap<u32, u64> {
             continue;
         }
         let Some(smd) = smd.as_ref() else { continue };
-        let output = Command::new(smd)
+        let output = hidden_command(smd)
             .args(["search", &key, "--manifests", "0", "--json"])
             .output();
         let size = match output {
@@ -517,7 +518,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         if let (Some(depots), Some(bundle)) = (depots.as_ref(), base_bundle.as_ref()) {
             download_with_ddm(&app, &mut dl_state, game.metadata_app_id.unwrap_or(0), *app_id, depots, bundle, &staging, base, span)?;
         } else {
-            let mut command = Command::new(&smd);
+            let mut command = hidden_command(&smd);
             command.arg("--data-dir").arg(cache.join("data"))
                 .arg("download").arg(app_id.to_string())
                 .args(["--like-steam", "--platform", "windows", "--language", "english", "-o"])

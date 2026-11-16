@@ -4,10 +4,10 @@
 //! exclusion paths for the current game and SteamTron's overlay data.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::Serialize;
 use steamtron_core::config::Config;
+use steamtron_core::process::hidden_command;
 use steamtron_core::{data_home, steam};
 
 #[derive(Clone, Debug, Serialize)]
@@ -424,7 +424,7 @@ fn run_powershell(script: &str) -> Result<String, String> {
     }
     let script =
         format!("$OutputEncoding = [Console]::OutputEncoding = [Text.Encoding]::UTF8\n{script}");
-    let output = Command::new("powershell.exe")
+    let output = hidden_command("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",

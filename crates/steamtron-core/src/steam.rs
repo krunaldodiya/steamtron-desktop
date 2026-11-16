@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use thiserror::Error;
 
+#[cfg(target_os = "windows")]
+use crate::process::hidden_command;
 #[derive(Debug, Error)]
 pub enum SteamError {
     #[error("Steam installation was not found")]
@@ -42,7 +44,7 @@ fn steam_registry_path() -> Vec<PathBuf> {
         ("HKLM", "SOFTWARE\\Valve\\Steam", "InstallPath"),
     ] {
         let query = format!("{hive}\\{key}");
-        let Ok(output) = Command::new("reg")
+        let Ok(output) = hidden_command("reg")
             .args(["query", &query, "/v", value])
             .output()
         else {

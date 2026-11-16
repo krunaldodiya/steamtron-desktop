@@ -3,9 +3,8 @@ use std::collections::BTreeSet;
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::path::Path;
-use std::process::Command;
-
 use serde::Serialize;
+use steamtron_core::process::hidden_command;
 use steamtron_core::steam;
 use steamtron_register::{platform_backend, RegistrationBackend};
 
@@ -224,7 +223,7 @@ fn steam_running() -> bool {
 
 #[cfg(target_os = "windows")]
 fn steam_running() -> bool {
-    Command::new("tasklist")
+    hidden_command("tasklist")
         .args(["/FI", "IMAGENAME eq steam.exe", "/NH"])
         .output()
         .map(|output| String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains("steam.exe"))
@@ -303,7 +302,7 @@ pub fn launch_unlock_installer() -> Result<String, String> {
                 shell_quote(&log),
                 shell_quote(&marker)
             );
-            Command::new(terminal)
+            hidden_command(terminal)
                 .args(arguments)
                 .arg("bash")
                 .arg("-c")

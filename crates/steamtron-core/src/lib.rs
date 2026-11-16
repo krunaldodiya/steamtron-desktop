@@ -8,6 +8,7 @@ pub mod fixes;
 pub mod steam;
 pub mod play_history;
 pub mod prelaunch;
+pub mod process;
 
 use std::path::PathBuf;
 

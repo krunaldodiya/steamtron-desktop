@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use crate::library::{Game, LaunchTarget};
 
+use crate::process::hidden_command;
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error("game has no launch target")]
@@ -41,7 +42,7 @@ pub struct LaunchPlan {
 impl LaunchPlan {
     /// Build a std process command; stdout/stderr handling stays with the caller.
     pub fn command(&self) -> std::process::Command {
-        let mut command = std::process::Command::new(&self.program);
+        let mut command = hidden_command(&self.program);
         command.args(&self.arguments).current_dir(&self.cwd);
         command.envs(&self.environment);
         command
@@ -185,7 +186,7 @@ pub fn managed_launch_plan(
 #[cfg(unix)]
 pub fn terminate_process_group(pid: u32, force: bool) -> Result<(), RuntimeError> {
     let signal = if force { "-KILL" } else { "-TERM" };
-    let status = std::process::Command::new("kill")
+    let status = hidden_command("kill")
         .args([signal, &format!("-{pid}")])
         .status()
         .map_err(|error| RuntimeError::Io {
@@ -281,7 +282,7 @@ mod tests {
     fn terminates_a_process_group() {
         use std::os::unix::process::CommandExt;
 
-        let mut child = std::process::Command::new("sleep")
+        let mut child = hidden_command("sleep")
             .arg("30")
             .process_group(0)
             .spawn()

@@ -97,3 +97,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0070](0070-open-source-release.md) | Open-source ready distribution and contributor docs | done | 2026-11-16 |
 | [0071](0071-signin-progress.md) | Visible sign-in progress | done | 2026-11-16 |
 | [0072](0072-windows-drive-discovery.md) | Windows library drive discovery | active | 2026-11-16 |
+| [0073](0073-hidden-console.md) | Hide helper console windows on Windows | active | 2026-11-16 |

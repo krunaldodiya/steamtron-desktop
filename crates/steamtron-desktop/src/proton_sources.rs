@@ -14,6 +14,7 @@ use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
 use xz2::read::XzDecoder;
+use steamtron_core::process::hidden_command;
 
 const REPOS: &[(&str, &str)] = &[
     ("GE-Proton", "GloriousEggroll/proton-ge-custom"),
@@ -453,7 +454,7 @@ fn install_valve(
     let home = runner_root().join(".downloads").join("steamcmd-home");
     fs::create_dir_all(&home).map_err(|error| error.to_string())?;
     emit(state, "Valve-Proton", tag, name, "downloading", 0.0, 0, VALVE_SIZE, "Downloading…");
-    let mut command = std::process::Command::new(&script);
+    let mut command = hidden_command(&script);
     command
         .args([
             "+force_install_dir",
@@ -595,16 +596,16 @@ pub fn pause(family: &str, tag: &str, name: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
         let group = format!("-{}", state.pid);
-        let _ = std::process::Command::new("kill")
+        let _ = hidden_command("kill")
             .args(["-TERM", &group])
             .status();
-        let _ = std::process::Command::new("kill")
+        let _ = hidden_command("kill")
             .args(["-TERM", &state.pid.to_string()])
             .status();
     }
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
+        let _ = hidden_command("taskkill")
             .args(["/PID", &state.pid.to_string(), "/F"])
             .status();
     }
@@ -643,16 +644,16 @@ pub fn cancel(family: &str, tag: &str, name: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
         let group = format!("-{}", state.pid);
-        let _ = std::process::Command::new("kill")
+        let _ = hidden_command("kill")
             .args(["-TERM", &group])
             .status();
-        let _ = std::process::Command::new("kill")
+        let _ = hidden_command("kill")
             .args(["-TERM", &state.pid.to_string()])
             .status();
     }
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
+        let _ = hidden_command("taskkill")
             .args(["/PID", &state.pid.to_string(), "/F"])
             .status();
     }

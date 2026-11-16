@@ -25,6 +25,7 @@ use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
 use steamtron_auth::{login as auth_login, logout as auth_logout, status as auth_status, AuthState};
 use steamtron_library::updates::{available_updates, clear_pin, pin_update, Updates};
 use steamtron_library::{add_bundle, backup, bundle_from_file, download_bundle, normalize_appid, remove_game as remove_library_game, repair_missing_appmanifests, search as steam_search, title_for_appid, AddedGame, RemovedGame, RepairedGame, SearchResult};
+use steamtron_core::process::hidden_command;
 
 #[derive(Serialize)]
 struct GameView {
@@ -111,19 +112,18 @@ fn overlay_pids(appid: &str) -> Vec<u32> {
 
 #[cfg(unix)]
 fn stop_overlay_processes(appid: &str) -> Result<(), String> {
-    use std::process::Command;
     use std::time::{Duration, Instant};
 
     let pids = overlay_pids(appid);
     for pid in &pids {
-        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+        let _ = hidden_command("kill").args(["-TERM", &pid.to_string()]).status();
     }
     let deadline = Instant::now() + Duration::from_secs(3);
     while !overlay_pids(appid).is_empty() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(100));
     }
     for pid in overlay_pids(appid) {
-        let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+        let _ = hidden_command("kill").args(["-KILL", &pid.to_string()]).status();
     }
     // Drop the FUSE mount if its process was killed rather than asked to exit.
     let mount = std::env::temp_dir().join("steamtron-");
@@ -133,7 +133,7 @@ fn stop_overlay_processes(appid: &str) -> Result<(), String> {
             let Some(path) = fields.split_whitespace().nth(4) else { continue };
             let mount_text = mount.to_string_lossy();
             if path.starts_with(mount_text.as_ref()) && path.contains(&format!("/{appid}-")) && path.ends_with("/merged") {
-                let _ = Command::new("fusermount3").args(["-u", "-z", path]).status();
+                let _ = hidden_command("fusermount3").args(["-u", "-z", path]).status();
             }
         }
     }
@@ -439,7 +439,7 @@ fn install_desktop_entry() -> Result<String, String> {
     std::fs::write(&temporary, desktop).map_err(|error| error.to_string())?;
     std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644)).map_err(|error| error.to_string())?;
     std::fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
-    let _ = std::process::Command::new("update-desktop-database").arg(&applications).status();
+    let _ = hidden_command("update-desktop-database").arg(&applications).status();
     Ok(path.display().to_string())
 }
 
@@ -524,8 +524,7 @@ fn steam_process_running() -> bool {
 
 #[cfg(target_os = "windows")]
 fn steam_process_running() -> bool {
-    use std::process::Command;
-    Command::new("tasklist")
+    hidden_command("tasklist")
         .args(["/FI", "IMAGENAME eq steam.exe", "/NH"])
         .output()
         .map(|output| String::from_utf8_lossy(&output.stdout).to_ascii_lowercase().contains("steam.exe"))
@@ -534,13 +533,12 @@ fn steam_process_running() -> bool {
 
 #[cfg(target_os = "windows")]
 fn stop_steam() -> Result<(), String> {
-    use std::process::Command;
     use std::time::{Duration, Instant};
 
     if !steam_process_running() {
         return Ok(());
     }
-    let output = Command::new("taskkill")
+    let output = hidden_command("taskkill")
         .args(["/IM", "steam.exe", "/F"])
         .output()
         .map_err(|error| format!("Could not stop Steam: {error}"))?;
@@ -562,12 +560,12 @@ fn stop_steam() -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn start_steam() -> Result<(), String> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
 
     let root = steam::steam_root().map_err(|error| error.to_string())?;
     let executable = root.join("steam.exe");
-    Command::new(&executable)
+    hidden_command(&executable)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -592,13 +590,12 @@ fn restart_steam_impl() -> Result<String, String> {
 
 #[cfg(target_os = "linux")]
 fn stop_steam() -> Result<(), String> {
-    use std::process::Command;
     use std::time::{Duration, Instant};
 
     if !steam_process_running() {
         return Ok(());
     }
-    let output = Command::new("steam")
+    let output = hidden_command("steam")
         .arg("-shutdown")
         .output()
         .map_err(|error| format!("Steam executable not found: {error}"))?;
@@ -620,10 +617,10 @@ fn stop_steam() -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn start_steam() -> Result<(), String> {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
 
-    Command::new("setsid")
+    hidden_command("setsid")
         .arg("steam")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1290,7 +1287,7 @@ fn play_target_without_overlay(
     {
         let (proton, compat) = proton_launcher(appid)
             .ok_or("could not resolve the Steam Proton runtime")?;
-        let mut command = std::process::Command::new(proton);
+        let mut command = hidden_command(proton);
         command
             .arg("waitforexitandrun")
             .arg(target)
@@ -1314,7 +1311,7 @@ fn play_target_without_overlay(
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
-        let child = std::process::Command::new(target)
+        let child = hidden_command(target)
             .args(arguments)
             .current_dir(&game.common)
             .stdin(std::process::Stdio::null())
@@ -1402,11 +1399,11 @@ fn play_game(appid: String, target_id: Option<String>) -> Result<(), String> {
         return Err("This game is already running through SteamTron.".into());
     }
     let mut command = if cfg!(unix) {
-        let mut command = std::process::Command::new("setsid");
+        let mut command = hidden_command("setsid");
         command.arg(exe).args(args);
         command
     } else {
-        let mut command = std::process::Command::new(exe);
+        let mut command = hidden_command(exe);
         command.args(args);
         command
     };
@@ -1441,11 +1438,11 @@ fn launch_steam_app(appid: &str, clear_stale_launch_option: bool) -> Result<(), 
         steam = std::path::PathBuf::from("steam");
     }
     let mut command = if cfg!(unix) {
-        let mut command = std::process::Command::new("setsid");
+        let mut command = hidden_command("setsid");
         command.arg(steam).args(["-applaunch", appid]);
         command
     } else {
-        let mut command = std::process::Command::new(steam);
+        let mut command = hidden_command(steam);
         command.args(["-applaunch", appid]);
         command
     };
@@ -1573,7 +1570,7 @@ fn open_fixes_folder(appid: String) -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
+        hidden_command("xdg-open")
             .arg(&entry.fixes)
             .spawn()
             .map_err(|error| format!("Could not open the fixes folder: {error}"))?;
@@ -1712,7 +1709,6 @@ fn proton_launcher(appid: &str) -> Option<(std::path::PathBuf, std::path::PathBu
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn try_overlay_wrapper() -> Option<i32> {
     use steamtron_overlay::{OverlayGame, PlatformOverlay};
-    use std::process::Command;
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) != Some("--steamtron-overlay") {
@@ -1806,7 +1802,7 @@ fn try_overlay_wrapper() -> Option<i32> {
                 Some(path) => std::path::PathBuf::from(path),
                 None => steam::steam_root().map_err(|e| e.to_string())?,
             };
-            let mut process = Command::new(proton);
+            let mut process = hidden_command(proton);
             process
                 .arg("waitforexitandrun")
                 .arg(&rewritten[0])
@@ -1818,7 +1814,7 @@ fn try_overlay_wrapper() -> Option<i32> {
         } else if use_proton {
             let (proton, compat) = proton_launcher(&appid)
                 .ok_or("could not resolve the Steam Proton runtime")?;
-            let mut process = Command::new(proton);
+            let mut process = hidden_command(proton);
             process
                 .arg("waitforexitandrun")
                 .arg(&rewritten[0])
@@ -1828,7 +1824,7 @@ fn try_overlay_wrapper() -> Option<i32> {
                 .env("SteamGameId", &appid);
             process
         } else {
-            Command::new(&rewritten[0])
+            hidden_command(&rewritten[0])
         };
         // Use the launcher's own directory. Steam's native launch usually
         // runs a nested executable from its own directory (e.g. Max Payne 3's
@@ -2023,7 +2019,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .map(|id| id.to_string())
             .unwrap_or_else(|| game.id.clone());
         let exe = steamtron_executable()?;
-        let mut command = std::process::Command::new(&exe);
+        let mut command = hidden_command(&exe);
         command
             .arg("--steamtron-overlay")
             .args([
@@ -2326,7 +2322,7 @@ fn stop_managed_blocking(game_id: String) -> Result<(), String> {
     #[cfg(not(target_os = "linux"))]
     {
         let pid = tracked.ok_or_else(|| "This game is not running.".to_string())?;
-        let status = std::process::Command::new("taskkill")
+        let status = hidden_command("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .status()
             .map_err(|error| format!("Could not stop the game: {error}"))?;
@@ -3023,7 +3019,7 @@ async fn proton_source_releases(
 fn spawn_proton_install(family: &str, tag: &str, name: &str, resume: bool) -> Result<(), String> {
     let executable = std::env::current_exe()
         .map_err(|error| format!("Could not locate SteamTron: {error}"))?;
-    let mut command = std::process::Command::new(executable);
+    let mut command = hidden_command(executable);
     command
         .args(["--proton-install", family, tag, name])
         .stdin(std::process::Stdio::null())
@@ -3120,9 +3116,9 @@ fn open_path(path: String) -> Result<(), String> {
         return Err(format!("folder does not exist: {path}"));
     }
     #[cfg(target_os = "linux")]
-    let mut command = std::process::Command::new("xdg-open");
+    let mut command = hidden_command("xdg-open");
     #[cfg(target_os = "windows")]
-    let mut command = std::process::Command::new("explorer");
+    let mut command = hidden_command("explorer");
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     return Err("opening folders is not supported on this platform".into());
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -3546,7 +3542,7 @@ fn set_ui_scale(app: tauri::AppHandle, scale: f64) -> Result<(), String> {
 }
 
 fn spawn_system(command: &str, args: &[&str]) -> Result<(), String> {
-    std::process::Command::new(command)
+    hidden_command(command)
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -3684,8 +3680,8 @@ fn cancel_operation(app: tauri::AppHandle, operation: String, game_id: String) -
     if let Some(pid) = *control.pid.lock().map_err(|_| "operation PID lock failed".to_string())? {
         #[cfg(unix)]
         {
-            let _ = std::process::Command::new("kill").args(["-CONT", &format!("-{pid}")]).status();
-            let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+            let _ = hidden_command("kill").args(["-CONT", &format!("-{pid}")]).status();
+            let _ = hidden_command("kill").args(["-TERM", &format!("-{pid}")]).status();
         }
     }
     emit_operation(&app, &operation, &game_id, "cancelled", "cancelled", "Cancelled");
@@ -4924,7 +4920,7 @@ fn run_ddm_verify(
     for (index, (depot, manifest)) in depots.iter().enumerate() {
         operation_check(control)?;
         let manifest_file = format!("{depot}_{manifest}.manifest");
-        let mut command = std::process::Command::new(ddm);
+        let mut command = hidden_command(ddm);
         command
             .current_dir(root)
             .args(["-app", &game_id, "-depot", depot, "-manifest", manifest, "-depotkeys", "steam.keys", "-manifestfile", &manifest_file, "-dir", ".", "-max-downloads", "8", "-verify-all"])
@@ -4959,8 +4955,8 @@ fn run_ddm_verify(
             line.clear();
         }
         if control.cancelled.load(Ordering::SeqCst) {
-            let _ = std::process::Command::new("kill").args(["-CONT", &format!("-{}", child.id())]).status();
-            let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{}", child.id())]).status();
+            let _ = hidden_command("kill").args(["-CONT", &format!("-{}", child.id())]).status();
+            let _ = hidden_command("kill").args(["-TERM", &format!("-{}", child.id())]).status();
         }
         let status = child.wait().map_err(|error| error.to_string())?;
         if !status.success() && !control.cancelled.load(Ordering::SeqCst) {
@@ -5044,7 +5040,7 @@ async fn verify_managed_files(app: tauri::AppHandle, game_id: String) -> Result<
         let smd = download::resolve_smd()?;
         let stderr_log = log.with_extension("stderr.log");
         let stderr = std::fs::File::create(&stderr_log).map_err(|error| error.to_string())?;
-        let mut command = std::process::Command::new(&smd);
+        let mut command = hidden_command(&smd);
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;

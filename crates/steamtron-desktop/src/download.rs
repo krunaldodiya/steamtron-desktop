@@ -7,12 +7,13 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
+use steamtron_core::process::hidden_command;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -878,7 +879,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     // interleave with and corrupt JSON lines.
     let stdout_log = std::fs::File::create(&log_path).map_err(|error| error.to_string())?;
     let stderr_log = std::fs::File::create(&stderr_path).map_err(|error| error.to_string())?;
-    let mut command = Command::new(&smd);
+    let mut command = hidden_command(&smd);
     command
         .arg("--data-dir")
         .arg(cache.join("data"))
@@ -973,7 +974,7 @@ pub fn pause(game_id: &str) -> Result<(), String> {
         .ok_or_else(|| "this game is not downloading".to_string())?;
     #[cfg(unix)]
     {
-        let status = Command::new("kill")
+        let status = hidden_command("kill")
             .args(["-STOP", &format!("-{pid}")])
             .status()
             .map_err(|error| format!("could not pause the downloader: {error}"))?;
@@ -1007,7 +1008,7 @@ pub fn resume(game_id: &str) -> Result<(), String> {
         .ok_or_else(|| "this game is not downloading".to_string())?;
     #[cfg(unix)]
     {
-        let status = Command::new("kill")
+        let status = hidden_command("kill")
             .args(["-CONT", &format!("-{pid}")])
             .status()
             .map_err(|error| format!("could not resume the downloader: {error}"))?;
@@ -1053,12 +1054,12 @@ pub fn cancel(game_id: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
         // A paused process ignores SIGTERM until it is continued.
-        let _ = Command::new("kill").args(["-CONT", &format!("-{pid}")]).status();
-        let _ = Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+        let _ = hidden_command("kill").args(["-CONT", &format!("-{pid}")]).status();
+        let _ = hidden_command("kill").args(["-TERM", &format!("-{pid}")]).status();
     }
     #[cfg(not(unix))]
     {
-        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status();
+        let _ = hidden_command("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status();
     }
     if let Ok(mut states) = states().lock() {
         if let Some(state) = states.get_mut(game_id) {
@@ -1072,7 +1073,7 @@ pub fn cancel(game_id: &str) -> Result<(), String> {
 fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        Command::new("kill")
+        hidden_command("kill")
             .args(["-0", &format!("-{pid}")])
             .stderr(Stdio::null())
             .status()
@@ -1170,7 +1171,7 @@ mod tests {
     #[test]
     fn pause_and_resume_stop_and_continue_the_process_group() {
         let game_id = "test-pause-resume";
-        let mut child = Command::new("sleep")
+        let mut child = hidden_command("sleep")
             .arg("30")
             .process_group(0)
             .spawn()
@@ -1191,7 +1192,7 @@ mod tests {
     #[test]
     fn cancel_terminates_a_paused_download() {
         let game_id = "test-cancel-paused";
-        let mut child = Command::new("sleep")
+        let mut child = hidden_command("sleep")
             .arg("30")
             .process_group(0)
             .spawn()
@@ -1215,7 +1216,7 @@ mod tests {
     #[test]
     fn status_reports_a_live_download_with_no_recent_output_as_stalled() {
         let game_id = "test-stalled";
-        let mut child = Command::new("sleep")
+        let mut child = hidden_command("sleep")
             .arg("30")
             .process_group(0)
             .spawn()

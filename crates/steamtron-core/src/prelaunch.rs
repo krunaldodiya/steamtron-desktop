@@ -6,13 +6,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
 use crate::library::Game;
 
+use crate::process::hidden_command;
 pub const MAX_SCRIPT_BYTES: u64 = 1024 * 1024;
 pub const TIMEOUT_SECONDS: u64 = 120;
 
@@ -78,7 +79,7 @@ pub fn run(game: &Game, proton: &Path, log: &std::fs::File) -> Result<(), String
     let script = verify(&game.launch.prelaunch, &game.launch.prelaunch_sha256)?;
     let prefix = game.installation.prefix.display().to_string();
     let drive_c = game.installation.prefix.join("drive_c");
-    let mut command = Command::new(&script);
+    let mut command = hidden_command(&script);
     command
         .current_dir(&game.installation.root)
         .stdin(Stdio::null())
@@ -117,7 +118,7 @@ pub fn run(game: &Game, proton: &Path, log: &std::fs::File) -> Result<(), String
             None if started.elapsed() > Duration::from_secs(TIMEOUT_SECONDS) => {
                 #[cfg(unix)]
                 {
-                    let _ = Command::new("kill").args(["-KILL", &format!("-{}", child.id())]).status();
+                    let _ = hidden_command("kill").args(["-KILL", &format!("-{}", child.id())]).status();
                 }
                 let _ = child.kill();
                 let _ = child.wait();
