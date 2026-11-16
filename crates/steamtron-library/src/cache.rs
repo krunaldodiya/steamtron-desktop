@@ -109,3 +109,35 @@ mod tests {
         assert_eq!(path_for_manifest(&manifest), manifest.with_extension("cache.json"));
     }
 }
+
+/// Merge DLC catalogue/size entries from the global caches into the game's
+/// sidecar. Missing fields are left for the first tab open/network refresh.
+pub fn backfill_from_global(game: &Game) -> Result<(), String> {
+    let Some(appid) = game.metadata_app_id else { return Ok(()) };
+    let layout = steamtron_core::paths::layout();
+    let mut cache = load_for_game(game);
+    let catalog: Option<serde_json::Value> = fs::read(layout.cache_dir().join("dlc-catalog.json"))
+        .ok().and_then(|data| serde_json::from_slice(&data).ok());
+    if cache.dlc.is_none() {
+        if let Some(value) = catalog.as_ref().and_then(|catalog| catalog.get(appid.to_string())).cloned() {
+            cache.dlc = Some(value);
+        }
+    }
+    let sizes: Option<serde_json::Value> = fs::read(layout.cache_dir().join("dlc-sizes.json"))
+        .ok().and_then(|data| serde_json::from_slice(&data).ok());
+    if let Some(sizes) = sizes {
+        let dlc = cache.dlc.get_or_insert_with(|| serde_json::json!({"fetched_at": 0, "entries": []}));
+        if dlc.get("entries").and_then(|value| value.as_array()).is_none() {
+            dlc["entries"] = serde_json::json!([]);
+        }
+        if let Some(entries) = dlc.get_mut("entries").and_then(|value| value.as_array_mut()) {
+            for entry in entries.iter_mut() {
+                let Some(id) = entry.get("app_id").and_then(|value| value.as_u64()) else { continue };
+                if let Some(size) = sizes.get(id.to_string()).and_then(|value| value.as_u64()) {
+                    entry["size"] = serde_json::json!(size);
+                }
+            }
+        }
+    }
+    save_for_game(game, &cache)
+}

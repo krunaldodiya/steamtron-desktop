@@ -34,6 +34,16 @@ Schema:
 The appmanifest remains the source of truth for game configuration. Volatile
 cache data lives only in the sidecar.
 
+## Generation timing
+
+- Adding a game creates its sidecar through `backfill_from_global`.
+- Startup backfills every game: DLC catalogue/sizes from the global caches and
+  Updates by scanning local manifests.
+- Opening the DLC tab fetches Store data only when the sidecar has no valid DLC
+  catalogue.
+- Opening Updates uses the sidecar; Refresh re-scans.
+- Backup/export copies the sidecar if present.
+
 ## Requirements
 
 - R1: DLC reads/writes catalogue and sizes from the sidecar.
@@ -49,6 +59,7 @@ cache data lives only in the sidecar.
 - `cargo check` passes.
 - Desktop tests: 20 passed.
 - Library tests: 28 passed.
+- All 21 managed games now have `appmanifest_<appid>.cache.json`.
 - Full restore/export round-trip with a populated sidecar was not run yet.
 
 ## Risks

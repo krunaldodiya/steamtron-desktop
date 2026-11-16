@@ -804,6 +804,7 @@ pub fn add_managed_game_at(
     game.installation.prefix = layout.prefix.clone();
     game.installation.manifest = layout.manifest.clone();
     ensure_appmanifest(&game)?;
+    let _ = crate::cache::backfill_from_global(&game);
 
     // Depot filtering is best-effort: a Steam metadata outage must not block
     // registration, so the provider Lua is kept unchanged in that case.

@@ -5929,6 +5929,14 @@ fn main() {
                 steamtron_library::managed::cleanup_legacy_lua_files();
                 steamtron_library::managed::organize_manifest_store();
                 steamtron_library::managed::populate_missing_appmanifests();
+                if let Ok(library) = steamtron_core::library::Library::load() {
+                    for game in library.games() {
+                        let _ = steamtron_library::cache::backfill_from_global(game);
+                        if let Some(appid) = game.metadata_app_id {
+                            let _ = steamtron_library::updates::available_updates(&appid.to_string());
+                        }
+                    }
+                }
             });
             download::restore(app.handle());
             Ok(())
