@@ -3644,7 +3644,9 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         } else {
             (Vec::new(), Vec::new(), 0)
         };
-        let manifest_source = steamtron_core::paths::layout().manifests();
+        let manifest_source = app_id
+            .map(|id| steamtron_core::paths::layout().manifests_for(&id.to_string()))
+            .unwrap_or_else(|| steamtron_core::paths::layout().manifests());
         let mut manifest_files = Vec::new();
         if let Some(lua) = lua.as_ref().and_then(|path| std::fs::read_to_string(path).ok()) {
             let (depots, _) = parse_lua_metadata(&lua);
@@ -3763,6 +3765,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
             "steam_app_id": app_id,
             "content_directory": format!("common/{folder}"),
             "fixes_directory": if fixes_sha.is_empty() { String::new() } else { format!("fixes/{folder}") },
+            "compatdata_directory": format!("compatdata/{}", game.installation.prefix.file_name().and_then(|name| name.to_str()).unwrap_or(&folder)),
             "content_archive": {"name":"content.tar","sha256":content_sha},
             "components": components,
             "launcher_relative_path": launcher_relative,
@@ -3776,7 +3779,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
             "proton": game.launch.proton,
             "fixes_enabled": game.fixes_enabled,
         });
-        let manifest_name = format!("appmanifest_{}.json", app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
+        let manifest_name = format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
         std::fs::write(package.join(manifest_name), serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
         if final_path.exists() {
@@ -3989,6 +3992,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let manifest_components = manifest.get("components").cloned().unwrap_or(serde_json::Value::Null);
     let manifest_worker = manifest.clone();
     let expected_content_sha_worker = expected_content_sha.clone();
+    let global_appid_worker = appid.map(|id| id.to_string());
     let target_game_worker = target_game.clone();
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         // Use archive sizes as the progress denominator. Scanning every tar
@@ -4058,7 +4062,11 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
                     if entry.path().is_file() {
                         let name = entry.file_name();
                         std::fs::copy(entry.path(), target_root_worker.join(&name)).map_err(|error| error.to_string())?;
-                        let _ = std::fs::copy(entry.path(), steamtron_core::paths::layout().manifests().join(&name));
+                        if let Some(global_appid) = global_appid_worker.as_deref() {
+                            let directory = steamtron_core::paths::layout().manifests_for(global_appid);
+                            let _ = std::fs::create_dir_all(&directory);
+                            let _ = std::fs::copy(entry.path(), directory.join(&name));
+                        }
                     }
                 }
             }
@@ -4142,6 +4150,20 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     }
     game.launch_targets = targets;
     steamtron_core::library::mark_setup_completed(&mut game);
+    let appmanifest_path = if !game.installation.manifest.as_os_str().is_empty() {
+        game.installation.manifest.clone()
+    } else {
+        target_root.parent().and_then(|path| path.parent())
+            .ok_or_else(|| "The managed library folder is invalid.".to_string())?
+            .join(format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone())))
+    };
+    if let Some(parent) = appmanifest_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let appmanifest_temporary = appmanifest_path.with_extension("json.steamtron.tmp");
+    std::fs::write(&appmanifest_temporary, serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    std::fs::rename(&appmanifest_temporary, &appmanifest_path).map_err(|error| error.to_string())?;
     library.upsert_game(game.clone()).map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
     let _ = std::fs::remove_dir_all(&staging_cleanup);
@@ -4252,7 +4274,7 @@ async fn regenerate_managed_manifests(game_id: String) -> Result<serde_json::Val
         use steamtron_library::managed::write_managed_manifests;
 
         let bundle = steamtron_library::download_bundle(&app_id.to_string()).map_err(|error| error.to_string())?;
-        write_managed_manifests(&bundle.manifests).map_err(|error| error.to_string())?;
+        write_managed_manifests(&app_id.to_string(), &bundle.manifests).map_err(|error| error.to_string())?;
         Ok::<_, String>(serde_json::json!({
             "appid": app_id,
             "manifests": bundle.manifests.len(),
@@ -4445,15 +4467,18 @@ fn ensure_verify_metadata(
     }
     let missing = |pair: &(String, String)| !root.join(format!("{}_{}.manifest", pair.0, pair.1)).is_file();
     if depots.iter().any(missing) {
-        let cached = steamtron_core::paths::layout().manifests();
+        let cached = steamtron_core::paths::layout().manifests_for(&app_id.to_string());
+        let cached_root = steamtron_core::paths::layout().manifests();
         for (depot, manifest) in &depots {
             let name = format!("{depot}_{manifest}.manifest");
             let destination = root.join(&name);
             if destination.is_file() {
                 continue;
             }
-            let source = cached.join(&name);
-            if source.is_file() {
+            let source = [cached.join(&name), cached_root.join(&name)]
+                .into_iter()
+                .find(|path| path.is_file());
+            if let Some(source) = source {
                 std::fs::copy(&source, &destination).map_err(|error| error.to_string())?;
             }
         }
@@ -5571,6 +5596,7 @@ fn main() {
             std::thread::spawn(|| {
                 steamtron_library::migrate_manifest_cache();
                 steamtron_library::managed::cleanup_legacy_lua_files();
+                steamtron_library::managed::organize_manifest_store();
             });
             download::restore(app.handle());
             Ok(())

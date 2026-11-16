@@ -345,8 +345,43 @@ fn lua_manifest_ids(lua: &str) -> Vec<(String, String)> {
     depots
 }
 
-/// Export one ZIP per library game: metadata.json, lua/<appid>.lua, and every
-/// depot manifest. Missing Lua/manifests are generated from the signed-in API.
+fn game_appmanifest(game: &steamtron_core::library::Game) -> serde_json::Value {
+    let folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game");
+    let prefix_name = game.installation.prefix.file_name().and_then(|name| name.to_str()).unwrap_or(folder);
+    let primary = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first());
+    let launcher_relative = primary
+        .and_then(|target| target.executable.strip_prefix(&game.installation.root).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let targets = game.launch_targets.iter().map(|target| {
+        serde_json::json!({
+            "id": target.id,
+            "name": target.name,
+            "executable": target.executable.strip_prefix(&game.installation.root)
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| target.executable.to_string_lossy().into_owned()),
+            "arguments": target.arguments,
+            "primary": target.primary,
+        })
+    }).collect::<Vec<_>>();
+    serde_json::json!({
+        "format": 1,
+        "game_id": game.id,
+        "title": game.title,
+        "steam_app_id": game.metadata_app_id,
+        "content_directory": format!("common/{folder}"),
+        "fixes_directory": format!("fixes/{folder}"),
+        "launcher_relative_path": launcher_relative,
+        "compatdata_directory": format!("compatdata/{prefix_name}"),
+        "proton": game.launch.proton,
+        "launch_options": game.launch.arguments,
+        "launch_targets": targets,
+    })
+}
+
+/// Export one ZIP per library game: metadata.json, appmanifest JSON,
+/// lua/<appid>.lua, and every depot manifest. Missing Lua/manifests are
+/// generated from the signed-in API.
 pub fn export_game_backups(
     destination: &Path,
     progress: &mut dyn FnMut(usize, usize, &str) -> Result<(), String>,
@@ -359,8 +394,8 @@ pub fn export_game_backups(
     if games.is_empty() {
         return Err(LibraryError::Archive("No managed games to export.".into()));
     }
-    let manifests_dir = steamtron_core::paths::layout().manifests();
-    fs::create_dir_all(&manifests_dir).map_err(|error| LibraryError::io(&manifests_dir, error))?;
+    let manifests_root = steamtron_core::paths::layout().manifests();
+    let _ = manifests_root;
     let total = games.len();
     let mut files = 0usize;
     let mut bytes = 0u64;
@@ -370,6 +405,8 @@ pub fn export_game_backups(
 
     for (index, game) in games.iter().enumerate() {
         let appid = game.metadata_app_id.map(|id| id.to_string()).unwrap_or_default();
+        let manifests_dir = steamtron_core::paths::layout().manifests_for(&appid);
+        fs::create_dir_all(&manifests_dir).map_err(|error| LibraryError::io(&manifests_dir, error))?;
         let title = export_safe_name(&game.title);
         progress(index, total, &format!("Exporting {} of {} · {}", index + 1, total, game.title))
             .map_err(LibraryError::Archive)?;
@@ -396,6 +433,10 @@ pub fn export_game_backups(
             let name = format!("{depot}_{manifest}.manifest");
             let cached = manifests_dir.join(&name);
             if let Ok(data) = fs::read(&cached) {
+                manifest_data.push((name, data));
+                continue;
+            }
+            if let Ok(data) = fs::read(manifests_root.join(&name)) {
                 manifest_data.push((name, data));
                 continue;
             }
@@ -432,8 +473,10 @@ pub fn export_game_backups(
             "game": game,
         });
         let encoded = serde_json::to_vec_pretty(&metadata).map_err(|error| LibraryError::Archive(error.to_string()))?;
+        let appmanifest = serde_json::to_vec_pretty(&game_appmanifest(game)).map_err(|error| LibraryError::Archive(error.to_string()))?;
         for (name, data) in [
             (format!("{title}/metadata.json"), encoded),
+            (format!("{title}/appmanifest_{appid}.json"), appmanifest),
             (format!("{title}/lua/{appid}.lua"), lua.into_bytes()),
         ] {
             zip.start_file(name, options).map_err(LibraryError::Zip)?;

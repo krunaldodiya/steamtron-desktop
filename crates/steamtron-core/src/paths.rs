@@ -97,6 +97,10 @@ impl Layout {
         self.home().join("runners")
     }
 
+    pub fn manifests_for(&self, appid: &str) -> PathBuf {
+        self.manifests().join(appid)
+    }
+
     pub fn diagnostics(&self) -> PathBuf {
         self.home().join("diagnostics")
     }

@@ -286,7 +286,7 @@ pub(crate) fn store_cached_manifest(appid: &str, provider: &str, bytes: &[u8]) {
     );
 }
 
-fn persistent_bundle_path(appid: &str) -> PathBuf {
+pub(crate) fn persistent_bundle_path(appid: &str) -> PathBuf {
     steamtron_core::paths::layout()
         .home()
         .join("manifest-bundles")
@@ -551,10 +551,10 @@ pub fn remove_game(appid: &str, backend: &dyn RegistrationBackend) -> Result<Rem
     }
 
     for library in &libraries {
-        remove_manifests(&library.join("depotcache"), &manifest_names, &mut removed);
+        remove_manifests(&library.join("depotcache"), appid, &manifest_names, &mut removed);
     }
     for store in manifest_stores() {
-        remove_manifests(&store, &manifest_names, &mut removed);
+        remove_manifests(&store, appid, &manifest_names, &mut removed);
     }
 
     Ok(RemovedGame {
@@ -564,12 +564,11 @@ pub fn remove_game(appid: &str, backend: &dyn RegistrationBackend) -> Result<Rem
     })
 }
 
-fn remove_manifests(root: &Path, names: &BTreeSet<String>, removed: &mut Vec<String>) {
+fn remove_manifests(root: &Path, appid: &str, names: &BTreeSet<String>, removed: &mut Vec<String>) {
     let mut depots = BTreeSet::new();
     for name in names {
-        let path = root.join(name);
-        if path.is_file() {
-            if fs::remove_file(&path).is_ok() {
+        for path in [root.join(appid).join(name), root.join(name)] {
+            if path.is_file() && fs::remove_file(&path).is_ok() {
                 removed.push(path.display().to_string());
             }
         }
@@ -603,6 +602,7 @@ fn manifest_stores() -> Vec<PathBuf> {
     }) {
         stores.push(data.join("SLSsteam/manifests"));
     }
+    stores.push(steamtron_core::paths::layout().manifests());
     stores
 }
 

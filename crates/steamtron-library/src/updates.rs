@@ -277,17 +277,30 @@ fn day_end(value: &str) -> Option<i64> {
         .map(|date| date.and_utc().timestamp())
 }
 
+fn manifest_files(root: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Ok(nested) = fs::read_dir(path) {
+                    paths.extend(nested.flatten().map(|entry| entry.path()).filter(|path| path.is_file()));
+                }
+            } else if path.is_file() {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+}
+
 fn sources(depots: &BTreeMap<String, String>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
     if let Some(store) = manifest_store() {
-        if let Ok(entries) = fs::read_dir(store) {
-            paths.extend(entries.flatten().map(|entry| entry.path()));
-        }
+        paths.extend(manifest_files(&store));
     }
-    if let Ok(entries) = fs::read_dir(steamtron_core::paths::layout().manifests()) {
-        paths.extend(entries.flatten().map(|entry| entry.path()));
-    }
+    paths.extend(manifest_files(&steamtron_core::paths::layout().manifests()));
     if let Ok(root) = steam::steam_root() {
         if let Ok(entries) = fs::read_dir(root.join("steamapps/depotcache")) {
             paths.extend(entries.flatten().map(|entry| entry.path()));

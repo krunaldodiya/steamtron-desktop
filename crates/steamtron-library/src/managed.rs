@@ -612,14 +612,53 @@ pub fn cleanup_legacy_lua_files() {
     }
 }
 
+/// Rebuild the per-game manifest folders from the persistent bundles and
+/// remove flat copies that now live inside a game folder.
+pub fn organize_manifest_store() {
+    let root = steamtron_core::paths::layout().manifests();
+    if !root.is_dir() { return; }
+    let bundles = steamtron_core::paths::layout().home().join("manifest-bundles");
+    if let Ok(entries) = fs::read_dir(&bundles) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(appid) = path.file_stem().and_then(|value| value.to_str()) else { continue };
+            let Some(bundle) = crate::read_bundle_file(&path) else { continue };
+            let directory = root.join(appid);
+            let _ = fs::create_dir_all(&directory);
+            for (name, data) in &bundle.manifests {
+                let safe = Path::new(name).file_name().and_then(|value| value.to_str()).unwrap_or("manifest");
+                let _ = fs::write(directory.join(safe), data);
+            }
+        }
+    }
+    let Ok(entries) = fs::read_dir(&root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() { continue; }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else { continue };
+        if let Some(appid) = name.split('.').next().filter(|value| value.chars().all(|c| c.is_ascii_digit())) {
+            let directory = root.join(appid);
+            let _ = fs::create_dir_all(&directory);
+            let _ = fs::rename(&path, directory.join(name));
+            continue;
+        }
+        let organized = fs::read_dir(&root).ok().into_iter().flatten().flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .any(|directory| directory.join(name).is_file());
+        if organized { let _ = fs::remove_file(&path); }
+    }
+}
+
 /// Store provider depot manifests in SteamTron's Steam-independent store.
 pub fn write_managed_manifests(
+    appid: &str,
     manifests: &BTreeMap<String, Vec<u8>>,
 ) -> Result<(), LibraryError> {
     if manifests.is_empty() {
         return Ok(());
     }
-    let directory = steamtron_core::paths::layout().manifests();
+    let directory = steamtron_core::paths::layout().manifests_for(appid);
     fs::create_dir_all(&directory).map_err(|error| LibraryError::io(&directory, error))?;
     for (name, data) in manifests {
         let safe = Path::new(name)
@@ -740,7 +779,7 @@ pub fn add_managed_game_at(
     // registration, so the provider Lua is kept unchanged in that case.
     let lua = windows_only_lua(&appid, &bundle.lua)
         .unwrap_or_else(|_| canonical_lua(&bundle.lua));
-    let manifest_dir = steamtron_core::paths::layout().manifests();
+    let manifest_dir = steamtron_core::paths::layout().manifests_for(&appid);
     fs::create_dir_all(&manifest_dir).map_err(|error| LibraryError::io(&manifest_dir, error))?;
     for (name, data) in &bundle.manifests {
         let safe = Path::new(name)
