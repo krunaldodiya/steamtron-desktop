@@ -80,3 +80,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0053](0053-repair-backup-fixes.md) | Repair backup fixes from installed fixes | done | 2026-11-16 |
 | [0054](0054-updates-from-bundle.md) | Updates tab reads the persistent bundle | done | 2026-11-16 |
 | [0055](0055-dlc-queue-and-install.md) | DLC selection, queue, install, and removal | active | 2026-11-16 |
+| [0056](0056-dlc-sizes.md) | DLC sizes | done | 2026-11-16 |

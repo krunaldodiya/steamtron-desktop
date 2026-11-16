@@ -2022,12 +2022,23 @@ function openManagedGameOptions(game) {
           <td><input type="checkbox" data-dlc-id="${entry.app_id}"${entry.selected ? " checked" : ""}${entry.available ? "" : " disabled"} aria-label="Install ${escape(entry.name)}" title="${entry.available ? "Check to queue this DLC; uncheck to remove it." : "This DLC is not present in the game manifest."}"></td>
           <td>${escape(entry.name)}${entry.installed ? ' <span class="dlc-note">installed</span>' : entry.available ? "" : ' <span class="dlc-note">not in manifest</span>'}</td>
           <td>${escape(entry.released || "—")}</td>
-          <td>—</td>
+          <td data-dlc-size="${entry.app_id}">…</td>
         </tr>`).join("");
         pane.innerHTML = `<h3>Downloadable Content</h3>
           <p class="pane-note">Check DLC to queue it. Unchecking removes its installed files immediately. When a download is queued, Play becomes Update.</p>
           <table class="dlc-table"><thead><tr><th>Install</th><th>Name</th><th>Released</th><th>Size</th></tr></thead>
           <tbody>${rows || '<tr><td colspan="4">No DLC entries were reported for this game.</td></tr>'}</tbody></table>`;
+        const sizeIds = entries.map((entry) => entry.app_id);
+        if (sizeIds.length) {
+          void invoke("managed_dlc_sizes", { appIds: sizeIds }).then((sizes) => {
+            for (const cell of pane.querySelectorAll("[data-dlc-size]")) {
+              const size = Number(sizes[cell.dataset.dlcSize]) || 0;
+              cell.textContent = size > 0 ? formatBytes(size) : "—";
+            }
+          }).catch(() => {
+            for (const cell of pane.querySelectorAll("[data-dlc-size]")) cell.textContent = "—";
+          });
+        }
         for (const input of pane.querySelectorAll("input[data-dlc-id]")) {
           input.onchange = async () => {
             input.disabled = true;

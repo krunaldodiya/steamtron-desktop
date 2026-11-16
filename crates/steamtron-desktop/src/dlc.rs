@@ -197,6 +197,57 @@ fn dlc_row(state: &DlcState, app_id: u32, _title: &str) -> DepotProgress {
     }
 }
 
+fn sizes_cache_path() -> PathBuf {
+    steamtron_core::paths::layout().cache_dir().join("dlc-sizes.json")
+}
+
+fn load_size_cache() -> BTreeMap<String, u64> {
+    fs::read(sizes_cache_path())
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
+}
+
+fn save_size_cache(cache: &BTreeMap<String, u64>) {
+    let path = sizes_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(data) = serde_json::to_vec_pretty(cache) {
+        let _ = fs::write(path, data);
+    }
+}
+
+/// Sum the depot sizes reported by SMD for each DLC App ID.
+pub fn dlc_sizes(app_ids: &[u32]) -> BTreeMap<u32, u64> {
+    let mut cache = load_size_cache();
+    let mut result = BTreeMap::new();
+    let mut changed = false;
+    let smd = download::resolve_smd().ok();
+    for app_id in app_ids {
+        let key = app_id.to_string();
+        if let Some(size) = cache.get(&key).copied() {
+            result.insert(*app_id, size);
+            continue;
+        }
+        let Some(smd) = smd.as_ref() else { continue };
+        let output = Command::new(smd)
+            .args(["search", &key, "--manifests", "0", "--json"])
+            .output();
+        let Ok(output) = output else { continue };
+        if !output.status.success() { continue; }
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { continue };
+        let size = value.get("manifests").and_then(|value| value.as_array()).map(|items| {
+            items.iter().filter_map(|item| item.get("size_bytes").and_then(|value| value.as_u64())).sum::<u64>()
+        }).unwrap_or(0);
+        cache.insert(key, size);
+        result.insert(*app_id, size);
+        changed = true;
+    }
+    if changed { save_size_cache(&cache); }
+    result
+}
+
 pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     let library = Library::load().map_err(|error| error.to_string())?;
     let game = library.game(&game_id).ok_or_else(|| format!("unknown game {game_id}"))?.clone();

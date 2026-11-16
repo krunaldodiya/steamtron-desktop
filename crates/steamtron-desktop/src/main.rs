@@ -3250,6 +3250,15 @@ fn store_cached_catalog(
 }
 
 #[tauri::command]
+async fn managed_dlc_sizes(app_ids: Vec<u32>) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    let sizes = tauri::async_runtime::spawn_blocking(move || dlc::dlc_sizes(&app_ids))
+        .await
+        .map_err(|error| format!("DLC size task failed: {error}"))?;
+    serde_json::to_value(sizes).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn managed_dlc_state(game_id: String) -> Result<serde_json::Value, String> {
     let library = steamtron_core::library::Library::load().map_err(|error| error.to_string())?;
     let game = library.game(&game_id).ok_or_else(|| format!("unknown game {game_id}"))?;
@@ -5967,6 +5976,7 @@ fn main() {
             managed_dlc,
             set_managed_dlc,
             managed_dlc_state,
+            managed_dlc_sizes,
             start_managed_dlc_download,
             app_details,
             app_version,
