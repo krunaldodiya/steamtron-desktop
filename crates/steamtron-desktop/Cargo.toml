@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Open-source Steam library, fixes, and managed-game manager"
 license = "MIT"
-repository = "https://github.com/krunaldodiya/SteamTron-Desktop"
+repository = "https://github.com/krunaldodiya/steamtron-desktop"
 homepage = "https://steamtron.vercel.app"
 authors = ["Krunal Dodiya"]
 

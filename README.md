@@ -10,7 +10,7 @@ under active hardening.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows-2f86c9)](#platform-support)
-[![Latest release](https://img.shields.io/github/v/release/krunaldodiya/SteamTron-Desktop?include_prereleases)](https://github.com/krunaldodiya/SteamTron-Desktop/releases)
+[![Latest release](https://img.shields.io/github/v/release/krunaldodiya/steamtron-desktop?include_prereleases)](https://github.com/krunaldodiya/steamtron-desktop/releases)
 
 ## Features
 
@@ -42,7 +42,7 @@ registration, launch-option management, and Steam library discovery.
 ## Install from a release
 
 Download the latest artifact from
-[GitHub Releases](https://github.com/krunaldodiya/SteamTron-Desktop/releases).
+[GitHub Releases](https://github.com/krunaldodiya/steamtron-desktop/releases).
 
 ### Debian / Ubuntu
 
