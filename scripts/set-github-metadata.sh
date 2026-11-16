@@ -23,21 +23,9 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-repo_exists() {
-  gh repo view "$1" >/dev/null 2>&1
-}
-
-if repo_exists "$OLD_API"; then
-  gh repo rename steamtron --repo "$OLD_API" --yes
-fi
-gh repo edit "$NEW_API" \
-  --visibility private \
   --accept-visibility-change-consequences \
-  --description "SteamTron website and API backend (private)" \
   --homepage "https://steamtron.vercel.app" \
-  --add-topic steamtron,igdb,fastapi,nextjs,api,turso
-
-if repo_exists "$OLD_DESKTOP"; then
+if gh repo view "$OLD_DESKTOP" >/dev/null 2>&1; then
   gh repo rename steamtron-desktop --repo "$OLD_DESKTOP" --yes
 fi
 gh repo edit "$NEW_DESKTOP" \

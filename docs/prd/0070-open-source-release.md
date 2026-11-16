@@ -133,6 +133,9 @@ Recorded after implementation:
 - `downloads.js` selects latest-release AppImage, NSIS installer, deb, rpm, and
   checksums when the repository is public; otherwise it falls back to the
   GitHub Releases page.
+- The landing page source was moved out of the desktop repository into the
+  separate companion project. The desktop repository contains no `site/`
+  directory.
 - `cargo test -p steamtron-desktop`: 26 passed before the packaging-only
   changes.
 - GitHub Actions workflow added and `v0.1.0` tag pushed to trigger the Linux and
@@ -150,6 +153,8 @@ Recorded after implementation:
 - Vercel deployment was not applied: Vercel CLI is logged out. The landing
   project is ready under `site/` with `vercel.json`; `vercel deploy --temporary`
   also required login.
+- Vercel deployment of the companion project was not applied from this
+  workstation because Vercel CLI is logged out.
 
 ## Decisions and risks
 
