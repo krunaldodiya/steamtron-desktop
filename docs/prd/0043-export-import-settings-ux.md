@@ -18,12 +18,21 @@
 - R4: Show a native folder picker for Import folder.
 - R5: Separate path selection from import work so the picker runs as a
   synchronous Tauri command on the main thread.
+- R6: Import runs in the same operation-manager dialog as export, with
+  per-game progress such as “Importing 1 of 21” and a 0–100% bar.
 
 ## Verification
 
 - `finishOperation` and `failOperation` now always reset the operation button.
 - `pick_import_paths` opens `pick_files` or `pick_folder`; import receives the
   selected paths in a second command.
+- Ran the debug binary with a temporary picker hook: both `files` and `folder`
+  modes blocked with the native dialog open until the 6-second timeout, proving
+  the picker opens inside Tauri.
+- Import progress emits 22 callbacks for 21 ZIPs: `0/21 "Importing 1 of 21"` …
+  `21/21 "Import complete"`.
+- The import button no longer uses `busy()`; progress is shown by the operation
+  manager modal.
 - `node --check crates/steamtron-desktop/ui/app.js` passes.
 - Desktop tests pass.
 

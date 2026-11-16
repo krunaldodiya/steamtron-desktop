@@ -706,13 +706,25 @@ fn pick_import_paths(mode: Option<String>) -> Vec<String> {
 }
 
 #[tauri::command]
-async fn import_game_metadata(paths: Vec<String>) -> Result<serde_json::Value, String> {
+async fn import_game_metadata(app: tauri::AppHandle, paths: Vec<String>) -> Result<serde_json::Value, String> {
     require_auth()?;
     let paths: Vec<std::path::PathBuf> = paths.into_iter().map(std::path::PathBuf::from).collect();
-    let summary = tauri::async_runtime::spawn_blocking(move || backup::import_game_metadata(&paths))
-        .await
-        .map_err(|error| format!("Import task failed: {error}"))?
-        .map_err(|error| error.to_string())?;
+    let control = register_operation("library-import", "");
+    let emit_app = app.clone();
+    let emit_control = control.clone();
+    let summary = tauri::async_runtime::spawn_blocking(move || {
+        backup::import_game_metadata_with_progress(&paths, &mut |done, total, message| {
+            operation_check(&emit_control)?;
+            let percent = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+            emit_operation_at(&emit_app, "library-import", "", "import", "running", message, percent);
+            Ok(())
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await;
+    unregister_operation("library-import", "");
+    let summary = summary.map_err(|error| format!("Import task failed: {error}"))??;
+    emit_operation_at(&app, "library-import", "", "done", "done", "Import complete", 100.0);
     serde_json::to_value(summary).map_err(|error| error.to_string())
 }
 

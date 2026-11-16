@@ -510,10 +510,25 @@ fn import_one(library: &mut Library, drive: &Path, imported: &ImportedGame) -> R
 
 /// Import metadata folders, one or more ZIPs, or a folder containing ZIPs.
 pub fn import_game_metadata(inputs: &[PathBuf]) -> Result<ImportSummary, LibraryError> {
-    import_game_metadata_at(inputs, &Library::default_path())
+    import_game_metadata_with_progress(inputs, &mut |_, _, _| Ok(()))
+}
+
+pub fn import_game_metadata_with_progress(
+    inputs: &[PathBuf],
+    progress: &mut dyn FnMut(usize, usize, &str) -> Result<(), String>,
+) -> Result<ImportSummary, LibraryError> {
+    import_game_metadata_at_with_progress(inputs, &Library::default_path(), progress)
 }
 
 pub fn import_game_metadata_at(inputs: &[PathBuf], library_path: &Path) -> Result<ImportSummary, LibraryError> {
+    import_game_metadata_at_with_progress(inputs, library_path, &mut |_, _, _| Ok(()))
+}
+
+pub fn import_game_metadata_at_with_progress(
+    inputs: &[PathBuf],
+    library_path: &Path,
+    progress: &mut dyn FnMut(usize, usize, &str) -> Result<(), String>,
+) -> Result<ImportSummary, LibraryError> {
     let mut warnings = Vec::new();
     let games = collect_imports(inputs, &mut warnings);
     if games.is_empty() {
@@ -522,15 +537,19 @@ pub fn import_game_metadata_at(inputs: &[PathBuf], library_path: &Path) -> Resul
     let mut library = Library::open(library_path).map_err(|error| LibraryError::Archive(error.to_string()))?;
     let drive = library.drives().first().map(|drive| drive.root.clone())
         .ok_or_else(|| LibraryError::Archive("Add a library drive before importing.".into()))?;
+    let total = games.len();
     let mut imported = 0;
-    for game in &games {
+    for (index, game) in games.iter().enumerate() {
+        progress(index, total, &format!("Importing {} of {} · {}", index + 1, total, game.source))
+            .map_err(LibraryError::Archive)?;
         match import_one(&mut library, &drive, game) {
             Ok(_) => imported += 1,
             Err(error) => warnings.push(format!("Skipped {}: {error}", game.source)),
         }
     }
+    progress(total, total, "Import complete").map_err(LibraryError::Archive)?;
     library.save().map_err(|error| LibraryError::Archive(error.to_string()))?;
-    Ok(ImportSummary { imported, skipped: games.len() - imported, warnings })
+    Ok(ImportSummary { imported, skipped: total - imported, warnings })
 }
 
 #[cfg(test)]

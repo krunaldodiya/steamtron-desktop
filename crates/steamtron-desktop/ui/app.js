@@ -4426,14 +4426,25 @@ async function renderGeneralSettings(host) {
     try { paths = await invoke("pick_import_paths", { mode }); }
     catch (error) { showToast(String(error), true); return; }
     if (!paths?.length) return;
-    const stop = busy(event.target, "Importing…");
+    const operation = ensureOperationManager("library-import", "", {
+      operation: "library-import",
+      title: "Importing game metadata",
+    });
+    if (!operation) return;
+    beginOperation("library-import", "");
+    await operation.ready;
     try {
       const result = await invoke("import_game_metadata", { paths });
-      stop();
+      finishOperation("library-import", "", `Imported ${result.imported} games`);
+      operation.complete(`Imported ${result.imported} games`);
       await load();
       const warnings = result.warnings?.length ? ` · ${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"}` : "";
       showToast(`Imported ${result.imported} games${result.skipped ? `, skipped ${result.skipped}` : ""}${warnings}`);
-    } catch (error) { stop(); showToast(String(error), true); }
+    } catch (error) {
+      if (operation.isCancelled()) return;
+      failOperation("library-import", "", String(error));
+      operation.fail(String(error));
+    }
   };
   host.querySelector("#setting-import-games").onclick = (event) => { event.stopPropagation(); void importMetadata(event, "files"); };
   host.querySelector("#setting-import-folder").onclick = (event) => { event.stopPropagation(); void importMetadata(event, "folder"); };
