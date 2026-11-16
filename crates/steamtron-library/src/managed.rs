@@ -1253,7 +1253,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_without_a_steam_backend_and_writes_local_lua() {
+    fn adds_without_a_steam_backend_and_writes_appmanifest() {
         let temp = tempfile::tempdir().unwrap();
         let library_path = temp.path().join("library.json");
         let report = add_managed_game_at(
@@ -1273,8 +1273,10 @@ mod tests {
         assert!(!report.registered);
         assert!(!report.pending_restart);
         assert!(report.warning.is_some());
-        assert!(Path::new(&report.lua).is_file());
+        assert!(report.lua.starts_with("manifest-bundles/"));
         let game = Library::open(&library_path).unwrap().game("42").unwrap().clone();
+        assert!(game.installation.manifest.is_file());
+        assert!(super::managed_lua_path(&game).is_none_or(|path| !path.exists()));
         assert!(game.steam.is_none());
         assert_eq!(game.launch.prefix_mode, "umu");
     }

@@ -4359,7 +4359,7 @@ async function renderGeneralSettings(host) {
       ${settingsRow(email, profile?.base_url || "SteamTron account", '<button id="setting-signout">Sign out</button>')}
     </div></section>
     <section class="settings-section"><h2>Maintenance</h2><p>Library backup, restore and desktop integration.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one ZIP per game with metadata.json, lua/&lt;appid&gt;.lua and all depot manifests. Missing Lua/manifests are generated first.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export games…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one folder per game with the exact appmanifest and manifest bundle. Game content and fixes are not included.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export games…</button><button id="setting-import-games">Import ZIPs…</button><button id="setting-import-folder">Import folder…</button></div></div>
       ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
       ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
     </div></section>
@@ -4419,6 +4419,19 @@ async function renderGeneralSettings(host) {
       operation.fail(String(error));
     }
   };
+  const importMetadata = async (event, mode) => {
+    const stop = busy(event.target, "Importing…");
+    try {
+      const result = await invoke("import_game_metadata", { mode });
+      stop();
+      if (!result) { showToast("Import cancelled."); return; }
+      await load();
+      const warnings = result.warnings?.length ? ` · ${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"}` : "";
+      showToast(`Imported ${result.imported} games${result.skipped ? `, skipped ${result.skipped}` : ""}${warnings}`);
+    } catch (error) { stop(); showToast(String(error), true); }
+  };
+  host.querySelector("#setting-import-games").onclick = (event) => { event.stopPropagation(); void importMetadata(event, "files"); };
+  host.querySelector("#setting-import-folder").onclick = (event) => { event.stopPropagation(); void importMetadata(event, "folder"); };
   host.querySelector("#setting-shortcut").onclick = async (event) => {
     const stop = busy(event.target, "Installing…");
     try {

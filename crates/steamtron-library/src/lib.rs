@@ -9,7 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use regex::Regex;
 use serde::Serialize;
 use thiserror::Error;
-use zip::ZipArchive;
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use steamtron_core::steam;
 use steamtron_register::{RegistrationBackend, RegistrationRequest};
@@ -335,6 +336,33 @@ pub fn migrate_manifest_cache() {
             let _ = fs::copy(&path, &destination);
         }
     }
+}
+
+/// Write a persistent bundle from imported Lua and manifest bytes.
+pub fn write_persistent_bundle(
+    appid: &str,
+    lua: &str,
+    manifests: &BTreeMap<String, Vec<u8>>,
+) -> Result<(), LibraryError> {
+    let path = persistent_bundle_path(appid);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
+    }
+    let temporary = path.with_extension("zip.tmp");
+    let file = fs::File::create(&temporary).map_err(|error| LibraryError::io(&temporary, error))?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    zip.start_file(format!("{appid}.lua"), options).map_err(LibraryError::Zip)?;
+    use std::io::Write;
+    zip.write_all(lua.as_bytes()).map_err(|error| LibraryError::io(&temporary, error))?;
+    for (name, data) in manifests {
+        let safe = Path::new(name).file_name().and_then(|value| value.to_str()).unwrap_or("manifest");
+        zip.start_file(safe.to_owned(), options).map_err(LibraryError::Zip)?;
+        zip.write_all(data).map_err(|error| LibraryError::io(&temporary, error))?;
+    }
+    zip.finish().map_err(LibraryError::Zip)?;
+    fs::rename(&temporary, &path).map_err(|error| LibraryError::io(&path, error))?;
+    Ok(())
 }
 
 pub(crate) fn read_persistent_bundle(appid: &str) -> Option<Bundle> {
@@ -1110,7 +1138,7 @@ mod tests {
         let mut removed = Vec::new();
         let mut names = BTreeSet::new();
         names.insert("43_7.manifest".to_owned());
-        remove_manifests(store, &names, &mut removed);
+        remove_manifests(store, "43", &names, &mut removed);
         assert!(!store.join("43_7.manifest").exists());
         assert!(!store.join(".preferred_43").exists());
         assert_eq!(removed.len(), 2);

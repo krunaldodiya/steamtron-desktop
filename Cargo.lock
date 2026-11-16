@@ -4166,6 +4166,7 @@ dependencies = [
  "steamtron-auth",
  "steamtron-core",
  "steamtron-register",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
  "zip",

@@ -685,6 +685,32 @@ fn backend_status() -> Result<steamtron_register::BackendStatus, String> {
 }
 
 #[tauri::command]
+async fn import_game_metadata(mode: Option<String>) -> Result<Option<serde_json::Value>, String> {
+    require_auth()?;
+    let paths = if mode.as_deref() == Some("folder") {
+        let Some(folder) = rfd::FileDialog::new().set_title("Choose a folder of SteamTron backups").pick_folder() else {
+            return Ok(None);
+        };
+        vec![folder]
+    } else {
+        let Some(files) = rfd::FileDialog::new()
+            .set_title("Choose SteamTron backup ZIP files")
+            .add_filter("SteamTron backup", &["zip"])
+            .pick_files()
+        else {
+            return Ok(None);
+        };
+        if files.is_empty() { return Ok(None); }
+        files
+    };
+    let summary = tauri::async_runtime::spawn_blocking(move || backup::import_game_metadata(&paths))
+        .await
+        .map_err(|error| format!("Import task failed: {error}"))?
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(summary).map(Some).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn export_game_backups(app: tauri::AppHandle, destination: Option<String>) -> Result<Option<serde_json::Value>, String> {
     require_auth()?;
     let folder = if let Some(destination) = destination {
@@ -5615,6 +5641,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_status,
             export_game_backups,
+            import_game_metadata,
             game_artwork,
             search_games,
             add_game,
