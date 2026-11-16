@@ -3534,6 +3534,47 @@ impl std::io::Read for ProgressReader<'_> {
     }
 }
 
+#[cfg(unix)]
+fn available_space(path: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(path.as_ptr(), &mut stat) } != 0 {
+        return None;
+    }
+    Some(stat.f_bavail.saturating_mul(stat.f_frsize))
+}
+
+#[cfg(not(unix))]
+fn available_space(_path: &Path) -> Option<u64> {
+    None
+}
+
+fn backup_size(value: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = value as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
+
+fn check_backup_space(directory: &Path, required: u64) -> Result<(), String> {
+    let Some(available) = available_space(directory) else { return Ok(()) };
+    if required <= available {
+        return Ok(());
+    }
+    Err(format!(
+        "Not enough free space in {}: this backup needs about {}, but only {} is available. The existing backup was not changed. Free space or choose another destination.",
+        directory.display(),
+        backup_size(required),
+        backup_size(available)
+    ))
+}
+
 fn replace_backup_directory(package: &Path, final_path: &Path) -> Result<(), String> {
     let name = final_path.file_name().and_then(|value| value.to_str()).unwrap_or("backup");
     let previous = final_path.with_file_name(format!(".{name}.previous-{}", std::process::id()));
@@ -3763,6 +3804,12 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         }
         let manifests_total: u64 = manifest_files.iter().map(|(_, size)| *size).sum();
         let overall_total = content_total + fixes_total + manifests_total;
+        let archive_overhead = ((content_files.len() + fixes_files.len() + manifest_files.len()) as u64)
+            .saturating_mul(1024)
+            .saturating_add(32 * 1024 * 1024);
+        let required_space = overall_total.saturating_add(archive_overhead);
+        let destination = final_path.parent().unwrap_or_else(|| Path::new("."));
+        check_backup_space(destination, required_space)?;
         let mut written = 0u64;
         let started = std::time::Instant::now();
 
@@ -5889,6 +5936,16 @@ mod backup_manifest_tests {
         };
         let mut buffer = [0u8; 16];
         assert!(std::io::Read::read(&mut reader, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn backup_size_and_free_space_are_reported() {
+        assert_eq!(backup_size(1024 * 1024 * 1024), "1.0 GiB");
+        let temp = tempfile::tempdir().unwrap();
+        let available = available_space(temp.path()).expect("statvfs on a temp directory");
+        assert!(available > 0);
+        let error = check_backup_space(temp.path(), u64::MAX).unwrap_err();
+        assert!(error.contains("Not enough free space"));
     }
 
     #[test]
