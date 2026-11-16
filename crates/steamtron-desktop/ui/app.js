@@ -3470,7 +3470,9 @@ async function runSignIn() {
   signInRunning = true;
   gateSpinner.classList.remove("hidden");
   gateSignin.disabled = true;
-  gateStatus.textContent = "Opening your browser to sign in…";
+  gateSignin.textContent = "Signing in…";
+  gateSignin.setAttribute("aria-busy", "true");
+  gateStatus.textContent = "Opening your browser. Complete sign-in there…";
   try {
     const auth = await invoke("profile_login");
     if (!auth.authenticated) {
@@ -3485,6 +3487,8 @@ async function runSignIn() {
     signInRunning = false;
     gateSpinner.classList.add("hidden");
     gateSignin.disabled = false;
+    gateSignin.textContent = "Sign in";
+    gateSignin.removeAttribute("aria-busy");
   }
 }
 

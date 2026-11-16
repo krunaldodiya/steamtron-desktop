@@ -95,3 +95,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0068](0068-umutron-parity-backlog.md) | UmuTron feature parity backlog | draft | 2026-11-16 |
 | [0069](0069-direct-igdb-store.md) | Direct IGDB Store with per-user backend token | done | 2026-11-16 |
 | [0070](0070-open-source-release.md) | Open-source ready distribution and contributor docs | done | 2026-11-16 |
+| [0071](0071-signin-progress.md) | Visible sign-in progress | done | 2026-11-16 |

@@ -120,16 +120,18 @@ Release artifacts are built by `.github/workflows/release.yml`:
 - Linux: `.deb`, `.rpm`, `.AppImage`
 - Windows: NSIS `*-setup.exe`
 
-Create and push a version tag:
+1. Add the release section to [`CHANGELOG.md`](CHANGELOG.md).
+2. Confirm the website changelog section is updated.
+3. Create and push a version tag:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-The workflow creates the GitHub Release and uploads the packages plus
-`SHA256SUMS.txt`. Do not upload local build artifacts by hand unless a workflow
-failure is being recovered.
+The workflow verifies that `CHANGELOG.md` contains the matching version, creates
+the GitHub Release, and uploads the packages plus `SHA256SUMS.txt`. Do not upload
+local build artifacts by hand unless a workflow failure is being recovered.
 
 ## Reporting bugs
 

@@ -96,17 +96,94 @@ sudo pacman -S webkit2gtk-4.1 gtk3 libayatana-appindicator
 Steam, Proton, and GameMode are installed separately through their upstream
 packages.
 
-## First run
+## How to use
 
-1. Start SteamTron.
-2. Sign in with your SteamTron account when prompted.
-3. Confirm that Steam is detected under **Settings → Doctor**.
-4. Add a game from **Store** or use **Add game** for a Steam title.
-5. Choose the compatibility layer and launch target in game settings.
-6. Use **Play** only after the game content and launch target are configured.
+### 1. Install and launch
 
-Some operations require Steam to be closed because Steam rewrites its own
-configuration files. SteamTron prompts before those operations.
+Install the package for your platform from [GitHub Releases](https://github.com/krunaldodiya/steamtron-desktop/releases),
+then start **SteamTron**.
+
+- Linux: install the `.deb`/`.rpm`, or run the AppImage.
+- Windows: run the per-user NSIS installer and install
+  [WinFsp](https://winfsp.dev/rel/) before using the overlay.
+
+### 2. Sign in
+
+Click **Sign in**. SteamTron opens the SteamTron website in your browser and
+waits for the account login to finish. Return to the app; the sign-in dialog
+closes automatically.
+
+If the browser does not open, use the printed URL. After signing in, the
+account menu in the top-right shows the signed-in email.
+
+### 3. Confirm Steam and storage
+
+Open **Settings**.
+
+1. Run **Doctor** and resolve any Steam or backend warning.
+2. Open **Storage** and add the drive that should hold managed games.
+3. Linux users should keep Proton installed; Windows overlay users need WinFsp.
+
+### 4. Add a game
+
+Use one of these paths:
+
+- **Store** — browse or search IGDB, open a PC title, and choose **Add to
+  library**. Select a game drive, then wait for the manifest and depot download.
+- **Add game** — search the Steam catalogue by title, App ID, or Steam URL.
+- **Game Settings → Game Link** — link an already installed external game and
+  choose its launcher executable.
+
+If **Connect IGDB** appears in the Store, open **Settings**, connect the IGDB
+application, and retry.
+
+### 5. Finish game setup
+
+Open the game and use **Game options**:
+
+- **General** — confirm the launch target, working directory, arguments, and
+  optional pre-launch script.
+- **Compatibility** — choose Proton, prefix source, and whether Steam must be
+  running.
+- **Environment** — add per-game environment variables such as
+  `WINEDLLOVERRIDES` when required.
+- **DLC** — select add-ons, download them, or remove installed content.
+- **Fixes** — import fixes, apply GoldBerg/Steamless where appropriate, or open
+  the fixes folder.
+- **Updates** — inspect available builds and pin or clear a manifest set.
+- **Installed Files** — verify content, back up the game, move it to another
+  drive, or uninstall it.
+
+### 6. Play
+
+Press **Play** on Home, Library, or the game detail page. SteamTron starts the
+configured launcher through the selected Proton runtime. Use **Stop** to end the
+owned game processes.
+
+Some Steam registration and configuration actions require Steam to be closed.
+SteamTron prompts before those operations.
+
+### 7. Maintain the library
+
+- **Backups** — export game content, fixes, manifests, and save snapshots from
+  **Installed Files**.
+- **Updates** — pin or clear builds in **Updates**.
+- **Remove from library** — removes the Steam registration but keeps game files.
+- **Uninstall** — deletes managed game content while keeping the library entry.
+- **Diagnostics** — open **Settings → Diagnostic logs** for per-game logs.
+- **Controller/fullscreen** — use the mode button, F11, or a connected gamepad;
+  Page Up/Page Down moves through collection pages.
+
+### Troubleshooting a first game
+
+- No **Play** button: the game has no launch target; set one under
+  **Game Settings → General**.
+- Download stops: reopen the operation from the download manager and use
+  **Resume**.
+- Proton errors: install a runner under **Settings → Proton Manager**, then
+  select it under **Game Settings → Compatibility**.
+- Store is unavailable: check your account session and the SteamTron API
+  connection.
 
 ## Data locations
 
@@ -208,6 +285,11 @@ landing page and downloads.
 
 See [API.md](API.md) for the first-party API endpoints, authentication, IGDB
 token lifecycle, direct upstream APIs, and error formats.
+
+## Changelog
+
+Every release has a user-facing change list in [CHANGELOG.md](CHANGELOG.md) and
+on the [website](https://steamtron.vercel.app/#changelog).
 
 ## Contributing
 

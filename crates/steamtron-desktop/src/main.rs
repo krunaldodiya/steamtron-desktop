@@ -274,8 +274,11 @@ fn profile_status() -> AuthState {
 }
 
 #[tauri::command]
-fn profile_login() -> Result<AuthState, String> {
-    auth_login().map_err(|error| error.to_string())
+async fn profile_login() -> Result<AuthState, String> {
+    tauri::async_runtime::spawn_blocking(auth_login)
+        .await
+        .map_err(|error| format!("Sign-in task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
