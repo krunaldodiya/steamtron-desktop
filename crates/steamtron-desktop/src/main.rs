@@ -3738,7 +3738,7 @@ fn archive_component(
         emit(percent, *written, overall_total, "Archive complete");
     }
     let writer = archive.into_inner().map_err(|error| error.to_string())?;
-    writer.inner.sync_all().map_err(|error| error.to_string())?;
+    writer.inner.sync_data().map_err(|error| error.to_string())?;
     let digest = writer.hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
     Ok((digest, total_bytes))
 }
@@ -3938,7 +3938,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
                 }
             }
             let writer = archive.into_inner().map_err(|error| error.to_string())?;
-            writer.inner.sync_all().map_err(|error| error.to_string())?;
+            writer.inner.sync_data().map_err(|error| error.to_string())?;
             writer.hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>()
         } else {
             String::new()

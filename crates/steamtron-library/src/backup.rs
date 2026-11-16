@@ -250,7 +250,7 @@ pub fn export_game_backups(
             zip.start_file(format!("{title}/manifest-bundle.tar"), options).map_err(LibraryError::Zip)?;
             zip.write_all(&tar_bytes).map_err(|error| LibraryError::io(&temporary, error))?;
             let file = zip.finish().map_err(LibraryError::Zip)?;
-            file.sync_all().map_err(|error| LibraryError::io(&temporary, error))?;
+            file.sync_data().map_err(|error| LibraryError::io(&temporary, error))?;
             files += 2;
             bytes = bytes.saturating_add(appmanifest.len() as u64 + tar_bytes.len() as u64);
             fs::rename(&temporary, &zip_path).map_err(|error| LibraryError::io(&zip_path, error))?;
