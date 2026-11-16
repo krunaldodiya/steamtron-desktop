@@ -169,6 +169,7 @@ fn download_with_ddm(
     app: &AppHandle,
     state: &mut DownloadState,
     base_appid: u32,
+    dlc_app_id: u32,
     depots: &[String],
     bundle: &steamtron_library::Bundle,
     staging: &Path,
@@ -209,6 +210,11 @@ fn download_with_ddm(
                     state.percent = progress_base + progress_span * (index as f64 + percent / 100.0) / depots.len() as f64;
                     if state.total > 0 {
                         state.completed = (state.percent / 100.0 * state.total as f64) as u64;
+                    }
+                    if let Some(row) = state.depots.iter_mut().find(|row| row.depot_id == dlc_app_id.to_string()) {
+                        row.percent = state.percent;
+                        row.status = "downloading".into();
+                        row.completed = if row.total > 0 { (row.percent / 100.0 * row.total as f64) as u64 } else { 0 };
                     }
                     state.message = format!("Downloading DLC depot {depot}…");
                     download::publish_and_store(app, state);
@@ -473,12 +479,15 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         dl_state.depots_current = index as u32;
         dl_state.depots_done = index as u32;
         download::publish_and_store(&app, &dl_state);
+        if let Some(row) = dl_state.depots.iter_mut().find(|row| row.depot_id == app_id.to_string()) {
+            row.status = "downloading".into();
+        }
         let depots = pics.depots.get(app_id).filter(|depots| !depots.is_empty()).cloned();
         let base = index as f64 / total as f64 * 100.0;
         let span = 100.0 / total as f64;
         let use_ddm = depots.is_some() && base_bundle.is_some();
         if let (Some(depots), Some(bundle)) = (depots.as_ref(), base_bundle.as_ref()) {
-            download_with_ddm(&app, &mut dl_state, game.metadata_app_id.unwrap_or(0), depots, bundle, &staging, base, span)?;
+            download_with_ddm(&app, &mut dl_state, game.metadata_app_id.unwrap_or(0), *app_id, depots, bundle, &staging, base, span)?;
         } else {
             let mut command = Command::new(&smd);
             command.arg("--data-dir").arg(cache.join("data"))
@@ -507,6 +516,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                         if count > 0 {
                             dl_state.percent = base + span * current as f64 / count as f64;
                             dl_state.completed = if dl_state.total > 0 { (dl_state.percent / 100.0 * dl_state.total as f64) as u64 } else { 0 };
+                            if let Some(row) = dl_state.depots.iter_mut().find(|row| row.depot_id == app_id.to_string()) {
+                                row.percent = dl_state.percent;
+                                row.status = "downloading".into();
+                                row.completed = if row.total > 0 { (row.percent / 100.0 * row.total as f64) as u64 } else { 0 };
+                            }
                             dl_state.depots_current = current as u32;
                             dl_state.depots_done = current as u32;
                             download::publish_and_store(&app, &dl_state);
