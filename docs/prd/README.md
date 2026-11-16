@@ -98,3 +98,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0071](0071-signin-progress.md) | Visible sign-in progress | done | 2026-11-16 |
 | [0072](0072-windows-drive-discovery.md) | Windows library drive discovery | active | 2026-11-16 |
 | [0073](0073-hidden-console.md) | Hide helper console windows on Windows | active | 2026-11-16 |
+| [0074](0074-winfsp-bootstrap.md) | Built-in WinFsp bootstrap on Windows | draft | 2026-11-16 |
+| [0075](0075-program-files-install.md) | Install Windows build under Program Files (x86) | active | 2026-11-16 |
