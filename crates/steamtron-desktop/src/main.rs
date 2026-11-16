@@ -3847,8 +3847,20 @@ fn extract_tar_component(
                 std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
             let mut output = std::fs::File::create(&target).map_err(|error| error.to_string())?;
-            let copied = std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
-            *written = (*written).saturating_add(copied);
+            // Copy in bounded chunks so one huge game file still advances the
+            // restore bar instead of jumping only after the whole file is done.
+            let mut buffer = vec![0u8; 1024 * 1024];
+            loop {
+                let count = std::io::Read::read(&mut entry, &mut buffer).map_err(|error| error.to_string())?;
+                if count == 0 { break; }
+                std::io::Write::write_all(&mut output, &buffer[..count]).map_err(|error| error.to_string())?;
+                *written = (*written).saturating_add(count as u64);
+                if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                    let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 1.0 };
+                    emit_operation_stats(app, operation, game_id, stage, message, progress_base + fraction * progress_span, *written, overall_total, started);
+                    last_emit = std::time::Instant::now();
+                }
+            }
         }
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
             let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 1.0 };
