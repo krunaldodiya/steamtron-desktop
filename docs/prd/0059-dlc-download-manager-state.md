@@ -20,10 +20,16 @@ before the DLC task stored its initial state.
 - R1: Store DLC download state in the same map as base game downloads.
 - R2: Keep the manager on the local state while the backend task starts.
 - R3: Do not show an error for a nonterminal local state.
+- R4: Register the running DDM/SMD child PID so status checks do not mark the
+  DLC task failed.
+- R5: Use a `starting` state between child processes.
+- R6: Report DLC byte totals when PICS sizes are available.
 
 ## Verification
 
 - `dlc::start` now uses `publish_and_store` for every state update.
+- DDM/SMD child PIDs are registered with the download status map.
+- The task uses `starting` between child processes and reports byte totals.
 - The manager falls back to its local nonterminal state when
   `managed_download_status` returns `None`.
 - `node --check` passes.

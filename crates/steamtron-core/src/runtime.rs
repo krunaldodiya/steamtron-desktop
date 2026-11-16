@@ -65,6 +65,13 @@ pub fn use_default_proton(game: &mut Game, default_proton: &str) {
     }
 }
 
+fn prefix_is_usable(prefix: &Path) -> bool {
+    prefix.join("system.reg").is_file()
+        || prefix.join("pfx/system.reg").is_file()
+        || prefix.join("drive_c").is_dir()
+        || prefix.join("pfx/drive_c").is_dir()
+}
+
 fn resolve_executable(root: &Path, executable: &Path) -> Option<PathBuf> {
     if executable.is_file() {
         return Some(executable.to_path_buf());
@@ -128,7 +135,10 @@ pub fn managed_launch_plan(
     if prefix.as_os_str().is_empty() {
         return Err(RuntimeError::MissingRuntime("game prefix"));
     }
-    if game.launch.prefix_mode == "steam" && crate::steam::steam_root().is_err() {
+    if game.launch.prefix_mode == "steam"
+        && crate::steam::steam_root().is_err()
+        && !prefix_is_usable(prefix)
+    {
         return Err(RuntimeError::MissingRuntime("Steam installation"));
     }
     fs::create_dir_all(prefix).map_err(|error| RuntimeError::Io {
@@ -372,6 +382,15 @@ mod tests {
             managed_launch_plan(&game, &target, temp.path()),
             Err(RuntimeError::MissingRuntime("Proton runner"))
         ));
+    }
+
+    #[test]
+    fn recognizes_an_existing_prefix_without_steam() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(!prefix_is_usable(temp.path()));
+        fs::create_dir_all(temp.path().join("pfx/drive_c")).unwrap();
+        fs::write(temp.path().join("pfx/system.reg"), b"").unwrap();
+        assert!(prefix_is_usable(temp.path()));
     }
 
     #[test]

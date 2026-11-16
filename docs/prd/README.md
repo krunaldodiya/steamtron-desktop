@@ -85,3 +85,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0058](0058-dlc-toggle-without-reload.md) | DLC toggle without reloading the tab | done | 2026-11-16 |
 | [0059](0059-dlc-download-manager-state.md) | DLC download manager state | done | 2026-11-16 |
 | [0060](0060-rebase-stale-launch-target.md) | Rebase stale launch targets | done | 2026-11-16 |
+| [0061](0061-existing-prefix-without-steam.md) | Use an existing Steam-style prefix without Steam | done | 2026-11-16 |

@@ -185,27 +185,43 @@ fn download_with_ddm(
         let name = format!("{depot}_{manifest}.manifest");
         let data = bundle.manifests.get(&name).ok_or_else(|| format!("No manifest file for DLC depot {depot}."))?;
         fs::write(staging.join(&name), data).map_err(|error| error.to_string())?;
-        let mut child = Command::new(&ddm)
+        let mut command = Command::new(&ddm);
+        command
             .current_dir(staging)
             .args(["-app", &base_appid.to_string(), "-depot", depot, "-manifest", manifest, "-depotkeys", "steam.keys", "-manifestfile", &name, "-dir", ".", "-max-downloads", "8"])
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| format!("could not start DepotDownloaderMod: {error}"))?;
+        download::set_active_pid(&state.game_id, child.id());
+        state.status = "downloading".into();
+        download::publish_and_store(app, state);
         let reader = BufReader::new(child.stdout.take().ok_or("DepotDownloaderMod produced no output")?);
         for line in reader.lines().map_while(Result::ok) {
             if let Some(position) = line.find('%') {
                 if let Ok(percent) = line[..position].trim().parse::<f64>() {
                     state.percent = progress_base + progress_span * (index as f64 + percent / 100.0) / depots.len() as f64;
+                    if state.total > 0 {
+                        state.completed = (state.percent / 100.0 * state.total as f64) as u64;
+                    }
                     state.message = format!("Downloading DLC depot {depot}…");
-                    download::publish(app, state);
+                    download::publish_and_store(app, state);
                 }
             }
         }
         let status = child.wait().map_err(|error| error.to_string())?;
+        download::clear_active_pid(&state.game_id);
         if !status.success() {
             return Err(format!("DepotDownloaderMod failed for DLC depot {depot}."));
         }
+        state.status = "starting".into();
+        download::publish_and_store(app, state);
     }
     Ok(())
 }
@@ -425,12 +441,13 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     let base_bundle = game.metadata_app_id
         .and_then(|id| steamtron_library::persistent_bundle(&id.to_string()));
     let total = pending.len();
+    let total_bytes: u64 = pending.iter().filter_map(|id| pics.sizes.get(id).copied()).sum();
     let mut dl_state = DownloadState {
         game_id: game_id.clone(),
-        status: "downloading".into(),
+        status: "starting".into(),
         percent: 0.0,
         completed: 0,
-        total: total as u64,
+        total: total_bytes,
         speed: 0.0,
         average_speed: 0.0,
         depots_total: total as u32,
@@ -438,7 +455,11 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         depots_current: 0,
         stalled_seconds: 0,
         elapsed_seconds: 0.0,
-        depots: pending.iter().map(|id| dlc_row(&state, *id, "")).collect(),
+        depots: pending.iter().map(|id| {
+            let mut row = dlc_row(&state, *id, "");
+            row.total = pics.sizes.get(id).copied().unwrap_or(1);
+            row
+        }).collect(),
         last_event_at: 0.0,
         message: "Downloading DLC…".into(),
         log: String::new(),
@@ -446,6 +467,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     download::publish_and_store(&app, &dl_state);
     for (index, app_id) in pending.iter().enumerate() {
         let title = format!("DLC {app_id}");
+        dl_state.status = "starting".into();
         dl_state.message = format!("Downloading {title} ({} of {total})…", index + 1);
         dl_state.percent = index as f64 / total as f64 * 100.0;
         dl_state.depots_current = index as u32;
@@ -464,11 +486,19 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                 .args(["--like-steam", "--platform", "windows", "--language", "english", "-o"])
                 .arg(&staging)
                 .arg("--json");
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                command.process_group(0);
+            }
             let mut child = command
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .map_err(|error| format!("could not start the DLC download: {error}"))?;
+            download::set_active_pid(&game_id, child.id());
+            dl_state.status = "downloading".into();
+            download::publish_and_store(&app, &dl_state);
             let reader = BufReader::new(child.stdout.take().ok_or("DLC downloader produced no output")?);
             for line in reader.lines().map_while(Result::ok) {
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
@@ -476,7 +506,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                     if let (Some(current), Some(count)) = (value.get("current").and_then(|v| v.as_u64()), value.get("total").and_then(|v| v.as_u64())) {
                         if count > 0 {
                             dl_state.percent = base + span * current as f64 / count as f64;
-                            dl_state.completed = (dl_state.percent * total as f64 / 100.0) as u64;
+                            dl_state.completed = if dl_state.total > 0 { (dl_state.percent / 100.0 * dl_state.total as f64) as u64 } else { 0 };
                             dl_state.depots_current = current as u32;
                             dl_state.depots_done = current as u32;
                             download::publish_and_store(&app, &dl_state);
@@ -485,6 +515,9 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
                 }
             }
             let status = child.wait().map_err(|error| error.to_string())?;
+            download::clear_active_pid(&game_id);
+            dl_state.status = "starting".into();
+            download::publish_and_store(&app, &dl_state);
             if !status.success() {
                 dl_state.status = "error".into();
                 dl_state.message = format!("{title} download failed.");
@@ -504,13 +537,21 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         install_downloaded(&root, &mut state, *app_id, &title, &folder)?;
         save_state(&root, &state)?;
         write_smd_dlc_choice(&root, &state);
+        if let Some(row) = dl_state.depots.iter_mut().find(|row| row.depot_id == app_id.to_string()) {
+            row.percent = 100.0;
+            row.status = "done".into();
+            row.completed = row.total;
+        }
+        dl_state.depots_done = index as u32 + 1;
+        dl_state.completed = dl_state.depots_done as u64;
         let _ = fs::remove_dir_all(&staging);
         fs::create_dir_all(&staging).ok();
     }
     let _ = fs::remove_dir_all(&staging);
+    download::clear_active_pid(&game_id);
     dl_state.status = "done".into();
     dl_state.percent = 100.0;
-    dl_state.completed = total as u64;
+    dl_state.completed = total_bytes;
     dl_state.depots_done = total as u32;
     dl_state.depots_current = total as u32;
     dl_state.message = "DLC download complete.".into();

@@ -71,7 +71,19 @@ fn active_path(game_id: &str) -> PathBuf {
     steamtron_core::paths::layout().diagnostics_for(game_id).join(ACTIVE_FILE)
 }
 
-pub(crate) fn publish(app: &AppHandle, state: &DownloadState) {
+pub(crate) fn set_active_pid(game_id: &str, pid: u32) {
+    if let Ok(mut active) = active().lock() {
+        active.insert(game_id.to_owned(), pid);
+    }
+}
+
+pub(crate) fn clear_active_pid(game_id: &str) {
+    if let Ok(mut active) = active().lock() {
+        active.remove(game_id);
+    }
+}
+
+fn publish(app: &AppHandle, state: &DownloadState) {
     let _ = app.emit("download-progress", state.clone());
 }
 
@@ -1083,7 +1095,7 @@ pub fn status(game_id: &str) -> Option<DownloadState> {
     let running = pid.is_some_and(process_alive);
     let mut states = states().lock().ok()?;
     let state = states.get_mut(game_id)?;
-    if !running && !matches!(state.status.as_str(), "done" | "error" | "cancelled") {
+    if !running && state.status != "starting" && !matches!(state.status.as_str(), "done" | "error" | "cancelled") {
         let generic = state.message.is_empty()
             || state.message.starts_with("Downloading ·")
             || [
@@ -1222,6 +1234,34 @@ mod tests {
         let game_id = "test-dead-pid";
         seed(game_id, u32::MAX, "downloading");
         assert_eq!(status(game_id).unwrap().status, "error");
+        cleanup(game_id);
+    }
+
+    #[test]
+    fn starting_dlc_state_is_not_marked_failed() {
+        let game_id = "test-dlc-starting";
+        states().lock().unwrap().insert(
+            game_id.into(),
+            DownloadState {
+                game_id: game_id.into(),
+                status: "starting".into(),
+                percent: 0.0,
+                completed: 0,
+                total: 0,
+                speed: 0.0,
+                average_speed: 0.0,
+                depots_total: 0,
+                depots_done: 0,
+                depots_current: 0,
+                stalled_seconds: 0,
+                elapsed_seconds: 0.0,
+                depots: Vec::new(),
+                last_event_at: 0.0,
+                message: "Downloading DLC…".into(),
+                log: String::new(),
+            },
+        );
+        assert_eq!(status(game_id).unwrap().status, "starting");
         cleanup(game_id);
     }
 
