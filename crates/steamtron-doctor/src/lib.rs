@@ -47,6 +47,13 @@ fn with_repair(mut value: DoctorCheck, repair: &'static str) -> DoctorCheck {
     value
 }
 
+#[cfg(target_os = "linux")]
+const BACKEND_LABEL: &str = "SLSsteam Moon";
+#[cfg(target_os = "windows")]
+const BACKEND_LABEL: &str = "BetterSteamTools";
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+const BACKEND_LABEL: &str = "Steam registration backend";
+
 pub fn run() -> DoctorReport {
     let mut checks = Vec::new();
     let steam_root = match steam::steam_root() {
@@ -117,7 +124,7 @@ pub fn run() -> DoctorReport {
             backend_ready = status.ready;
             checks.push(check(
                 "unlock-backend",
-                "Steam registration backend",
+                BACKEND_LABEL,
                 if status.ready { CheckStatus::Ok } else { CheckStatus::Error },
                 format!("{}: {}", status.backend, status.details),
             ));
@@ -129,7 +136,7 @@ pub fn run() -> DoctorReport {
         }
         Err(error) => {
             checks.push(with_repair(
-                check("unlock-backend", "Steam registration backend", CheckStatus::Error, error.to_string()),
+                check("unlock-backend", BACKEND_LABEL, CheckStatus::Error, error.to_string()),
                 "install-unlock-backend",
             ));
         }
@@ -145,8 +152,9 @@ pub fn run() -> DoctorReport {
                 "Managed game ownership",
                 CheckStatus::Error,
                 format!(
-                    "{} managed Lua entries exist but no registration backend is active. Steam can show Purchase for installed games.",
-                    managed.len()
+                    "{} managed Lua entries exist but {} is not active. Steam can show Purchase for installed games.",
+                    managed.len(),
+                    BACKEND_LABEL
                 ),
             ),
             "install-unlock-backend",

@@ -14,6 +14,8 @@ use serde::Serialize;
 #[cfg(target_os = "linux")]
 use tauri::Manager;
 #[cfg(target_os = "linux")]
+use tauri::Manager;
+#[cfg(target_os = "linux")]
 use tauri::Emitter;
 mod security;
 use steamtron_core::config::Config;

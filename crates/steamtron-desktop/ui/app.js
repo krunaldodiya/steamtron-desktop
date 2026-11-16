@@ -4202,7 +4202,7 @@ async function loadDoctor(target = null) {
   host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and fixes requirements.</p></div><div class="update-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button></div></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
   host.querySelector("#doctor-refresh").onclick = () => loadDoctor(host);
   host.querySelector("#doctor-repair").onclick = async () => {
-    if (!(await confirmDialog({ title: "Repair Steam integration", message: "Repair will install SLSsteam. Start Steam manually afterward. Continue?", confirmLabel: "Repair" }))) return;
+    if (!(await confirmDialog({ title: "Repair Steam integration", message: "Repair installs SLSsteam Moon into your existing Steam installation. Steam itself is not installed by this action. Start Steam manually afterward. Continue?", confirmLabel: "Repair" }))) return;
     const button = host.querySelector("#doctor-repair");
     const stop = busy(button, "Repairing…");
     try {
@@ -4365,8 +4365,8 @@ async function renderGeneralSettings(host) {
       ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
       ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
     </div></section>
-    <section class="settings-section"><h2>Steam diagnostics</h2><p>Validate Steam, fixes and the registration backend.</p><div class="settings-card">
-      ${settingsRow("Doctor", "Checks Steam, the Lua folder, fixes and the registration backend.", '<button id="setting-doctor-run">Run checks</button>')}
+    <section class="settings-section"><h2>Steam diagnostics</h2><p>Validate Steam, fixes and the unlock backend.</p><div class="settings-card">
+      ${settingsRow("Doctor", "Checks Steam, the Lua folder, fixes and the platform unlock backend.", '<button id="setting-doctor-run">Run checks</button>')}
     </div></section>
     <section class="settings-section"><h2>Diagnostic logs</h2><p>One local folder per game. Completed logs: 8 MiB per file, 100 MiB total, 14-day retention. Cleanup runs before and after launches; active logs are never cleared.</p><div class="settings-card">
       ${settingsRow("Activity", activity, '<button id="setting-open-logs">Open logs folder</button>')}
@@ -4479,7 +4479,7 @@ async function renderGeneralSettings(host) {
     backdrop.innerHTML = `<div class="modal doctor-modal">
       <div class="modal-head"><h2>Steam checks</h2><button class="modal-close" id="doctor-close" aria-label="Close">×</button></div>
       <p class="pane-note" id="doctor-status">Running checks…</p>
-      <div class="doctor-results" id="doctor-results"><div class="settings-row"><div class="row-text"><span>Checking Steam, Lua, fixes and the registration backend…</span></div></div></div>
+      <div class="doctor-results" id="doctor-results"><div class="settings-row"><div class="row-text"><span>Checking Steam, Lua, fixes and the unlock backend…</span></div></div></div>
       <div class="modal-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button><button id="doctor-dismiss">Close</button></div>
     </div>`;
     document.body.appendChild(backdrop);
@@ -4492,7 +4492,7 @@ async function renderGeneralSettings(host) {
       if (check.id === "managed-appmanifest") return { label: "Repair appmanifests", command: "repair_library_entries" };
       if (check.id === "steam-process" || check.id === "steam-injection") return { label: "Start Steam", command: "restart_steam" };
       if (check.id === "unlock-backend" || check.id === "managed-ownership" || check.repair === "install-unlock-backend") {
-        return { label: "Install backend", command: "repair_steam_library", confirm: true };
+        return { label: `Install ${check.title}`, command: "repair_steam_library", confirm: true };
       }
       if (check.id === "stplug-in") return { label: "Repair Steam library", command: "repair_steam_library", confirm: true };
       return null;
@@ -4540,7 +4540,7 @@ async function renderGeneralSettings(host) {
         for (const button of results.querySelectorAll("[data-doctor-repair]")) {
           button.onclick = async () => {
             if (button.dataset.doctorConfirm
-              && !(await confirmDialog({ title: "Repair Steam components", message: "This repair can install or change Steam components. Continue?", confirmLabel: "Repair" }))) return;
+              && !(await confirmDialog({ title: "Repair Steam components", message: "This repair can install or change SLSsteam Moon inside your existing Steam installation. Steam itself is not installed. Continue?", confirmLabel: "Repair" }))) return;
             void runRepair(button, button.dataset.doctorRepair);
           };
         }
@@ -4552,7 +4552,7 @@ async function renderGeneralSettings(host) {
 
     backdrop.querySelector("#doctor-refresh").onclick = () => { void runChecks(); };
     backdrop.querySelector("#doctor-repair").onclick = async () => {
-      if (!(await confirmDialog({ title: "Repair SteamTron integration", message: "Repair SteamTron's Steam integration? This can install SLSsteam. Start Steam manually afterward.", confirmLabel: "Repair" }))) return;
+      if (!(await confirmDialog({ title: "Repair SteamTron integration", message: "Repair SteamTron's Steam integration? This can install SLSsteam Moon into your existing Steam installation; Steam itself is not installed. Start Steam manually afterward.", confirmLabel: "Repair" }))) return;
       void runRepair(backdrop.querySelector("#doctor-repair"), "repair_steam_library");
     };
     await runChecks();
