@@ -26,12 +26,13 @@ Game Settings exposes two actions:
 
 - R1: Lua/manifest generation uses `download_bundle` (persistent store first,
   API fallback) and writes local Lua + depot manifests only.
-- R2: Appmanifest generation uses the existing Steam managed-app entry and
-  `repair_missing_appmanifests`; it does not download or rewrite Lua/manifests.
-- R3: Appmanifest generation returns the existing path when the `.acf` already
-  exists.
-- R4: Appmanifest generation explains that Lua/registration must exist first when
-  no Steam library entry is found.
+- R2: Appmanifest generation writes
+  `<SteamTronLibrary>/steamtronapps/appmanifest_<appid>.json` with the UmuTron
+  schema: game_id, title, steam_app_id, content/fixes/compatdata directories,
+  launcher_relative_path, proton, launch_options and launch_targets. No Steam is
+  required.
+- R3: Appmanifest generation overwrites the local metadata atomically.
+- R4: No Steam registration is required for either action.
 - R5: Files tab shows two separate buttons with separate result messages.
 
 ## Acceptance criteria
@@ -44,6 +45,9 @@ Game Settings exposes two actions:
 ## Verification
 
 - `cargo check` passes.
+- The managed appmanifest path is taken from `game.installation.manifest`, which
+  resolves to `/mnt/krunal/SteamTronLibrary/steamtronapps/appmanifest_<appid>.json`
+  for the current drive layout.
 - Persistent bundle store contains 21 bundles from the export/migration test.
 - Both commands are registered in the Tauri handler.
 - Release built and installed; the Files tab exposes Generate app manifest and
@@ -51,8 +55,9 @@ Game Settings exposes two actions:
 
 ## Decisions and risks
 
-- Appmanifest repair remains Steam-backend dependent; it is not fabricated from
-  a Lua file alone.
+- The local appmanifest JSON is SteamTron metadata, not a Steam-client `.acf`.
+  Generating a Steam `.acf` still requires Steam registration and remains a
+  separate Steam repair path.
 - Lua generation stays independent of Steam registration so users can repair
   local files before registering.
 

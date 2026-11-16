@@ -4271,37 +4271,66 @@ async fn generate_managed_appmanifest(game_id: String) -> Result<serde_json::Val
     require_auth()?;
     let library = Library::load().map_err(|error| error.to_string())?;
     let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
-    let app_id = game.metadata_app_id.ok_or_else(|| "This game has no Steam App ID.".to_string())?;
-    let appid = app_id.to_string();
+    let app_id = game.metadata_app_id;
     tauri::async_runtime::spawn_blocking(move || {
-        let lua = steamtron_core::library::managed_lua_path(&game).filter(|path| path.is_file())
-            .or_else(|| steam::steam_root().ok().map(|root| root.join("config/stplug-in").join(format!("{appid}.lua"))).filter(|path| path.is_file()))
-            .ok_or_else(|| "Generate Lua/manifests first, then generate the app manifest.".to_string())?;
-        let _ = lua;
-        let repaired = repair_missing_appmanifests().map_err(|error| error.to_string())?;
-        if let Some(entry) = repaired.iter().find(|entry| entry.appid == appid) {
-            return Ok::<_, String>(serde_json::json!({
-                "appid": appid,
-                "appmanifest": entry.appmanifest,
-                "created": true,
-            }));
+        let path = if !game.installation.manifest.as_os_str().is_empty() {
+            game.installation.manifest.clone()
+        } else {
+            let base = game.installation.root.parent().and_then(|path| path.parent())
+                .ok_or_else(|| "The managed library folder is invalid.".to_string())?;
+            base.join(format!(
+                "appmanifest_{}.json",
+                app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone())
+            ))
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        for library in steam::libraries().unwrap_or_default() {
-            let acf = library.join(format!("appmanifest_{appid}.acf"));
-            if acf.is_file() {
-                return Ok(serde_json::json!({
-                    "appid": appid,
-                    "appmanifest": acf.display().to_string(),
-                    "created": false,
-                }));
-            }
-        }
-        Err("No Steam library entry was found. Register the game with Steam first, then generate the app manifest.".into())
+        let folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game");
+        let prefix_name = game.installation.prefix.file_name().and_then(|name| name.to_str()).unwrap_or(folder);
+        let primary = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first());
+        let launcher_relative = primary
+            .and_then(|target| target.executable.strip_prefix(&game.installation.root).ok())
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let targets = game.launch_targets.iter().map(|target| {
+            serde_json::json!({
+                "id": target.id,
+                "name": target.name,
+                "executable": target.executable.strip_prefix(&game.installation.root)
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| target.executable.to_string_lossy().into_owned()),
+                "arguments": target.arguments,
+                "primary": target.primary,
+            })
+        }).collect::<Vec<_>>();
+        let metadata = serde_json::json!({
+            "format": 1,
+            "created_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0),
+            "game_id": game.id,
+            "title": game.title,
+            "steam_app_id": app_id,
+            "content_directory": format!("common/{folder}"),
+            "fixes_directory": format!("fixes/{folder}"),
+            "launcher_relative_path": launcher_relative,
+            "compatdata_directory": format!("compatdata/{prefix_name}"),
+            "proton": game.launch.proton,
+            "launch_options": game.launch.arguments,
+            "launch_targets": targets,
+        });
+        let payload = serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?;
+        let temporary = path.with_extension("json.steamtron.tmp");
+        std::fs::write(&temporary, &payload).map_err(|error| error.to_string())?;
+        std::fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+        Ok::<_, String>(serde_json::json!({
+            "appid": app_id,
+            "appmanifest": path.display().to_string(),
+            "created": true,
+        }))
     })
     .await
     .map_err(|error| format!("app manifest task failed: {error}"))?
 }
-
 #[tauri::command]
 fn export_managed_saves(game_id: String) -> Result<Option<String>, String> {
     use std::io::Write;
