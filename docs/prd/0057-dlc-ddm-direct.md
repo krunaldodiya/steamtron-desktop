@@ -1,6 +1,6 @@
 # Direct DepotDownloaderMod for DLC
 
-- Status: active
+- Status: done
 - Date: 2026-11-16
 - Areas: `crates/steamtron-desktop/src/{dlc.rs,main.rs}`
 
@@ -49,4 +49,4 @@ Measured download of Little Nightmares depot `601710`:
 ## Risks
 
 - The direct DDM path requires a consistent base Lua manifest/key bundle.
-- The full UI checkbox → Update → Play path is still active/pending verification.
+- The installed GUI completed the DLC download and returned to Play.

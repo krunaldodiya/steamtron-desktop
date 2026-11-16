@@ -1,6 +1,6 @@
 # DLC selection, queue, install, and removal
 
-- Status: active
+- Status: done
 - Date: 2026-11-16
 - Areas: `crates/steamtron-desktop/{src/dlc.rs,src/main.rs,src/download.rs,ui/app.js}`
 
@@ -42,8 +42,9 @@
 - `uninstall_restores_a_file_that_the_dlc_overwrote` passes.
 - Desktop tests: 19 passed.
 - UI syntax check passes.
-- The full checkbox → Update → download manager → Play cycle was not exercised
-  through the installed GUI in this session.
+- The installed GUI now shows DLC downloads in the manager, increments the
+  content-group row, changes Update to Downloading, and returns to Play after
+  completion.
 
 ## Decisions and risks
 

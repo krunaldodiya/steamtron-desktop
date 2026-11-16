@@ -79,9 +79,9 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0052](0052-repair-backup-metadata.md) | Repair backup metadata without redoing content | done | 2026-11-16 |
 | [0053](0053-repair-backup-fixes.md) | Repair backup fixes from installed fixes | done | 2026-11-16 |
 | [0054](0054-updates-from-bundle.md) | Updates tab reads the persistent bundle | done | 2026-11-16 |
-| [0055](0055-dlc-queue-and-install.md) | DLC selection, queue, install, and removal | active | 2026-11-16 |
+| [0055](0055-dlc-queue-and-install.md) | DLC selection, queue, install, and removal | done | 2026-11-16 |
 | [0056](0056-dlc-sizes.md) | DLC sizes | done | 2026-11-16 |
-| [0057](0057-dlc-ddm-direct.md) | Direct DepotDownloaderMod for DLC | active | 2026-11-16 |
+| [0057](0057-dlc-ddm-direct.md) | Direct DepotDownloaderMod for DLC | done | 2026-11-16 |
 | [0058](0058-dlc-toggle-without-reload.md) | DLC toggle without reloading the tab | done | 2026-11-16 |
 | [0059](0059-dlc-download-manager-state.md) | DLC download manager state | done | 2026-11-16 |
 | [0060](0060-rebase-stale-launch-target.md) | Rebase stale launch targets | done | 2026-11-16 |
