@@ -5,7 +5,17 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-11-16
+
+### Fixed
+
+- Windows now lists mounted fixed and removable drives in **Add game drive**,
+  including the Windows system volume.
+- Windows drive registration now verifies writability and labels the system
+  volume instead of showing an empty drive picker.
+
 ## [0.1.2] - 2026-11-16
+
 
 ### Added
 
@@ -47,6 +57,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.3]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.3
 [0.1.2]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.2
 [0.1.1]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.1
 [0.1.0]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.0

@@ -2667,6 +2667,45 @@ fn path_writable(path: &std::path::Path) -> bool {
     unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
 }
 
+#[cfg(target_os = "windows")]
+fn disk_space(path: &std::path::Path) -> (u64, u64) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut available = 0u64;
+    let mut total = 0u64;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut available,
+            &mut total,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        (0, 0)
+    } else {
+        (total, available)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn path_writable(path: &std::path::Path) -> bool {
+    let probe = path.join(format!(".steamtron-write-test-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 #[tauri::command]
 fn available_library_drives() -> Result<Vec<serde_json::Value>, String> {
     use steamtron_core::library::Library;
@@ -2738,6 +2777,60 @@ fn available_library_drives() -> Result<Vec<serde_json::Value>, String> {
             }));
         }
     }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+
+        const DRIVE_REMOVABLE: u32 = 2;
+        const DRIVE_FIXED: u32 = 3;
+
+        let mask = unsafe { GetLogicalDrives() };
+        if mask != 0 {
+            for index in 0..26u32 {
+                if mask & (1 << index) == 0 {
+                    continue;
+                }
+                let letter = (b'A' + index as u8) as char;
+                let root = format!("{letter}:\\");
+                let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+                let drive_type = unsafe { GetDriveTypeW(wide.as_ptr()) };
+                if drive_type != DRIVE_FIXED && drive_type != DRIVE_REMOVABLE {
+                    continue;
+                }
+                let path = std::path::PathBuf::from(&root);
+                if !path.is_dir() {
+                    continue;
+                }
+                let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+                let (total, free) = disk_space(&canonical);
+                if total == 0 {
+                    continue;
+                }
+                let label = if index == 2 {
+                    "System (C:)".to_owned()
+                } else {
+                    format!("Local Disk ({letter}:)")
+                };
+                let registered = library.drives().iter().any(|drive| drive.root == canonical);
+                let default = library
+                    .drives()
+                    .iter()
+                    .any(|drive| drive.root == canonical && drive.default);
+                result.push(serde_json::json!({
+                    "path": root,
+                    "label": label,
+                    "device": root,
+                    "fstype": "local",
+                    "total": total,
+                    "free": free,
+                    "writable": path_writable(&canonical),
+                    "registered": registered,
+                    "default": default,
+                }));
+            }
+        }
+    }
+
     result.sort_by(|left, right| {
         let left_root = left["path"] == "/";
         let right_root = right["path"] == "/";
@@ -2758,7 +2851,6 @@ fn add_library_drive(path: String) -> Result<serde_json::Value, String> {
         return Err("Choose a mounted drive or folder.".into());
     }
     let root = root.canonicalize().map_err(|error| error.to_string())?;
-    #[cfg(target_os = "linux")]
     if !path_writable(&root) {
         return Err("This drive is not writable.".into());
     }
@@ -2767,8 +2859,17 @@ fn add_library_drive(path: String) -> Result<serde_json::Value, String> {
     } else {
         root.file_name()
             .and_then(|name| name.to_str())
-            .unwrap_or("Drive")
-            .to_owned()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                #[cfg(target_os = "windows")]
+                {
+                    format!("System ({})", root.display())
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    "Drive".to_owned()
+                }
+            })
     };
     let mut library = Library::load().map_err(|error| error.to_string())?;
     let default = library.drives().is_empty();
