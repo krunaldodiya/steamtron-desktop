@@ -234,12 +234,16 @@ pub fn dlc_sizes(app_ids: &[u32]) -> BTreeMap<u32, u64> {
         let output = Command::new(smd)
             .args(["search", &key, "--manifests", "0", "--json"])
             .output();
-        let Ok(output) = output else { continue };
-        if !output.status.success() { continue; }
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else { continue };
-        let size = value.get("manifests").and_then(|value| value.as_array()).map(|items| {
-            items.iter().filter_map(|item| item.get("size_bytes").and_then(|value| value.as_u64())).sum::<u64>()
-        }).unwrap_or(0);
+        let size = match output {
+            Ok(output) if output.status.success() => {
+                serde_json::from_slice::<serde_json::Value>(&output.stdout).ok()
+                    .and_then(|value| value.get("manifests").and_then(|value| value.as_array()).map(|items| {
+                        items.iter().filter_map(|item| item.get("size_bytes").and_then(|value| value.as_u64())).sum::<u64>()
+                    }))
+                    .unwrap_or(0)
+            }
+            _ => 0,
+        };
         cache.insert(key, size);
         result.insert(*app_id, size);
         changed = true;

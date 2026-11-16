@@ -28,4 +28,6 @@ names and release dates, but not install sizes.
 
 - First lookup for each DLC starts an SMD search and can take several seconds;
   cached entries are instant.
-- A failed lookup shows `—` instead of failing the DLC tab.
+- Some DLC App IDs have no depot metadata in SMD (they are packages or share
+  base-game depots). Those remain `—` and are cached as unknown.
+- The UI starts with `—` instead of an indefinite `…` while sizes load.

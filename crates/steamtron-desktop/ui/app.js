@@ -2022,7 +2022,7 @@ function openManagedGameOptions(game) {
           <td><input type="checkbox" data-dlc-id="${entry.app_id}"${entry.selected ? " checked" : ""}${entry.available ? "" : " disabled"} aria-label="Install ${escape(entry.name)}" title="${entry.available ? "Check to queue this DLC; uncheck to remove it." : "This DLC is not present in the game manifest."}"></td>
           <td>${escape(entry.name)}${entry.installed ? ' <span class="dlc-note">installed</span>' : entry.available ? "" : ' <span class="dlc-note">not in manifest</span>'}</td>
           <td>${escape(entry.released || "—")}</td>
-          <td data-dlc-size="${entry.app_id}">…</td>
+          <td data-dlc-size="${entry.app_id}">—</td>
         </tr>`).join("");
         pane.innerHTML = `<h3>Downloadable Content</h3>
           <p class="pane-note">Check DLC to queue it. Unchecking removes its installed files immediately. When a download is queued, Play becomes Update.</p>
