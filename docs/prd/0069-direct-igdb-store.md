@@ -188,6 +188,14 @@ Add `/ui/settings/igdb`:
   the Store must render only the connection/error card. Hide the search
   sidebar, sort/genre lists, recently viewed chips, results grid, pager, and
   page hint until IGDB is connected.
+- R17: Opening a warm Store must paint the cached genre list and cached
+  catalogue page before any token/status network probe. The default session
+  must not show a blocking “Checking IGDB connection…” screen when cached
+  content exists.
+- R18: Once the IGDB token is cached in the Rust process, `igdb_store_status`
+  must answer from that cache without calling the FastAPI status endpoint.
+  The backend status call is a cold-session/connection-recovery operation, not
+  a per-Store-open operation.
 
 ## Acceptance criteria
 
@@ -205,6 +213,12 @@ Add `/ui/settings/igdb`:
   connection/error card; no sidebar, recent chips, results, or pager.
 - [ ] Cached Store pages remain usable when IGDB is offline after reconnecting;
   the disconnected screen itself is connection-only.
+- [ ] A warm Store open paints cached genres and catalogue content without a
+  blocking connection check.
+- [ ] Repeated Store opens in one app session do not call the FastAPI status
+  endpoint after the token is cached.
+- [ ] Cached genres are reused from `store_cached_genres`; a network genre
+  fetch occurs only when the local cache is absent or empty.
 - [ ] Direct IGDB browse, genre, detail, pagination, Steam resolution, and Add
   to library behavior remain intact.
 - [ ] No token appears in logs, URLs, backups, `localStorage`, or command
@@ -228,14 +242,21 @@ Recorded after implementation:
 - `node --check crates/steamtron-desktop/ui/app.js`: passed.
 - `bash scripts/build-linux.sh`: deb and AppImage built; installed binary
   SHA-256 matched the release build
-  (`341c6adfcb6f45fff194ba6121d589dd28743bb93c730a222fb9ab07cd8fae90`).
+  (`6b8eb989f2b9dba01c65820376f80ebd8f7fe94716d44a02b53a9639e5af0025`).
 - Local UI verification against an isolated FastAPI instance and isolated app
   data/cache:
   - With no cached catalogue and no connection, the Store showed only the
     connection card. The sidebar, recently viewed chips, pager, page hint, and
     results grid were absent.
-  - With a stale local catalogue and no connection, the connection-only path
-    was selected before cached cards could render.
+  - With a warm local catalogue, opening Store painted the cached genres,
+    recently viewed chips, and catalogue cards immediately instead of showing
+    the blocking “Checking IGDB connection…” card. The release build was
+    captured 0.3 seconds after the Store click.
+  - Repeated Store opens reuse the in-process token/status state; the FastAPI
+    status endpoint is not called after a valid token is cached.
+- Genre cache path verified: `store_cached_genres` is read before the status
+  probe, and the screen rendered the cached genre sidebar with the cached
+  page.
 - Production deployment verified after pushing backend `224efbf`:
   - `GET /v1/igdb/status` returned 200 with `configured=true` and
     `connected=false` before connection.

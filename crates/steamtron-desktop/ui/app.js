@@ -5495,15 +5495,19 @@ async function connectIgdbStore() {
 // The Rust side caches each catalogue page and the genre list. Read those
 // first so browsing the Store does not hit the API on every launch and keeps
 // working when the API is unreachable.
-async function loadStoreGenres() {
+async function loadCachedStoreGenres() {
   if (storeGenres.length) return storeGenres;
   try {
     const cached = await invoke("store_cached_genres");
-    if (Array.isArray(cached) && cached.length) {
-      storeGenres = cached;
-      return storeGenres;
-    }
-  } catch (_error) { /* fall through to the network */ }
+    if (Array.isArray(cached) && cached.length) storeGenres = cached;
+  } catch (_error) { /* keep going */ }
+  return storeGenres;
+}
+
+async function loadStoreGenres() {
+  if (storeGenres.length) return storeGenres;
+  await loadCachedStoreGenres();
+  if (storeGenres.length) return storeGenres;
   try { storeGenres = await invoke("store_genres"); }
   catch (_error) { storeGenres = []; }
   return storeGenres;
@@ -5521,6 +5525,19 @@ async function cachedStorePage(page) {
   } catch (_error) {
     return null;
   }
+}
+
+async function paintCachedStorePage(page, generation) {
+  const data = await cachedStorePage(page);
+  if (!data || generation !== storeGeneration) return false;
+  const existing = new Set(storeBuffer.map((entry) => entry.id));
+  for (const item of data.items) {
+    if (!isPcCatalogItem(item) || existing.has(item.id)) continue;
+    existing.add(item.id);
+    storeBuffer.push(item);
+  }
+  storeServerPage = Math.max(storeServerPage, page);
+  return true;
 }
 
 async function absorbStorePage(data, serverPage, generation) {
@@ -5554,22 +5571,25 @@ async function ensureStorePage(page, render = true) {
   storeLoading = true;
   storeRefreshing = false;
   storeError = "";
-  if (render) renderStorePage();
   const target = storePage * STORE_PAGE_SIZE;
   let guard = 0;
+
+  // Paint the local catalogue before any network/token probe. This is what
+  // makes a warm Store open instant instead of showing "Checking IGDB…".
+  await loadCachedStoreGenres();
+  const painted = await paintCachedStorePage(storePage, generation);
+  if (generation !== storeGeneration) return;
+  if (painted) {
+    storeLoading = false;
+    storeRefreshing = true;
+  }
+  if (render || painted) renderStorePage();
 
   if (!storeConnection || storeConnection.connected !== true) {
     await loadIgdbStatus();
   }
   if (generation !== storeGeneration) return;
   if (!storeConnection?.connected) {
-    // Cached catalogue pages are local data and remain readable after the
-    // token is revoked. Never make a network catalogue request in this state.
-    if (!storeBuffer.length) {
-      const cached = await cachedStorePage(1);
-      if (generation !== storeGeneration) return;
-      if (cached) await absorbStorePage(cached, 1, generation);
-    }
     storeLoading = false;
     storeRefreshing = false;
     storeTried = true;
@@ -5655,7 +5675,7 @@ function renderStorePage() {
   const previousStoreId = previousInDetail ? previousActive.dataset?.storeId || "" : "";
   const previousPage = previousInDetail ? previousActive.dataset?.storePage || "" : "";
   const previousScroll = detailEl.querySelector(".store-content")?.scrollTop || 0;
-  if (!storeConnection) {
+  if (!storeConnection && !storeBuffer.length) {
     detailEl.innerHTML = `<div class="page store-page">
       <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Game data by IGDB.</p></header>
       <div class="store-connect-page"><div class="status">Checking IGDB connection…</div></div>
@@ -5663,7 +5683,7 @@ function renderStorePage() {
     applyPendingRouteFocus("store");
     return;
   }
-  const disconnected = storeConnection.connected !== true;
+  const disconnected = Boolean(storeConnection && storeConnection.connected !== true);
   if (disconnected) {
     detailEl.innerHTML = `<div class="page store-page">
       <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Game data by IGDB.</p></header>

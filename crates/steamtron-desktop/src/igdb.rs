@@ -386,6 +386,22 @@ fn parse_genre(value: Option<&str>) -> Result<Option<u64>, String> {
 }
 
 pub async fn status() -> Result<Value, String> {
+    let cached = {
+        auth_cache()
+            .lock()
+            .await
+            .as_ref()
+            .filter(|auth| auth.usable())
+            .cloned()
+    };
+    if let Some(auth) = cached {
+        return Ok(json!({
+            "configured": true,
+            "connected": true,
+            "expires_at": auth.expires_at,
+            "connect_url": format!("{}/ui/settings", steamtron_auth::api_base()),
+        }));
+    }
     let mut payload = backend_json("/v1/igdb/status").await?;
     if let Some(object) = payload.as_object_mut() {
         object.entry("connect_url").or_insert_with(|| {
