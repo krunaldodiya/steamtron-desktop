@@ -27,6 +27,7 @@ steamtron-library = { path = "../steamtron-library" }
 anyhow = "1"
 steamless-core = { git = "https://github.com/staernid/steamless-rs", rev = "5886222dfdbb4f707c9dfa2fd37510297b7147d7" }
 sevenz-rust = "0.6.1"
+notify-rust = "4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }

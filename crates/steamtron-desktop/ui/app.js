@@ -1303,14 +1303,20 @@ function beginOperation(operation, gameId) {
   setOperationButton(operation, true);
 }
 
+function notifyTaskResult(operation, gameId, success, message) {
+  void invoke("notify_task_result", { operation, gameId, success, message: String(message || "") }).catch(() => {});
+}
+
 function finishOperation(operation, gameId, message) {
   setOperationInline(operation, gameId, message || "Complete", "done");
   setOperationButton(operation, false);
+  notifyTaskResult(operation, gameId, true, message || "Complete");
 }
 
 function failOperation(operation, gameId, message) {
   setOperationInline(operation, gameId, String(message), "error");
   setOperationButton(operation, false);
+  notifyTaskResult(operation, gameId, false, String(message));
 }
 
 function cancelOperation(operation, gameId) {
@@ -1547,6 +1553,7 @@ if (window.__TAURI__?.event?.listen) {
       showToast(payload.message || "Download cancelled");
       return;
     }
+    notifyTaskResult("download", payload.gameId || "", Boolean(payload.success), payload.message || (payload.success ? "Download complete" : "Download failed"));
     if (payload.gameId) {
       const current = managedDownloads.get(payload.gameId);
       if (current) {

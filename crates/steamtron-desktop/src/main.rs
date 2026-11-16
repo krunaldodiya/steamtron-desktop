@@ -11,7 +11,6 @@ mod fix_tools;
 mod proton_sources;
 
 use serde::Serialize;
-#[cfg(target_os = "linux")]
 use tauri::Manager;
 #[cfg(target_os = "linux")]
 use tauri::Emitter;
@@ -685,6 +684,72 @@ fn backend_status() -> Result<steamtron_register::BackendStatus, String> {
     platform_backend()
         .and_then(|backend| backend.status())
         .map_err(|error| error.to_string())
+}
+
+fn notification_summary(operation: &str, success: bool) -> (&'static str, &'static str) {
+    match (operation, success) {
+        ("backup", true) => ("Backup complete", "complete"),
+        ("backup", false) => ("Backup failed", "failed"),
+        ("restore", true) => ("Restore complete", "complete"),
+        ("restore", false) => ("Restore failed", "failed"),
+        ("verify", true) => ("Verification complete", "complete"),
+        ("verify", false) => ("Verification failed", "failed"),
+        ("download", true) => ("Download complete", "complete"),
+        ("download", false) => ("Download failed", "failed"),
+        ("library-export", true) => ("Export complete", "complete"),
+        ("library-export", false) => ("Export failed", "failed"),
+        ("library-import", true) => ("Import complete", "complete"),
+        ("library-import", false) => ("Import failed", "failed"),
+        (_, true) => ("Task complete", "complete"),
+        (_, false) => ("Task failed", "failed"),
+    }
+}
+
+fn truncate_notification(text: &str, max: usize) -> String {
+    let mut value: String = text.chars().take(max).collect();
+    if text.chars().count() > max {
+        value.push('…');
+    }
+    value
+}
+
+#[tauri::command]
+fn notify_task_result(app: tauri::AppHandle, operation: String, game_id: String, success: bool, message: String) {
+    let focused = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    if focused {
+        return;
+    }
+    let game_title = if game_id.is_empty() {
+        String::new()
+    } else {
+        steamtron_core::library::Library::load()
+            .ok()
+            .and_then(|library| library.game(&game_id).map(|game| game.title.clone()))
+            .unwrap_or_default()
+    };
+    let (summary, _) = notification_summary(&operation, success);
+    let detail = if message.trim().is_empty() {
+        summary.to_owned()
+    } else {
+        truncate_notification(message.trim(), 220)
+    };
+    let body = if game_title.is_empty() {
+        detail
+    } else {
+        format!("{game_title}: {detail}")
+    };
+    std::thread::spawn(move || {
+        let _ = notify_rust::Notification::new()
+            .appname("SteamTron")
+            .summary(summary)
+            .body(&body)
+            .urgency(notify_rust::Urgency::Critical)
+            .timeout(notify_rust::Timeout::Milliseconds(15000))
+            .show();
+    });
 }
 
 #[tauri::command]
@@ -5752,6 +5817,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_status,
             export_game_backups,
+            notify_task_result,
             pick_import_paths,
             import_game_metadata,
             game_artwork,
@@ -5936,6 +6002,16 @@ mod backup_manifest_tests {
         };
         let mut buffer = [0u8; 16];
         assert!(std::io::Read::read(&mut reader, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn task_notification_titles_cover_success_and_failure() {
+        assert_eq!(notification_summary("backup", true).0, "Backup complete");
+        assert_eq!(notification_summary("backup", false).0, "Backup failed");
+        assert_eq!(notification_summary("download", true).0, "Download complete");
+        assert_eq!(notification_summary("library-import", false).0, "Import failed");
+        assert_eq!(notification_summary("unknown", true).0, "Task complete");
+        assert_eq!(truncate_notification("abcdef", 3), "abc…");
     }
 
     #[test]
