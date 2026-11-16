@@ -172,11 +172,19 @@ fn lua_path(appid: &str) -> Option<PathBuf> {
     Some(directory.join(format!("{appid}.lua")))
 }
 
+fn lua_text(appid: &str) -> Option<String> {
+    if let Some(path) = lua_path(appid).filter(|path| path.is_file()) {
+        if let Ok(text) = fs::read_to_string(&path) {
+            return Some(text);
+        }
+    }
+    appid.parse::<u32>().ok()
+        .and_then(|id| crate::persistent_bundle(&id.to_string()))
+        .map(|bundle| bundle.lua)
+}
+
 fn lua_depots(appid: &str) -> BTreeMap<String, String> {
-    let Some(path) = lua_path(appid) else {
-        return BTreeMap::new();
-    };
-    let text = fs::read_to_string(path).unwrap_or_default();
+    let text = lua_text(appid).unwrap_or_default();
     let regex = Regex::new(r#"setManifestid\s*\(\s*(\d+)\s*,\s*["'](\d+)["']"#).unwrap();
     let mut depots: BTreeMap<String, String> = regex
         .captures_iter(&text)
