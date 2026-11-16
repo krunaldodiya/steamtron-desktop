@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Rename and configure the two SteamTron repositories.
+# Rename and configure the public SteamTron desktop repository.
 # Requires an authenticated GitHub CLI: gh auth login
-#
-# The API repository stays private. Only the desktop repository is public.
-# Optionally set STEAMTRON_API_DIR to the local checkout of UmuTron-FastAPI so
-# its origin can be updated after the rename.
 
 OWNER="krunaldodiya"
-OLD_API="$OWNER/UmuTron-FastAPI"
-NEW_API="$OWNER/steamtron"
 OLD_DESKTOP="$OWNER/SteamTron-Desktop"
 NEW_DESKTOP="$OWNER/steamtron-desktop"
 
@@ -23,11 +17,10 @@ if ! gh auth status >/dev/null 2>&1; then
   exit 1
 fi
 
-  --accept-visibility-change-consequences \
-  --homepage "https://steamtron.vercel.app" \
 if gh repo view "$OLD_DESKTOP" >/dev/null 2>&1; then
   gh repo rename steamtron-desktop --repo "$OLD_DESKTOP" --yes
 fi
+
 gh repo edit "$NEW_DESKTOP" \
   --visibility public \
   --accept-visibility-change-consequences \
@@ -37,16 +30,4 @@ gh repo edit "$NEW_DESKTOP" \
 
 git remote set-url origin "git@github.com:$NEW_DESKTOP.git"
 echo "Desktop origin updated to git@github.com:$NEW_DESKTOP.git"
-
-if [[ -n "${STEAMTRON_API_DIR:-}" ]]; then
-  if [[ -d "$STEAMTRON_API_DIR/.git" ]]; then
-    git -C "$STEAMTRON_API_DIR" remote set-url origin "git@github.com:$NEW_API.git"
-    echo "API origin updated in $STEAMTRON_API_DIR"
-  else
-    echo "STEAMTRON_API_DIR is not a git checkout: $STEAMTRON_API_DIR" >&2
-  fi
-fi
-
-echo "GitHub metadata applied. Verify with:"
-echo "  gh repo view $NEW_DESKTOP"
-echo "  gh repo view $NEW_API"
+echo "Verify with: gh repo view $NEW_DESKTOP"

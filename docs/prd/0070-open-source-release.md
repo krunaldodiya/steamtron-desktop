@@ -84,16 +84,13 @@ Documentation output:
 - R14: Add the repository description, website URL, and topics to GitHub once
   authenticated.
 - R15: Do not commit build artifacts or generated bundles.
-- R16: Add a responsive landing page under `site/` with Linux/Windows download
-  buttons populated from the latest public GitHub release.
-- R17: Add Vercel configuration and deployment instructions for
-  `steamtron.vercel.app`.
-- R18: Add a maintainer script that renames `UmuTron-FastAPI` to `steamtron`
-  (keep private), renames this repository to `steamtron-desktop`, makes only
-  the desktop repository public, and sets descriptions/homepages/topics.
-- R19: Landing and package metadata point at
-  `https://steamtron.vercel.app`; GitHub metadata must use it once deployment
-  exists.
+- R16: Keep the desktop repository free of website/API source. The separate
+  companion project owns the public landing page and API.
+- R17: Desktop README links `https://steamtron.vercel.app` but does not expose
+  the companion project's repository details.
+- R18: Add a maintainer script that renames this repository to
+  `steamtron-desktop`, makes it public, and sets its description/homepage/topics.
+- R19: Package metadata points at `https://steamtron.vercel.app`.
 
 ## Acceptance criteria
 
@@ -118,8 +115,6 @@ Documentation output:
 Recorded after implementation:
 
 - `bash -n scripts/build-linux.sh scripts/set-github-metadata.sh`: passed.
-- `python3 -m json.tool site/vercel.json`: passed.
-- `node --check site/downloads.js`: passed.
 - `bash scripts/build-linux.sh` produced:
   - `SteamTron_0.1.0_amd64.deb` (9.58 MiB)
   - `SteamTron-0.1.0-1.x86_64.rpm` (9.59 MiB)
@@ -128,11 +123,6 @@ Recorded after implementation:
   - `Homepage: https://steamtron.vercel.app`
   - `Maintainer: Krunal Dodiya`
   - `Depends: libwebkit2gtk-4.1-0, libgtk-3-0`
-- Landing page reviewed at 1440×1200 and 390×844 in headless Firefox;
-  desktop and mobile layouts rendered.
-- `downloads.js` selects latest-release AppImage, NSIS installer, deb, rpm, and
-  checksums when the repository is public; otherwise it falls back to the
-  GitHub Releases page.
 - The landing page source was moved out of the desktop repository into the
   separate companion project. The desktop repository contains no `site/`
   directory.
@@ -150,9 +140,6 @@ Recorded after implementation:
 - GitHub repository rename/visibility/metadata was not applied: `gh` is not
   authenticated and the repository is not readable unauthenticated. The
   ready-to-run script is `scripts/set-github-metadata.sh`.
-- Vercel deployment was not applied: Vercel CLI is logged out. The landing
-  project is ready under `site/` with `vercel.json`; `vercel deploy --temporary`
-  also required login.
 - Vercel deployment of the companion project was not applied from this
   workstation because Vercel CLI is logged out.
 
@@ -188,7 +175,6 @@ Recorded after implementation:
 ## Links
 
 - Repository: `https://github.com/krunaldodiya/SteamTron-Desktop`
-- Backend: `/mnt/krunal/WorkSpace/Code/UMUTron-WorkSpace/UmuTron-FastAPI`
 - Tauri bundle config: `crates/steamtron-desktop/tauri.conf.json`
 - Build script: `scripts/build-linux.sh`
 - Existing PRD index: `docs/prd/README.md`

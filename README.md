@@ -197,34 +197,12 @@ crates/steamtron-desktop    Tauri commands, UI and release packaging
 crates/steamtron-cli        overlay CLI
 docs/prd                    one PRD per feature or issue
 API.md                      endpoints used by the application
-site/                       static landing page for steamtron.vercel.app
 ```
 
 ## Website
 
-The public landing page lives in [`site/`](site/). It is configured for
-`https://steamtron.vercel.app` and includes release-driven Linux and Windows
-download buttons.
-
-## Repositories
-
-SteamTron is split into two repositories:
-
-| Repository | Visibility | Purpose |
-|---|---|---|
-| [`SteamTron-Desktop`](https://github.com/krunaldodiya/SteamTron-Desktop) | Public (after release setup) | Rust/Tauri desktop application |
-| `steamtron` | Private | Main website and API backend |
-
-The API repository is the existing FastAPI service today and is being renamed
-from `UmuTron-FastAPI` to `steamtron`. The planned Next.js fullstack application
-will host the public website and the API in that repository. The desktop's API
-contract is documented in [API.md](API.md) and is intended to stay stable
-through that migration.
-
-The GitHub repository renames and visibility change require maintainer
-credentials. Run `scripts/set-github-metadata.sh` after `gh auth login`; it
-renames `UmuTron-FastAPI` to `steamtron` (private), renames this repository to
-`steamtron-desktop`, and makes only the desktop repository public.
+Visit [steamtron.vercel.app](https://steamtron.vercel.app) for the public
+landing page and downloads.
 
 ## API
 

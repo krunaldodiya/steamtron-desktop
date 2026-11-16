@@ -15,7 +15,7 @@ use thiserror::Error;
 use url::form_urlencoded;
 
 const CLIENT_ID: &str = "umutron-desktop";
-const DEFAULT_API: &str = "https://umutron-fastapi.vercel.app";
+const DEFAULT_API: &str = "https://steamtron.vercel.app";
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Error)]

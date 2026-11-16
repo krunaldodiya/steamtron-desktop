@@ -11,20 +11,16 @@ The desktop resolves the first-party API base in this order:
 1. `STEAMTRON_API_BASE` environment variable.
 2. `api_base` in `~/.config/steamtron/config.json`
    (`%APPDATA%\SteamTron\config.json` on Windows).
-3. `https://umutron-fastapi.vercel.app`.
+3. `https://steamtron.vercel.app`.
 
-The backend is the private SteamTron API repository:
+The backend is the SteamTron API:
 
-- Current source: `UmuTron-FastAPI`, being renamed to `steamtron`
-- Current implementation: FastAPI; the planned fullstack replacement is
-  Next.js and must preserve this desktop contract
 - Health: `GET /health`
 - Interactive schema: `GET /docs`
 
-The current fallback hostname still contains the old `umutron-fastapi` name.
-It will move to the SteamTron deployment after the repository/domain migration.
-Desktop builds can point at the new origin immediately with
-`STEAMTRON_API_BASE` or `~/.config/steamtron/config.json`.
+The fallback hostname is the current deployed service. Desktop builds can point
+at another API origin with `STEAMTRON_API_BASE` or
+`~/.config/steamtron/config.json`.
 
 All first-party endpoints except the browser login/connect pages require a
 bearer token.
@@ -103,7 +99,7 @@ Returns state without exposing the access token.
   "configured": true,
   "connected": true,
   "expires_at": 1800146342,
-  "connect_url": "https://umutron-fastapi.vercel.app/ui/settings"
+  "connect_url": "https://steamtron.vercel.app/ui/settings"
 }
 ```
 
