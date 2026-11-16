@@ -5587,6 +5587,7 @@ fn main() {
             std::thread::spawn(|| {
                 let _ = download::resolve_smd();
             });
+            std::thread::spawn(steamtron_library::migrate_manifest_cache);
             download::restore(app.handle());
             Ok(())
         })

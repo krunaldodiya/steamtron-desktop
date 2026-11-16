@@ -286,12 +286,73 @@ pub(crate) fn store_cached_manifest(appid: &str, provider: &str, bytes: &[u8]) {
     );
 }
 
+fn persistent_bundle_path(appid: &str) -> PathBuf {
+    steamtron_core::paths::layout()
+        .home()
+        .join("manifest-bundles")
+        .join(format!("{appid}.zip"))
+}
+
+fn read_bundle_file(path: &Path) -> Option<Bundle> {
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() as u64 > MAX_ARCHIVE { return None; }
+    match parse_bundle(&bytes) {
+        Ok(mut bundle) => {
+            bundle.lua = canonical_lua(&bundle.lua);
+            Some(bundle)
+        }
+        Err(_) => None,
+    }
+}
+
+fn store_persistent_bundle(appid: &str, bytes: &[u8]) {
+    let path = persistent_bundle_path(appid);
+    let Some(parent) = path.parent() else { return };
+    if fs::create_dir_all(parent).is_err() { return; }
+    let temporary = path.with_extension(format!("zip.{}.tmp", std::process::id()));
+    if fs::write(&temporary, bytes).is_ok() && fs::rename(&temporary, &path).is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+}
+
+/// Move bundles from the disposable cache into SteamTron's persistent data
+/// directory. Runs at startup and on demand so existing caches are not lost.
+pub fn migrate_manifest_cache() {
+    let old = steamtron_core::paths::layout()
+        .cache_dir()
+        .join("manifests")
+        .join("api");
+    let Ok(entries) = fs::read_dir(&old) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("zip") { continue; }
+        let Some(appid) = path.file_stem().and_then(|value| value.to_str()) else { continue };
+        if normalize_appid(appid).as_deref() != Some(appid) { continue; }
+        let destination = persistent_bundle_path(appid);
+        if destination.is_file() { continue; }
+        if let Some(parent) = destination.parent() { let _ = fs::create_dir_all(parent); }
+        if fs::rename(&path, &destination).is_err() {
+            let _ = fs::copy(&path, &destination);
+        }
+    }
+}
+
 pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);
     }
 
+    // Persistent store first: adding/removing a library entry never needs to
+    // contact the manifest API twice for the same App ID.
+    let persistent = persistent_bundle_path(appid);
+    if let Some(bundle) = read_bundle_file(&persistent) {
+        return Ok(bundle);
+    }
     if let Some(bundle) = read_cached_manifest(appid, "api") {
+        // Migrate an existing disposable-cache bundle into the persistent store.
+        if let Ok(bytes) = fs::read(manifest_cache_path(appid, "api")) {
+            store_persistent_bundle(appid, &bytes);
+        }
         return Ok(bundle);
     }
 
@@ -304,6 +365,7 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     }
     let mut bundle = parse_bundle(&bytes)?;
     bundle.lua = canonical_lua(&bundle.lua);
+    store_persistent_bundle(appid, &bytes);
     store_cached_manifest(appid, "api", &bytes);
     Ok(bundle)
 }
