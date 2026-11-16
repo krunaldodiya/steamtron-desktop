@@ -14,8 +14,6 @@ use serde::Serialize;
 #[cfg(target_os = "linux")]
 use tauri::Manager;
 #[cfg(target_os = "linux")]
-use tauri::Manager;
-#[cfg(target_os = "linux")]
 use tauri::Emitter;
 mod security;
 use steamtron_core::config::Config;
@@ -295,6 +293,9 @@ fn doctor_report() -> Result<steamtron_doctor::DoctorReport, String> {
 async fn repair_steam_library() -> Result<String, String> {
     require_auth()?;
     tauri::async_runtime::spawn_blocking(|| {
+        if steam::steam_root().is_err() {
+            return Err("Steam is not installed. Install Steam and start it once, then retry. SteamTron does not install Steam.".into());
+        }
         let installed = || {
             platform_backend()
                 .ok()
