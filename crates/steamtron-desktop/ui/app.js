@@ -5616,7 +5616,7 @@ function renderStorePage() {
   const previousScroll = detailEl.querySelector(".store-content")?.scrollTop || 0;
   if (!storeConnection && !storeLoadedItems().length) {
     detailEl.innerHTML = `<div class="page store-page">
-      <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Game data by IGDB.</p></header>
+      <header class="page-head"><h1>Discover your next game</h1><p>PC titles only. Game data by IGDB.</p></header>
       <div class="store-connect-page"><div class="status">Checking IGDB connection…</div></div>
     </div>`;
     applyPendingRouteFocus("store");
@@ -5625,7 +5625,7 @@ function renderStorePage() {
   const disconnected = Boolean(storeConnection && storeConnection.connected !== true);
   if (disconnected) {
     detailEl.innerHTML = `<div class="page store-page">
-      <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Game data by IGDB.</p></header>
+      <header class="page-head"><h1>Discover your next game</h1><p>PC titles only. Game data by IGDB.</p></header>
       <div class="store-connect-page">${storeConnectMarkup()}</div>
     </div>`;
     wireStoreConnectionButtons();
@@ -5654,7 +5654,7 @@ function renderStorePage() {
         ? "Saved catalogue · updating…"
         : `${storeLoadedItems().length} PC titles`;
   detailEl.innerHTML = `<div class="page store-page">
-    <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
+    <header class="page-head"><h1>Discover your next game</h1><p>PC titles only. Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">
       <aside class="store-sidebar">
         <div class="store-sidebar-head"><label for="store-search">Search</label><button type="button" tabindex="0" class="store-clear-link" id="store-clear-search">Clear</button></div>

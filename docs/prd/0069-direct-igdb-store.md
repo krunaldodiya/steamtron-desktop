@@ -258,7 +258,7 @@ Recorded after implementation:
 - `node --check crates/steamtron-desktop/ui/app.js`: passed.
 - `bash scripts/build-linux.sh`: deb and AppImage built; installed binary
   SHA-256 matched the release build
-  (`cd4703982c1d607402424f4b1a3e502e0198ceffdc8b26c9ce309b628295efaf`).
+  (`8b573c78eca66e885ef6ee7def9a47bf1a4e5e385ec031187a974fd2937fbb48`).
 - Local UI verification against an isolated FastAPI instance and isolated app
   data/cache:
   - With no cached catalogue and no connection, the Store showed only the
@@ -317,6 +317,10 @@ Recorded after implementation:
 - Use process memory for the desktop token cache; no disk persistence.
 - Normalize direct IGDB data in Rust so the existing Store DOM contract does
   not change.
+- Store pages are 36 server-filtered PC titles. Steam availability is resolved
+  on the detail/add path, not used to shrink a catalogue page. The header now
+  says “PC titles only,” and titles without a Steam mapping show their
+  unavailable state on detail.
 
 ### Risks
 
