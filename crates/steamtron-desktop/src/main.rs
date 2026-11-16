@@ -4699,7 +4699,7 @@ fn parse_lua_metadata(lua: &str) -> (Vec<(String, String)>, String) {
     (depots, keys)
 }
 
-fn depot_downloader_path() -> Option<PathBuf> {
+pub(crate) fn depot_downloader_path() -> Option<PathBuf> {
     let stable = steamtron_core::paths::layout().tools().join("DepotDownloaderMod");
     if stable.is_file() {
         return Some(stable);

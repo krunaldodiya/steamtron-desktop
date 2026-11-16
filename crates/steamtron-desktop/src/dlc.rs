@@ -136,6 +136,10 @@ fn walk_files(root: &Path, path: &Path, files: &mut Vec<(PathBuf, PathBuf)>) -> 
     for entry in fs::read_dir(path).map_err(|error| format!("{}: {error}", path.display()))?.flatten() {
         let child = entry.path();
         if child.is_dir() {
+            let name = child.file_name().and_then(|value| value.to_str()).unwrap_or("");
+            if name.starts_with(".DepotDownloader") || name.starts_with(".smd") || name.starts_with(".steamtron") {
+                continue;
+            }
             walk_files(root, &child, files)?;
         } else if child.is_file() {
             let name = child.file_name().and_then(|value| value.to_str()).unwrap_or("");
@@ -144,6 +148,63 @@ fn walk_files(root: &Path, path: &Path, files: &mut Vec<(PathBuf, PathBuf)>) -> 
             }
             let relative = child.strip_prefix(root).map_err(|error| error.to_string())?.to_path_buf();
             files.push((child, relative));
+        }
+    }
+    Ok(())
+}
+
+fn parse_lua_depots(lua: &str) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
+    let manifest = regex::Regex::new(r#"setManifestid\s*\(\s*(\d+)\s*,\s*["'](\d+)["']"#).unwrap();
+    let key = regex::Regex::new(r#"addappid\s*\(\s*(\d+)\s*,\s*\d+\s*,\s*["']([0-9a-fA-F]{64})["']"#).unwrap();
+    let manifests = manifest.captures_iter(lua)
+        .filter_map(|captures| Some((captures[1].to_owned(), captures[2].to_owned())))
+        .collect();
+    let keys = key.captures_iter(lua)
+        .map(|captures| (captures[1].to_owned(), captures[2].to_owned()))
+        .collect();
+    (manifests, keys)
+}
+
+fn download_with_ddm(
+    app: &AppHandle,
+    state: &mut DownloadState,
+    base_appid: u32,
+    depots: &[String],
+    bundle: &steamtron_library::Bundle,
+    staging: &Path,
+    progress_base: f64,
+    progress_span: f64,
+) -> Result<(), String> {
+    let ddm = crate::depot_downloader_path().ok_or("DepotDownloaderMod is not available.")?;
+    let (manifests, keys) = parse_lua_depots(&bundle.lua);
+    fs::create_dir_all(staging).map_err(|error| format!("{}: {error}", staging.display()))?;
+    let key_data = depots.iter().filter_map(|depot| keys.get(depot).map(|key| format!("{depot};{key}\n"))).collect::<String>();
+    fs::write(staging.join("steam.keys"), key_data).map_err(|error| error.to_string())?;
+    for (index, depot) in depots.iter().enumerate() {
+        let manifest = manifests.get(depot).ok_or_else(|| format!("No manifest for DLC depot {depot}."))?;
+        let name = format!("{depot}_{manifest}.manifest");
+        let data = bundle.manifests.get(&name).ok_or_else(|| format!("No manifest file for DLC depot {depot}."))?;
+        fs::write(staging.join(&name), data).map_err(|error| error.to_string())?;
+        let mut child = Command::new(&ddm)
+            .current_dir(staging)
+            .args(["-app", &base_appid.to_string(), "-depot", depot, "-manifest", manifest, "-depotkeys", "steam.keys", "-manifestfile", &name, "-dir", ".", "-max-downloads", "8"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not start DepotDownloaderMod: {error}"))?;
+        let reader = BufReader::new(child.stdout.take().ok_or("DepotDownloaderMod produced no output")?);
+        for line in reader.lines().map_while(Result::ok) {
+            if let Some(position) = line.find('%') {
+                if let Ok(percent) = line[..position].trim().parse::<f64>() {
+                    state.percent = progress_base + progress_span * (index as f64 + percent / 100.0) / depots.len() as f64;
+                    state.message = format!("Downloading DLC depot {depot}…");
+                    download::publish(app, state);
+                }
+            }
+        }
+        let status = child.wait().map_err(|error| error.to_string())?;
+        if !status.success() {
+            return Err(format!("DepotDownloaderMod failed for DLC depot {depot}."));
         }
     }
     Ok(())
@@ -361,14 +422,8 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|error| format!("{}: {error}", staging.display()))?;
     let pics = game.metadata_app_id.map(steamcmd_dlc).unwrap_or_default();
-    let base_lua = game.metadata_app_id
-        .and_then(|id| steamtron_library::persistent_bundle(&id.to_string()))
-        .map(|bundle| {
-            let path = cache.join("dlc").join(format!("{game_id}-base.lua"));
-            let _ = fs::write(&path, bundle.lua);
-            path
-        })
-        .filter(|path| path.is_file());
+    let base_bundle = game.metadata_app_id
+        .and_then(|id| steamtron_library::persistent_bundle(&id.to_string()));
     let total = pending.len();
     let mut dl_state = DownloadState {
         game_id: game_id.clone(),
@@ -397,59 +452,55 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         dl_state.depots_done = index as u32;
         download::publish(&app, &dl_state);
         let depots = pics.depots.get(app_id).filter(|depots| !depots.is_empty()).cloned();
-        let use_base_lua = depots.is_some() && base_lua.is_some();
-        let mut command = Command::new(&smd);
-        command.arg("--data-dir").arg(cache.join("data"));
-        if let (Some(depots), Some(base_lua)) = (depots.as_ref(), base_lua.as_ref()) {
-            command.arg("download").arg(base_lua)
-                .arg("--depots").arg(depots.join(","))
-                .args(["--like-steam", "--platform", "windows", "--language", "english", "--update"])
-                .arg(&staging)
-                .arg("--json");
+        let base = index as f64 / total as f64 * 100.0;
+        let span = 100.0 / total as f64;
+        let use_ddm = depots.is_some() && base_bundle.is_some();
+        if let (Some(depots), Some(bundle)) = (depots.as_ref(), base_bundle.as_ref()) {
+            download_with_ddm(&app, &mut dl_state, game.metadata_app_id.unwrap_or(0), depots, bundle, &staging, base, span)?;
         } else {
-            command.arg("download").arg(app_id.to_string())
+            let mut command = Command::new(&smd);
+            command.arg("--data-dir").arg(cache.join("data"))
+                .arg("download").arg(app_id.to_string())
                 .args(["--like-steam", "--platform", "windows", "--language", "english", "-o"])
                 .arg(&staging)
                 .arg("--json");
-        }
-        let mut child = command
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| format!("could not start the DLC download: {error}"))?;
-        let reader = BufReader::new(child.stdout.take().ok_or("DLC downloader produced no output")?);
-        let mut base = index as f64 / total as f64 * 100.0;
-        let span = 100.0 / total as f64;
-        for line in reader.lines().map_while(Result::ok) {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-            if value.get("type").and_then(|v| v.as_str()) == Some("depot_complete") {
-                if let (Some(current), Some(count)) = (value.get("current").and_then(|v| v.as_u64()), value.get("total").and_then(|v| v.as_u64())) {
-                    if count > 0 {
-                        dl_state.percent = base + span * current as f64 / count as f64;
-                        dl_state.completed = (dl_state.percent * total as f64 / 100.0) as u64;
-                        dl_state.depots_current = current as u32;
-                        dl_state.depots_done = current as u32;
-                        download::publish(&app, &dl_state);
+            let mut child = command
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| format!("could not start the DLC download: {error}"))?;
+            let reader = BufReader::new(child.stdout.take().ok_or("DLC downloader produced no output")?);
+            for line in reader.lines().map_while(Result::ok) {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                if value.get("type").and_then(|v| v.as_str()) == Some("depot_complete") {
+                    if let (Some(current), Some(count)) = (value.get("current").and_then(|v| v.as_u64()), value.get("total").and_then(|v| v.as_u64())) {
+                        if count > 0 {
+                            dl_state.percent = base + span * current as f64 / count as f64;
+                            dl_state.completed = (dl_state.percent * total as f64 / 100.0) as u64;
+                            dl_state.depots_current = current as u32;
+                            dl_state.depots_done = current as u32;
+                            download::publish(&app, &dl_state);
+                        }
                     }
                 }
             }
+            let status = child.wait().map_err(|error| error.to_string())?;
+            if !status.success() {
+                dl_state.status = "error".into();
+                dl_state.message = format!("{title} download failed.");
+                download::publish(&app, &dl_state);
+                let _ = app.emit("download-complete", serde_json::json!({"gameId":game_id,"success":false,"cancelled":false,"message":dl_state.message}));
+                return Err(dl_state.message);
+            }
         }
-        let status = child.wait().map_err(|error| error.to_string())?;
-        if !status.success() {
-            dl_state.status = "error".into();
-            dl_state.message = format!("{title} download failed.");
-            download::publish(&app, &dl_state);
-            let _ = app.emit("download-complete", serde_json::json!({"gameId":game_id,"success":false,"cancelled":false,"message":dl_state.message}));
-            return Err(dl_state.message);
-        }
-        let folder = if use_base_lua {
+        let folder = if use_ddm {
             staging.clone()
         } else {
             fs::read_dir(&staging).ok().into_iter().flatten().flatten()
                 .map(|entry| entry.path()).find(|path| path.is_dir())
                 .ok_or_else(|| format!("{title} download folder was not produced."))?
         };
-        let title = if use_base_lua { title.clone() } else { parse_title(&folder, *app_id) };
+        let title = if use_ddm { title.clone() } else { parse_title(&folder, *app_id) };
         install_downloaded(&root, &mut state, *app_id, &title, &folder)?;
         save_state(&root, &state)?;
         write_smd_dlc_choice(&root, &state);
