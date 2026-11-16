@@ -1926,29 +1926,38 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .game(&game_id)
         .cloned()
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
+    #[cfg(not(target_os = "windows"))]
     steamtron_core::runtime::use_default_proton(&mut game, &library.settings().default_proton);
-    let selected_proton = if !game.launch.proton.is_empty() {
-        game.launch.proton.clone()
-    } else {
-        game.installation.proton.clone()
-    };
-    let proton_usable = {
-        let path = std::path::Path::new(&selected_proton);
-        !selected_proton.is_empty() && (path.is_file() || path.is_dir())
-    };
-    if !proton_usable {
-        if let Some(fallback) = installed_proton_runner() {
-            let fallback = fallback.display().to_string();
-            game.launch.proton = fallback.clone();
-            game.installation.proton = fallback;
+    #[cfg(not(target_os = "windows"))]
+    {
+        let selected_proton = if !game.launch.proton.is_empty() {
+            game.launch.proton.clone()
         } else {
-            return Err(
-                "No Proton runner is installed. Open Settings → Proton Manager and install one before playing."
-                    .into(),
-            );
+            game.installation.proton.clone()
+        };
+        let proton_usable = {
+            let path = std::path::Path::new(&selected_proton);
+            !selected_proton.is_empty() && (path.is_file() || path.is_dir())
+        };
+        if !proton_usable {
+            if let Some(fallback) = installed_proton_runner() {
+                let fallback = fallback.display().to_string();
+                game.launch.proton = fallback.clone();
+                game.installation.proton = fallback;
+            } else {
+                return Err(
+                    "No Proton runner is installed. Open Settings → Proton Manager and install one before playing."
+                        .into(),
+                );
+            }
         }
     }
     let steam_root = steam::steam_root().ok();
+    #[cfg(target_os = "windows")]
+    let client_root = steam_root
+        .clone()
+        .unwrap_or_else(|| steamtron_core::paths::layout().home());
+    #[cfg(not(target_os = "windows"))]
     let client_root = if game.launch.requires_steam {
         let root = steam_root.clone().ok_or_else(|| {
             "This game requires Steam, but Steam is not installed. Install Steam or turn off the Steam requirement in Game Settings."
@@ -2010,6 +2019,9 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     let plan = managed_launch_plan(&game, &target, &client_root)
         .map_err(|error| error.to_string())?;
     let fixes = managed_fixes_dir(&game);
+    #[cfg(target_os = "windows")]
+    let use_overlay = false;
+    #[cfg(not(target_os = "windows"))]
     let use_overlay =
         fixes.as_ref().is_some_and(|path| dir_has_entries(path));
     let command = if use_overlay {
@@ -2047,7 +2059,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     };
     (
         command,
-        "proton",
+        if cfg!(target_os = "windows") { "native" } else { "proton" },
         plan.program.display().to_string(),
         plan.arguments,
         use_overlay,

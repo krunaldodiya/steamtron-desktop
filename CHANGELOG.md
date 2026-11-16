@@ -11,6 +11,10 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 - Windows no longer shows Linux-only Proton Manager, Proton compatibility,
   prefix-source or Feral GameMode controls.
+- Windows managed games launch their native executable instead of requiring
+  Proton.
+- Add to library falls back to the public manifest archive when the signed-in
+  provider returns no bundle.
 
 ## [0.1.6] - 2026-11-17
 

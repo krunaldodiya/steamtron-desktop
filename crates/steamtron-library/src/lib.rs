@@ -397,7 +397,17 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     // The signed-in UMUTron API owns provider priority: Ryuu first, then
     // Luie, then SteamML. Do not silently use the old public SteamML archive
     // here; it can point at a different game build than the selected fix.
-    let bytes = download_from_api(appid)?;
+    let bytes = match download_from_api(appid) {
+        Ok(bytes) => bytes,
+        Err(api_error) => {
+            let fallback = download_from_public(appid).map_err(|fallback_error| {
+                LibraryError::Download(format!(
+                    "{api_error}; public manifest fallback failed: {fallback_error}"
+                ))
+            })?;
+            fallback
+        }
+    };
     if bytes.len() as u64 > MAX_ARCHIVE {
         return Err(LibraryError::Archive("archive is too large".into()));
     }
@@ -406,6 +416,29 @@ pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     store_persistent_bundle(appid, &bytes);
     store_cached_manifest(appid, "api", &bytes);
     Ok(bundle)
+}
+
+fn download_from_public(appid: &str) -> Result<Vec<u8>, LibraryError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|error| LibraryError::Download(error.to_string()))?;
+    let url = format!(
+        "https://pub-5b6d3b7c03fd4ac1afb5bd3017850e20.r2.dev/{appid}.zip"
+    );
+    let response = client
+        .get(url)
+        .header("Accept", "application/zip")
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .map_err(|error| LibraryError::Download(error.to_string()))?;
+    if !response.status().is_success() {
+        return Err(LibraryError::Download(format!("HTTP {}", response.status())));
+    }
+    let bytes = response
+        .bytes()
+        .map_err(|error| LibraryError::Download(error.to_string()))?;
+    Ok(bytes.to_vec())
 }
 
 fn download_from_api(appid: &str) -> Result<Vec<u8>, LibraryError> {

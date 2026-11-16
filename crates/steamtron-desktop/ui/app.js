@@ -1917,7 +1917,7 @@ function openManagedGameOptions(game) {
           ${row("Library entry", latestGame.id)}
           ${row("Steam App ID", latestGame.metadata_app_id ? String(latestGame.metadata_app_id) : "None")}
           ${row("Installation", latestGame.installation?.root)}
-          ${row("Prefix", latestGame.installation?.prefix)}
+          ${IS_WINDOWS ? "" : row("Prefix", latestGame.installation?.prefix)}
           ${row("Manifest", latestGame.installation?.manifest)}
           ${row("Launch target", target?.executable || "Not configured")}
           ${row("Steam registration", registration ? `${registration.state} · ${registration.backend}` : "Not registered")}
@@ -2006,7 +2006,7 @@ function openManagedGameOptions(game) {
       return;
     }
     if (key === "debug") {
-      pane.innerHTML = `<h3>Debug</h3><p class="pane-note">Latest Proton diagnostic log for this game. The viewer shows the newest 64 KiB.</p>
+      pane.innerHTML = `<h3>Debug</h3><p class="pane-note">Latest ${IS_WINDOWS ? "game" : "Proton"} diagnostic log for this game. The viewer shows the newest 64 KiB.</p>
         <pre class="game-log" id="gs-log">Loading…</pre>
         <p class="pane-note" id="gs-log-path"></p>
         <div class="pane-actions"><button id="gs-log-copy">Copy</button><button class="danger" id="gs-log-clear">Clear</button></div>`;

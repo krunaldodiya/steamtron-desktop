@@ -105,7 +105,30 @@ fn proton_runner(game: &Game) -> Option<&Path> {
     None
 }
 
+/// Plan a native Windows launch for one managed game.
+#[cfg(target_os = "windows")]
+pub fn managed_launch_plan(
+    game: &Game,
+    target: &LaunchTarget,
+    _steam_root: &Path,
+) -> Result<LaunchPlan, RuntimeError> {
+    let root = &game.installation.root;
+    if !root.is_dir() {
+        return Err(RuntimeError::MissingContent(root.clone()));
+    }
+    let executable = resolve_executable(root, &target.executable)
+        .ok_or_else(|| RuntimeError::MissingExecutable(target.executable.clone()))?;
+    let environment = game.launch.environment.clone();
+    Ok(LaunchPlan {
+        program: executable,
+        arguments: target.arguments.clone(),
+        environment,
+        cwd: root.clone(),
+    })
+}
+
 /// Plan a Steam-free Proton launch for one managed game.
+#[cfg(not(target_os = "windows"))]
 pub fn managed_launch_plan(
     game: &Game,
     target: &LaunchTarget,
