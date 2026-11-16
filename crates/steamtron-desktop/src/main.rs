@@ -5635,6 +5635,7 @@ fn main() {
                 steamtron_library::migrate_manifest_cache();
                 steamtron_library::managed::cleanup_legacy_lua_files();
                 steamtron_library::managed::organize_manifest_store();
+                steamtron_library::managed::populate_missing_appmanifests();
             });
             download::restore(app.handle());
             Ok(())

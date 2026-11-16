@@ -64,3 +64,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0037](0037-appmanifest-backup-and-manifest-folders.md) | Appmanifest backups and per-game manifest folders | done | 2026-11-16 |
 | [0038](0038-steam-installation-detection.md) | Reliable Steam installation detection | done | 2026-11-16 |
 | [0039](0039-per-game-backup-bundle-fallback.md) | Per-game backup Lua/manifest fallback | done | 2026-11-16 |
+| [0040](0040-populate-managed-appmanifest.md) | Populate managed appmanifest files | done | 2026-11-16 |

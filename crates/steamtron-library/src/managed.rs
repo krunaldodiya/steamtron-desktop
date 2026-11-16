@@ -672,6 +672,35 @@ pub fn write_managed_manifests(
     Ok(())
 }
 
+/// Write the managed appmanifest JSON when it is missing.
+pub fn ensure_appmanifest(game: &Game) -> Result<bool, LibraryError> {
+    let path = &game.installation.manifest;
+    if path.as_os_str().is_empty() || path.is_file() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
+    }
+    let data = serde_json::to_vec_pretty(&crate::backup::game_appmanifest(game))
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let temporary = path.with_extension("json.steamtron.tmp");
+    fs::write(&temporary, data).map_err(|error| LibraryError::io(&temporary, error))?;
+    fs::rename(&temporary, path).map_err(|error| LibraryError::io(path, error))?;
+    Ok(true)
+}
+
+/// Populate appmanifest JSON for every existing game that lacks it.
+pub fn populate_missing_appmanifests() -> usize {
+    let Ok(library) = Library::load() else { return 0 };
+    let mut written = 0;
+    for game in library.games() {
+        if ensure_appmanifest(game).unwrap_or(false) {
+            written += 1;
+        }
+    }
+    written
+}
+
 /// Add one game to the managed library. Steam registration is attempted only
 /// when a ready backend is supplied.
 pub fn add_managed_game(
@@ -774,6 +803,7 @@ pub fn add_managed_game_at(
     game.installation.root = layout.content.clone();
     game.installation.prefix = layout.prefix.clone();
     game.installation.manifest = layout.manifest.clone();
+    ensure_appmanifest(&game)?;
 
     // Depot filtering is best-effort: a Steam metadata outage must not block
     // registration, so the provider Lua is kept unchanged in that case.

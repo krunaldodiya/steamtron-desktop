@@ -345,7 +345,7 @@ fn lua_manifest_ids(lua: &str) -> Vec<(String, String)> {
     depots
 }
 
-fn game_appmanifest(game: &steamtron_core::library::Game) -> serde_json::Value {
+pub fn game_appmanifest(game: &steamtron_core::library::Game) -> serde_json::Value {
     let folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game");
     let prefix_name = game.installation.prefix.file_name().and_then(|name| name.to_str()).unwrap_or(folder);
     let primary = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first());
