@@ -290,4 +290,6 @@ Recorded after implementation:
 - Existing auth: `app/auth.py`, `app/security.py`
 - Desktop Store: `crates/steamtron-desktop/ui/app.js`
 - Desktop Store commands: `crates/steamtron-desktop/src/main.rs`
+- SteamTron implementation commit: `dc83cfde4c`
+- UmuTron-FastAPI implementation commit: `224efbf85f`
 - Related backlog: `0068-umutron-parity-backlog.md` (`L-06`, `L-11`)
