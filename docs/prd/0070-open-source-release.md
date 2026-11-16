@@ -1,6 +1,6 @@
 # Open-source ready distribution and contributor documentation
 
-- Status: active
+- Status: done
 - Date: 2026-11-16
 - Areas: repository docs, `.github/`, Tauri bundle configuration, `scripts/build-linux.sh`
 
@@ -116,9 +116,9 @@ Recorded after implementation:
 
 - `bash -n scripts/build-linux.sh scripts/set-github-metadata.sh`: passed.
 - `bash scripts/build-linux.sh` produced:
-  - `SteamTron_0.1.0_amd64.deb` (9.58 MiB)
-  - `SteamTron-0.1.0-1.x86_64.rpm` (9.59 MiB)
-  - `SteamTron_0.1.0_amd64.AppImage` (114.56 MiB)
+  - `SteamTron_0.1.1_amd64.deb` (9.58 MiB)
+  - `SteamTron-0.1.1-1.x86_64.rpm` (9.59 MiB)
+  - `SteamTron_0.1.1_amd64.AppImage` (114.56 MiB)
 - Debian control metadata verified:
   - `Homepage: https://steamtron.vercel.app`
   - `Maintainer: Krunal Dodiya`
@@ -128,20 +128,32 @@ Recorded after implementation:
   directory.
 - `cargo test -p steamtron-desktop`: 26 passed before the packaging-only
   changes.
-- GitHub Actions workflow added and `v0.1.0` tag pushed to trigger the Linux and
-  Windows build jobs. CI status could not be inspected because `gh` is not
-  authenticated.
-- Windows NSIS installer was not built locally because Tauri requires a Windows
-  runner and WinFsp; the Windows job is part of the tag workflow.
+- `v0.1.1` tag triggered the GitHub Actions release workflow:
+  - Linux job succeeded.
+  - Windows job succeeded and produced the NSIS installer.
+  - Publish job succeeded.
+- Release assets verified:
+  - `SteamTron_0.1.1_amd64.deb`
+  - `SteamTron-0.1.1-1.x86_64.rpm`
+  - `SteamTron_0.1.1_amd64.AppImage`
+  - `SteamTron_0.1.1_x64-setup.exe`
+  - `SHA256SUMS.txt`
+- Repository renamed to `steamtron-desktop`, made public, and metadata/topics
+  set.
+- Companion project deployed privately on GitHub and publicly on Vercel:
+  - `https://steamtron.vercel.app/`
+  - `/health` returns `SteamTron API`
+  - signup/login test against production Turso passed
+- Windows build fixes verified by CI: unconditional Tauri `Emitter` import and
+  explicit Windows drive-list result type.
 - Local Linux artifact hashes:
   - deb `884fc2542736fee0e7305982eac845e7406d214c1d53a1d9e99f45b5d01826ae`
   - rpm `eff5a395430eb0a6ffe14594bbb21623aff76f81494054df59a926e2abca10d7`
   - AppImage `ffe7f4739db00de9b8db551459004be6be8793351536c2b0d61eda1b7eb86f50`
-- GitHub repository rename/visibility/metadata was not applied: `gh` is not
-  authenticated and the repository is not readable unauthenticated. The
-  ready-to-run script is `scripts/set-github-metadata.sh`.
-- Vercel deployment of the companion project was not applied from this
-  workstation because Vercel CLI is logged out.
+- Twitch application credentials are still required in the new Vercel project
+  before live IGDB Store use. Vercel marks the old project's Twitch values as
+  non-exportable secrets; add them in the new project and redeploy.
+- The desktop now defaults to `https://steamtron.vercel.app`.
 
 ## Decisions and risks
 
