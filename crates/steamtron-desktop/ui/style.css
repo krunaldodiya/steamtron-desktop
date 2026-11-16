@@ -673,7 +673,7 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-depot-meta { display:flex; justify-content:space-between; gap:10px; margin-top:4px; color:var(--muted); font-size:11px; }
 .download-actions-inline .game-icon-button { width:20px; height:20px; min-width:20px; padding:0; border-radius:6px; }
 .download-cancel-icon:hover { border-color:var(--error); color:var(--error); }
-.download-stats { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:8px; margin:0 0 14px; }
+.download-stats { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:8px; margin:0 0 14px; }
 .download-stat { padding:10px 12px; border:1px solid var(--border); border-radius:9px; background:var(--surface); min-width:0; }
 .download-stat span { display:block; margin-bottom:4px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
 .download-stat strong { display:block; color:var(--text); font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

@@ -1077,13 +1077,13 @@ function openDownloadManager(game) {
     <p class="download-stage" id="download-manager-stage">Preparing download…</p>
     <div class="download-progress-row">
       <div class="download-bar"><span id="download-manager-fill"></span></div>
+      <strong class="operation-percent" id="download-manager-percent">—</strong>
       <div class="download-actions-inline" id="download-manager-actions">
         <button class="game-icon-button" id="download-manager-pause" title="Pause" aria-label="Pause"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 5v14M15 5v14"></path></svg></button>
         <button class="game-icon-button download-cancel-icon" id="download-manager-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
       </div>
     </div>
     <div class="download-stats">
-      <div class="download-stat"><span>Progress</span><strong id="download-manager-percent">—</strong></div>
       <div class="download-stat"><span>Downloaded</span><strong id="download-manager-completed">—</strong></div>
       <div class="download-stat"><span>Total size</span><strong id="download-manager-total">—</strong></div>
       <div class="download-stat"><span>Average speed</span><strong id="download-manager-speed">—</strong></div>
@@ -1352,7 +1352,6 @@ function openOperationManager(options = {}) {
       </div>
     </div>
     ${rich ? `<div class="download-stats operation-stats">
-      <div class="download-stat"><span>Progress</span><strong id="operation-percent-stat">0%</strong></div>
       <div class="download-stat"><span>Transferred</span><strong id="operation-completed">—</strong></div>
       <div class="download-stat"><span>Total size</span><strong id="operation-total">—</strong></div>
       <div class="download-stat"><span>Transfer speed</span><strong id="operation-speed">—</strong></div>
@@ -1365,7 +1364,6 @@ function openOperationManager(options = {}) {
   const stage = backdrop.querySelector("#operation-stage");
   const fill = backdrop.querySelector(".operation-bar span");
   const percentNode = backdrop.querySelector("#operation-percent");
-  const percentStat = backdrop.querySelector("#operation-percent-stat");
   const completedNode = backdrop.querySelector("#operation-completed");
   const totalNode = backdrop.querySelector("#operation-total");
   const speedNode = backdrop.querySelector("#operation-speed");
@@ -1417,7 +1415,6 @@ function openOperationManager(options = {}) {
     }
     fill.style.width = `${currentPercent}%`;
     percentNode.textContent = `${currentPercent.toFixed(0)}%`;
-    if (percentStat) percentStat.textContent = `${currentPercent.toFixed(0)}%`;
   };
   const setStat = (node, value) => { if (node) node.textContent = value; };
   const applyStats = (payload) => {

@@ -56,8 +56,9 @@ present-participle label.
 - R12: Backup and restore expose Cancel only in their operation window. Verify
   has no window: its progress and Cancel button are inline under the button.
   None of these operations supports Pause/Resume.
-- R13: Backup and restore show six stat cells: Progress, Transferred, Total
-  size, Transfer speed, ETA, and Time spent. Download shows the same six.
+- R13: Backup and restore show five stat cells: Transferred, Total size,
+  Transfer speed, ETA, and Time spent; the percent sits beside the progress bar.
+  Download uses the same layout.
 - R14: Cancel stops the worker, removes a partial backup archive, and reports
   Cancelled without being overwritten by a failure.
 

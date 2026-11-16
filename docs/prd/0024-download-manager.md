@@ -86,8 +86,8 @@ button, and a cancelled download removes its partial files.
   group; cancel terminates a paused process; a non-terminal state without a
   process, or with a dead PID, becomes `error`.
 - JSDOM download-manager harness passed: Downloading opened the large manager,
-  progress/average speed/ETA/time spent/depot progress rendered with six stat
-  cells, Pause/Resume icon controls invoked their commands, closing kept the
+  progress/average speed/ETA/time spent/depot progress rendered with five stat
+  cells plus the inline percent beside the bar, Pause/Resume icon controls invoked their commands, closing kept the
   download, and Cancel showed the cancelled state before the top-right close
   restored the Download button.
 - Fixed the Time spent render crash by declaring the elapsed-stat node; the
