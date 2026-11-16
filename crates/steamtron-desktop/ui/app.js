@@ -2034,7 +2034,7 @@ function openManagedGameOptions(game) {
     }
     if (key === "dlc") {
       const renderDlcTab = async () => {
-        pane.innerHTML = '<h3>Downloadable Content</h3><p class="pane-note">Loading DLC from Steam…</p>';
+        pane.innerHTML = '<h3>Downloadable Content</h3><p class="pane-note">Loading DLC catalogue…</p>';
         let entries = [];
         try { entries = await invoke("managed_dlc", { gameId: game.id }); } catch (_error) { entries = []; }
         const rows = entries.map((entry) => `<tr>

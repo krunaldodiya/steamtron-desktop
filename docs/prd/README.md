@@ -89,3 +89,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0062](0062-dlc-content-group-progress.md) | DLC content-group progress | done | 2026-11-16 |
 | [0063](0063-dlc-downloading-button.md) | Keep the Downloading button while DLC runs | done | 2026-11-16 |
 | [0064](0064-dlc-primary-button-progress.md) | Primary button reflects DLC download progress | done | 2026-11-16 |
+| [0065](0065-cache-dlc-catalogue.md) | Cache the DLC catalogue | done | 2026-11-16 |

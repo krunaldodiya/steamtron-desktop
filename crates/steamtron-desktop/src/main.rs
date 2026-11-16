@@ -3322,48 +3322,77 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
         .or_else(|| app_id.to_string().parse::<u32>().ok().and_then(|id| steamtron_library::persistent_bundle(&id.to_string())).map(|bundle| bundle.lua))
         .unwrap_or_default();
     let dlc_state = dlc::load_state(&game.installation.root);
-    let response = store_client()
-        .get("https://store.steampowered.com/api/appdetails")
-        .query(&[("appids", app_id.to_string()), ("l", "english".into()), ("cc", "US".into())])
-        .header("Accept", "application/json")
-        .header("User-Agent", "steamtron-desktop")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
-    let data = payload
-        .get(app_id.to_string())
-        .and_then(|entry| entry.get("data"));
-    let ids: Vec<u32> = data
-        .and_then(|data| data.get("dlc"))
-        .and_then(|dlc| dlc.as_array())
-        .map(|items| items.iter().filter_map(|id| id.as_u64().map(|id| id as u32)).collect())
-        .unwrap_or_default();
-    let mut result = Vec::new();
-    for id in ids {
-        let detail = match store_client()
+    let cache_path = steamtron_core::paths::layout().cache_dir().join("dlc-catalog.json");
+    let mut cache: serde_json::Value = std::fs::read(&cache_path)
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let cache_entry = cache.get(app_id.to_string()).cloned().filter(|entry| {
+        let fetched = entry.get("fetched_at").and_then(|value| value.as_u64()).unwrap_or(0);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
+        now.saturating_sub(fetched) < 30 * 24 * 60 * 60
+    });
+    let entries: Vec<(u32, String, String)> = if let Some(entry) = cache_entry.as_ref() {
+        entry.get("entries").and_then(|value| value.as_array()).map(|items| {
+            items.iter().filter_map(|item| {
+                Some((
+                    item.get("app_id")?.as_u64()? as u32,
+                    item.get("name")?.as_str()?.to_owned(),
+                    item.get("released").and_then(|value| value.as_str()).unwrap_or("").to_owned(),
+                ))
+            }).collect()
+        }).unwrap_or_default()
+    } else {
+        let response = store_client()
             .get("https://store.steampowered.com/api/appdetails")
-            .query(&[("appids", id.to_string()), ("l", "english".into()), ("cc", "US".into())])
+            .query(&[("appids", app_id.to_string()), ("l", "english".into()), ("cc", "US".into())])
             .header("Accept", "application/json")
             .header("User-Agent", "steamtron-desktop")
             .send()
             .await
-        {
-            Ok(response) => response.json::<serde_json::Value>().await.ok(),
-            Err(_) => None,
-        };
-        let entry = detail.as_ref().and_then(|value| value.get(id.to_string())).and_then(|entry| entry.get("data"));
-        let name = entry
-            .and_then(|data| data.get("name"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_owned();
-        let released = entry
-            .and_then(|data| data.get("release_date"))
-            .and_then(|value| value.get("date"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_owned();
+            .map_err(|error| error.to_string())?;
+        let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+        let data = payload
+            .get(app_id.to_string())
+            .and_then(|entry| entry.get("data"));
+        let ids: Vec<u32> = data
+            .and_then(|data| data.get("dlc"))
+            .and_then(|dlc| dlc.as_array())
+            .map(|items| items.iter().filter_map(|id| id.as_u64().map(|id| id as u32)).collect())
+            .unwrap_or_default();
+        let mut fetched_entries = Vec::new();
+        for id in ids {
+            let detail = match store_client()
+                .get("https://store.steampowered.com/api/appdetails")
+                .query(&[("appids", id.to_string()), ("l", "english".into()), ("cc", "US".into())])
+                .header("Accept", "application/json")
+                .header("User-Agent", "steamtron-desktop")
+                .send()
+                .await
+            {
+                Ok(response) => response.json::<serde_json::Value>().await.ok(),
+                Err(_) => None,
+            };
+            let entry = detail.as_ref().and_then(|value| value.get(id.to_string())).and_then(|entry| entry.get("data"));
+            let name = entry.and_then(|data| data.get("name")).and_then(|value| value.as_str()).unwrap_or("");
+            let released = entry.and_then(|data| data.get("release_date")).and_then(|value| value.get("date")).and_then(|value| value.as_str()).unwrap_or("");
+            fetched_entries.push((id, name.to_owned(), released.to_owned()));
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
+        cache[app_id.to_string()] = serde_json::json!({
+            "fetched_at": now,
+            "entries": fetched_entries.iter().map(|(id, name, released)| serde_json::json!({
+                "app_id": id, "name": name, "released": released
+            })).collect::<Vec<_>>(),
+        });
+        if let Some(parent) = cache_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&cache_path, serde_json::to_vec_pretty(&cache).unwrap_or_default());
+        fetched_entries
+    };
+    let mut result = Vec::new();
+    for (id, name, released) in entries {
         let marked = lua.contains(&format!("AppID: {id}"))
             || lua.lines().any(|line| line.trim_start().starts_with(&format!("addappid({id}")));
         result.push(serde_json::json!({
@@ -3376,6 +3405,7 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
         }));
     }
     Ok(result)
+
 }
 
 #[tauri::command]
