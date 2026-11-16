@@ -685,29 +685,35 @@ fn backend_status() -> Result<steamtron_register::BackendStatus, String> {
 }
 
 #[tauri::command]
-async fn import_game_metadata(mode: Option<String>) -> Result<Option<serde_json::Value>, String> {
-    require_auth()?;
-    let paths = if mode.as_deref() == Some("folder") {
-        let Some(folder) = rfd::FileDialog::new().set_title("Choose a folder of SteamTron backups").pick_folder() else {
-            return Ok(None);
-        };
-        vec![folder]
+fn pick_import_paths(mode: Option<String>) -> Vec<String> {
+    if mode.as_deref() == Some("folder") {
+        rfd::FileDialog::new()
+            .set_title("Choose a folder of SteamTron backups")
+            .pick_folder()
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect()
     } else {
-        let Some(files) = rfd::FileDialog::new()
+        rfd::FileDialog::new()
             .set_title("Choose SteamTron backup ZIP files")
             .add_filter("SteamTron backup", &["zip"])
             .pick_files()
-        else {
-            return Ok(None);
-        };
-        if files.is_empty() { return Ok(None); }
-        files
-    };
+            .unwrap_or_default()
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect()
+    }
+}
+
+#[tauri::command]
+async fn import_game_metadata(paths: Vec<String>) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    let paths: Vec<std::path::PathBuf> = paths.into_iter().map(std::path::PathBuf::from).collect();
     let summary = tauri::async_runtime::spawn_blocking(move || backup::import_game_metadata(&paths))
         .await
         .map_err(|error| format!("Import task failed: {error}"))?
         .map_err(|error| error.to_string())?;
-    serde_json::to_value(summary).map(Some).map_err(|error| error.to_string())
+    serde_json::to_value(summary).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -5641,6 +5647,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_status,
             export_game_backups,
+            pick_import_paths,
             import_game_metadata,
             game_artwork,
             search_games,

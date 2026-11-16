@@ -67,3 +67,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0040](0040-populate-managed-appmanifest.md) | Populate managed appmanifest files | done | 2026-11-16 |
 | [0041](0041-remove-legacy-restore.md) | Remove the legacy consolidated restore | done | 2026-11-16 |
 | [0042](0042-folder-metadata-export-import.md) | ZIP metadata export and import | done | 2026-11-16 |
+| [0043](0043-export-import-settings-ux.md) | Export/import settings UX | done | 2026-11-16 |
