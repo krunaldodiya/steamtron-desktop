@@ -9,6 +9,7 @@ mod artwork;
 mod dlc;
 mod download;
 mod fix_tools;
+mod igdb;
 mod proton_sources;
 
 use serde::Serialize;
@@ -3158,51 +3159,25 @@ fn write_catalog_cache(path: std::path::PathBuf, value: &serde_json::Value) {
     }
 }
 
-async fn store_get(path: &str, query: &[(&str, String)]) -> Result<serde_json::Value, String> {
-    let token = steamtron_auth::access_token();
-    if token.is_empty() {
-        return Err("Sign in to browse the Store.".into());
+#[tauri::command]
+async fn igdb_store_status() -> Result<serde_json::Value, String> {
+    igdb::status().await
+}
+
+#[tauri::command]
+fn open_igdb_connect(url: String) -> Result<(), String> {
+    let url = url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("The IGDB connection URL is invalid.".into());
     }
-    let base = steamtron_auth::api_base();
-    let request = |client: &reqwest::Client| {
-        client
-            .get(format!("{base}{path}"))
-            .query(query)
-            .bearer_auth(&token)
-            .header("Accept", "application/json")
-            .header("User-Agent", "steamtron-desktop")
-            .send()
-    };
-    let response = match request(store_client()).await {
-        Ok(response) => response,
-        Err(_) => {
-            // A pooled connection can go stale while the window sits idle. Retry
-            // once with a fresh client so Store search does not fail permanently
-            // until the app restarts.
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .connect_timeout(std::time::Duration::from_secs(8))
-                .build()
-                .map_err(|error| format!("Could not create the Store client: {error}"))?;
-            request(&client)
-                .await
-                .map_err(|error| format!("Could not reach the Store. Check your connection and retry. ({error})"))?
-        }
-    };
-    let status = response.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err("The Store rejected this session. Sign in again.".into());
-    }
-    if !status.is_success() {
-        return Err(format!("Store returned HTTP {status}"));
-    }
-    response.json().await.map_err(|error| error.to_string())
+    webbrowser::open(url)
+        .map(|_| ())
+        .map_err(|error| format!("Could not open the browser: {error}"))
 }
 
 #[tauri::command]
 async fn store_genres() -> Result<serde_json::Value, String> {
-    let value = store_get("/v1/genres", &[]).await?;
+    let value = igdb::genres().await?;
     write_catalog_cache(catalog_cache_path("genres.json"), &value);
     Ok(value)
 }
@@ -3222,17 +3197,15 @@ async fn store_catalog(
     let page = page.max(1);
     let genre = genre.unwrap_or_default();
     let sort = sort.unwrap_or_default();
-    let mut params = vec![
-        ("q", query.clone()),
-        ("genre", genre.clone()),
-        ("page", page.to_string()),
-    ];
-    if !sort.is_empty() {
-        params.push(("sort", sort.clone()));
-    }
     // Must match store_cached_catalog exactly: query|genre|sort|page.
     let key = catalog_cache_key(&format!("{query}|{genre}|{sort}|{page}"));
-    let value = store_get("/v1/games", &params).await?;
+    let value = igdb::catalog(
+        &query,
+        Some(&genre).filter(|value| !value.is_empty()).map(String::as_str),
+        Some(&sort).filter(|value| !value.is_empty()).map(String::as_str),
+        page,
+    )
+    .await?;
     write_catalog_cache(catalog_cache_path(&key), &value);
     Ok(value)
 }
@@ -3432,7 +3405,7 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
 
 #[tauri::command]
 async fn store_game(id: u64) -> Result<serde_json::Value, String> {
-    store_get(&format!("/v1/games/{id}"), &[]).await
+    igdb::detail(id).await
 }
 
 
@@ -5160,18 +5133,9 @@ async fn igdb_id_for(appid: u32, title: Option<String>) -> Option<String> {
             return Some(text.to_owned());
         }
     }
-    // 2. Catalogue browse by title, exact-or-edition match only.
+    // 2. Direct IGDB search by title, exact-or-edition match only.
     let title = title?;
-    let data = store_get(
-        "/v1/games",
-        &[
-            ("q", title.clone()),
-            ("genre", String::new()),
-            ("page", "1".to_owned()),
-        ],
-    )
-    .await
-    .ok()?;
+    let data = igdb::catalog(&title, None, None, 1).await.ok()?;
     let items = data.get("items").and_then(|items| items.as_array())?;
     for item in items {
         let name = item.get("name").and_then(|name| name.as_str()).unwrap_or("");
@@ -6038,6 +6002,8 @@ fn main() {
             reboot_system,
             shutdown_system,
             managed_artwork,
+            igdb_store_status,
+            open_igdb_connect,
             store_genres,
             store_cached_genres,
             store_cached_catalog,

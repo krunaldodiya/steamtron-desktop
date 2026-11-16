@@ -4149,6 +4149,7 @@ name = "steamtron-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "flate2",
  "ksni",
  "libc",
@@ -4171,6 +4172,8 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tempfile",
+ "tokio",
+ "webbrowser",
  "xz2",
  "zip",
 ]

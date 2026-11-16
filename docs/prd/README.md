@@ -93,3 +93,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0066](0066-cache-updates-tab.md) | Cache the Updates tab | done | 2026-11-16 |
 | [0067](0067-per-game-cache-sidecar.md) | Per-game cache sidecar | active | 2026-11-16 |
 | [0068](0068-umutron-parity-backlog.md) | UmuTron feature parity backlog | draft | 2026-11-16 |
+| [0069](0069-direct-igdb-store.md) | Direct IGDB Store with per-user backend token | done | 2026-11-16 |

@@ -5119,6 +5119,9 @@ let storeDetail = null;
 let storeDraft = "";
 let storeScrollTop = 0;
 let restoreStoreScroll = false;
+let storeConnection = null;
+let storeConnecting = false;
+let storeConnectionError = "";
 let storeRecent = (() => { try { return JSON.parse(localStorage.getItem("steamtron.storeRecent.v1") || "[]"); } catch (_error) { return []; } })();
 
 function saveStoreRecent() {
@@ -5406,6 +5409,89 @@ function resetStorePaging() {
   storeRefreshing = false;
 }
 
+async function loadIgdbStatus() {
+  try {
+    const status = await invoke("igdb_store_status");
+    storeConnection = status && typeof status === "object" ? status : null;
+    storeConnectionError = "";
+    return storeConnection;
+  } catch (error) {
+    // Keep a failed status probe distinct from a deliberately disconnected
+    // account so the Store does not open an empty connect URL.
+    storeConnection = { configured: null, connected: false, connect_url: "" };
+    storeConnectionError = String(error);
+    return null;
+  }
+}
+
+function storeConnectMarkup() {
+  if (storeConnectionError) {
+    return `<div class="status error store-connect"><strong>Could not check IGDB</strong><p>${escape(storeConnectionError)}</p><button id="store-retry-connection">Retry</button></div>`;
+  }
+  if (storeConnection?.configured === false) {
+    return `<div class="status error store-connect"><strong>IGDB is not configured</strong><p>The SteamTron API has no Twitch credentials. Set them on the server, then retry.</p><button id="store-retry-connection">Retry</button></div>`;
+  }
+  if (!storeConnection) {
+    return '<div class="status">Checking IGDB connection…</div>';
+  }
+  if (storeConnecting) {
+    return '<div class="status store-connect"><strong>Waiting for IGDB…</strong><p>Finish connecting in the browser, then return to SteamTron. The Store will load automatically.</p><button id="store-retry-connection">Check again</button></div>';
+  }
+  return `<div class="status store-connect"><strong>Connect IGDB to browse the Store</strong><p>IGDB is connected through the SteamTron API once, then the Store queries IGDB directly.</p><button id="store-connect-igdb" class="primary">Connect IGDB</button><button id="store-retry-connection">Retry</button></div>`;
+}
+
+function wireStoreConnectionButtons() {
+  const connect = detailEl.querySelector("#store-connect-igdb");
+  if (connect) connect.onclick = () => { void connectIgdbStore(); };
+  const retryConnection = detailEl.querySelector("#store-retry-connection");
+  if (retryConnection) retryConnection.onclick = () => {
+    storeConnecting = false;
+    storeTried = false;
+    void ensureStorePage(1);
+  };
+}
+
+async function connectIgdbStore() {
+  if (storeConnecting) return;
+  const status = storeConnection || await loadIgdbStatus();
+  if (!status?.configured) {
+    renderStorePage();
+    return;
+  }
+  const url = String(status.connect_url || "");
+  if (!url) {
+    storeConnectionError = "The Store did not return an IGDB settings URL.";
+    renderStorePage();
+    return;
+  }
+  try {
+    await invoke("open_igdb_connect", { url });
+  } catch (error) {
+    storeConnectionError = String(error);
+    renderStorePage();
+    return;
+  }
+  storeConnecting = true;
+  storeConnectionError = "";
+  renderStorePage();
+  // The settings page runs in the system browser. Poll just long enough for
+  // the user to sign in/connect and return; never loop forever.
+  for (let attempt = 0; attempt < 60 && storeConnecting; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (!storeConnecting) return;
+    const current = await loadIgdbStatus();
+    if (current?.connected) {
+      storeConnecting = false;
+      storeTried = false;
+      resetStorePaging();
+      await ensureStorePage(1);
+      return;
+    }
+  }
+  storeConnecting = false;
+  if (appView === "store") renderStorePage();
+}
+
 // The Rust side caches each catalogue page and the genre list. Read those
 // first so browsing the Store does not hit the API on every launch and keeps
 // working when the API is unreachable.
@@ -5455,8 +5541,10 @@ async function absorbStorePage(data, serverPage, generation) {
     if (!item) continue;
     if (!storeBuffer.some((entry) => entry.id === item.id)) storeBuffer.push(item);
   }
-  const totalPages = data.total_pages || 1;
-  if (!items.length || storeServerPage >= totalPages) storeExhausted = true;
+  const totalPages = typeof data.total_pages === "number" ? data.total_pages : null;
+  if (!items.length) storeExhausted = true;
+  else if (totalPages !== null && storeServerPage >= totalPages) storeExhausted = true;
+  else if (data.has_next === false) storeExhausted = true;
   return true;
 }
 
@@ -5469,6 +5557,25 @@ async function ensureStorePage(page, render = true) {
   if (render) renderStorePage();
   const target = storePage * STORE_PAGE_SIZE;
   let guard = 0;
+
+  if (!storeConnection || storeConnection.connected !== true) {
+    await loadIgdbStatus();
+  }
+  if (generation !== storeGeneration) return;
+  if (!storeConnection?.connected) {
+    // Cached catalogue pages are local data and remain readable after the
+    // token is revoked. Never make a network catalogue request in this state.
+    if (!storeBuffer.length) {
+      const cached = await cachedStorePage(1);
+      if (generation !== storeGeneration) return;
+      if (cached) await absorbStorePage(cached, 1, generation);
+    }
+    storeLoading = false;
+    storeRefreshing = false;
+    storeTried = true;
+    if (render || appView === "store") renderStorePage();
+    return;
+  }
 
   await loadStoreGenres();
   if (generation !== storeGeneration) return;
@@ -5505,8 +5612,14 @@ async function ensureStorePage(page, render = true) {
       if (generation !== storeGeneration) return;
     }
   } catch (error) {
-    // A cached catalogue stays usable when the API is offline.
-    if (generation === storeGeneration && !storeBuffer.length) storeError = String(error);
+    const message = String(error);
+    if (message.includes("IGDB_NOT_CONNECTED") || message.includes("IGDB_NOT_CONFIGURED")) {
+      storeConnection = { ...(storeConnection || {}), connected: false, configured: !message.includes("IGDB_NOT_CONFIGURED") };
+      storeConnectionError = "";
+    } else if (generation === storeGeneration && !storeBuffer.length) {
+      // A cached catalogue stays usable when the API is offline.
+      storeError = message;
+    }
   }
   storeLoading = false;
   storeRefreshing = false;
@@ -5542,6 +5655,24 @@ function renderStorePage() {
   const previousStoreId = previousInDetail ? previousActive.dataset?.storeId || "" : "";
   const previousPage = previousInDetail ? previousActive.dataset?.storePage || "" : "";
   const previousScroll = detailEl.querySelector(".store-content")?.scrollTop || 0;
+  if (!storeConnection) {
+    detailEl.innerHTML = `<div class="page store-page">
+      <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Game data by IGDB.</p></header>
+      <div class="store-connect-page"><div class="status">Checking IGDB connection…</div></div>
+    </div>`;
+    applyPendingRouteFocus("store");
+    return;
+  }
+  const disconnected = storeConnection.connected !== true;
+  if (disconnected) {
+    detailEl.innerHTML = `<div class="page store-page">
+      <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Game data by IGDB.</p></header>
+      <div class="store-connect-page">${storeConnectMarkup()}</div>
+    </div>`;
+    wireStoreConnectionButtons();
+    applyPendingRouteFocus("store");
+    return;
+  }
   const genreOptions = storeGenres.map((genre) =>
     `<button class="store-option${String(genre.id) === storeGenre ? " selected" : ""}" data-store-genre="${escape(String(genre.id))}">${escape(genre.name)}</button>`
   ).join("");
@@ -5631,6 +5762,7 @@ function renderStorePage() {
   };
   const retry = detailEl.querySelector("#store-retry");
   if (retry) retry.onclick = () => { void ensureStorePage(storePage); };
+  wireStoreConnectionButtons();
   for (const button of detailEl.querySelectorAll("[data-store-page]")) {
     button.onclick = () => {
       const action = button.dataset.storePage;
