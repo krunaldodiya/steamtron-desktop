@@ -65,6 +65,29 @@ pub fn use_default_proton(game: &mut Game, default_proton: &str) {
     }
 }
 
+fn resolve_executable(root: &Path, executable: &Path) -> Option<PathBuf> {
+    if executable.is_file() {
+        return Some(executable.to_path_buf());
+    }
+    if !executable.is_absolute() {
+        let candidate = root.join(executable);
+        return candidate.is_file().then_some(candidate);
+    }
+    let root_name = root.file_name()?;
+    for ancestor in executable.ancestors().skip(1) {
+        if ancestor.file_name() != Some(root_name) {
+            continue;
+        }
+        let suffix = executable.strip_prefix(ancestor).ok()?;
+        let candidate = root.join(suffix);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    let candidate = root.join(executable.file_name()?);
+    candidate.is_file().then_some(candidate)
+}
+
 fn proton_runner(game: &Game) -> Option<&Path> {
     for value in [&game.launch.proton, &game.installation.proton] {
         if !value.is_empty() {
@@ -84,14 +107,8 @@ pub fn managed_launch_plan(
     if !root.is_dir() {
         return Err(RuntimeError::MissingContent(root.clone()));
     }
-    let executable = if target.executable.is_absolute() {
-        target.executable.clone()
-    } else {
-        root.join(&target.executable)
-    };
-    if !executable.is_file() {
-        return Err(RuntimeError::MissingExecutable(executable));
-    }
+    let executable = resolve_executable(root, &target.executable)
+        .ok_or_else(|| RuntimeError::MissingExecutable(target.executable.clone()))?;
     let proton = proton_runner(game).ok_or(RuntimeError::MissingRuntime("Proton runner"))?;
     // UmuTron/Steam runners are directories containing the real `proton`
     // launcher; accept either form.
@@ -355,6 +372,16 @@ mod tests {
             managed_launch_plan(&game, &target, temp.path()),
             Err(RuntimeError::MissingRuntime("Proton runner"))
         ));
+    }
+
+    #[test]
+    fn rebases_an_absolute_target_to_the_managed_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("SteamTronLibrary/common/Sample");
+        fs::create_dir_all(root.join("Bin")).unwrap();
+        fs::write(root.join("Bin/Game.exe"), b"MZ").unwrap();
+        let old = PathBuf::from("/mnt/old/SteamLibrary/steamapps/common/Sample/Bin/Game.exe");
+        assert_eq!(resolve_executable(&root, &old), Some(root.join("Bin/Game.exe")));
     }
 
     #[test]
