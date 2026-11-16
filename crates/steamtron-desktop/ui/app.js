@@ -1,4 +1,5 @@
 const invoke = (command, args = {}) => window.__TAURI__.core.invoke(command, args);
+const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
 const convertFileSrc = (path) => window.__TAURI__.core.convertFileSrc(path);
 const gamesEl = document.querySelector("#games");
 const detailEl = document.querySelector("#detail");
@@ -1866,7 +1867,7 @@ function openManagedGameOptions(game) {
   const installed = Boolean(game.installed) || game.installation?.mode === "linked";
   const tabs = [
     ["general", "General"],
-    ["compatibility", "Compatibility"],
+    ...(IS_WINDOWS ? [] : [["compatibility", "Compatibility"]]),
     ["environment", "Environment"],
     ["debug", "Debug"],
     ["link", "Game Link"],
@@ -4346,6 +4347,9 @@ async function loadDoctor(target = null) {
 
 let settingsTab = "general";
 let settingsLibrary = null;
+if (IS_WINDOWS) {
+  document.querySelector('[data-settings-tab="proton"]')?.remove();
+}
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -4464,8 +4468,8 @@ async function renderGeneralSettings(host) {
   host.innerHTML = `
     <section class="settings-section"><h2>Display mode</h2><p>Default mode applies on the next app start. Enter fullscreen from the mode button; leave through fullscreen options or the tray.</p><div class="settings-card">
       ${settingsRow("Default launch mode", "Desktop or fullscreen when a game starts.", `<select id="setting-display-mode"><option value="desktop"${mode === "desktop" ? " selected" : ""}>Desktop</option><option value="fullscreen"${mode === "fullscreen" ? " selected" : ""}>Fullscreen</option></select>`)}
-      ${settingsRow("Default prefix source", "Used for new games. Steam prefixes borrow Steam's compatdata; umu prefixes live inside the SteamTron library.", `<select id="setting-prefix-mode"><option value="umu"${prefix === "umu" ? " selected" : ""}>umu (SteamTron)</option><option value="steam"${prefix === "steam" ? " selected" : ""}>Steam compatdata</option></select>`)}
-      ${settingsRow("Feral GameMode", "Automatically optimize CPU governor, GPU performance, and process priorities while gaming, then revert on exit.", `<label class="switch"><input type="checkbox" id="setting-gamemode"${gamemode ? " checked" : ""}><span></span></label>`)}
+      ${IS_WINDOWS ? "" : settingsRow("Default prefix source", "Used for new games. Steam prefixes borrow Steam's compatdata; umu prefixes live inside the SteamTron library.", `<select id="setting-prefix-mode"><option value="umu"${prefix === "umu" ? " selected" : ""}>umu (SteamTron)</option><option value="steam"${prefix === "steam" ? " selected" : ""}>Steam compatdata</option></select>`)}
+      ${IS_WINDOWS ? "" : settingsRow("Feral GameMode", "Automatically optimize CPU governor, GPU performance, and process priorities while gaming, then revert on exit.", `<label class="switch"><input type="checkbox" id="setting-gamemode"${gamemode ? " checked" : ""}><span></span></label>`)}
     </div></section>
     <section class="settings-section"><h2>Account</h2><p>Session used for manifests, library actions and Steam registration.</p><div class="settings-card">
       ${settingsRow(email, profile?.base_url || "SteamTron account", '<button id="setting-signout">Sign out</button>')}
@@ -4490,18 +4494,18 @@ async function renderGeneralSettings(host) {
       showToast(`Default launch mode: ${event.target.value}`);
     } catch (error) { showToast(String(error), true); }
   };
-  host.querySelector("#setting-prefix-mode").onchange = async (event) => {
+  host.querySelector("#setting-prefix-mode")?.addEventListener("change", async (event) => {
     try {
       await invoke("update_library_settings", { defaultPrefixMode: event.target.value });
       showToast(`Default prefix source: ${event.target.value}`);
     } catch (error) { showToast(String(error), true); }
-  };
-  host.querySelector("#setting-gamemode").onchange = async (event) => {
+  });
+  host.querySelector("#setting-gamemode")?.addEventListener("change", async (event) => {
     try {
       await invoke("update_library_settings", { gamemode: event.target.checked });
       showToast(event.target.checked ? "GameMode optimization enabled" : "GameMode optimization disabled");
     } catch (error) { showToast(String(error), true); }
-  };
+  });
   host.querySelector("#setting-signout").onclick = async () => {
     try {
       await invoke("profile_logout");

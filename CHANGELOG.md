@@ -5,7 +5,15 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.7] - 2026-11-17
+
+### Fixed
+
+- Windows no longer shows Linux-only Proton Manager, Proton compatibility,
+  prefix-source or Feral GameMode controls.
+
 ## [0.1.6] - 2026-11-17
+
 
 ### Fixed
 
@@ -82,6 +90,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.7]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.7
 [0.1.6]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.6
 [0.1.5]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.5
 [0.1.4]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.4

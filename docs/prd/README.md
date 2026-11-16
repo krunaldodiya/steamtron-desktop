@@ -100,3 +100,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0073](0073-hidden-console.md) | Hide helper console windows on Windows | active | 2026-11-16 |
 | [0074](0074-winfsp-bootstrap.md) | Built-in WinFsp bootstrap on Windows | draft | 2026-11-16 |
 | [0075](0075-program-files-install.md) | Install Windows build under Program Files (x86) | active | 2026-11-16 |
+| [0076](0076-windows-platform-ui.md) | Hide Linux-only Proton UI on Windows | active | 2026-11-17 |
