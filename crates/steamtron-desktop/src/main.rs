@@ -3806,19 +3806,6 @@ fn sha256_file_with_progress(
     Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-fn tar_size(path: &Path) -> Result<u64, String> {
-    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let mut archive = tar::Archive::new(file);
-    let mut total = 0u64;
-    for entry in archive.entries().map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        if !entry.header().entry_type().is_dir() {
-            total = total.saturating_add(entry.size());
-        }
-    }
-    Ok(total)
-}
-
 fn extract_tar_component(
     archive_path: &Path,
     destination: &Path,
@@ -3970,9 +3957,12 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let manifest_worker = manifest.clone();
     let target_game_worker = target_game.clone();
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let content_total = tar_size(&restore_folder.join("content.tar"))?;
-        let fixes_total = if !fixes_directory.is_empty() { tar_size(&restore_folder.join("fixes.tar")).unwrap_or(0) } else { 0 };
-        let manifests_total = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() { tar_size(&restore_folder.join("manifest-bundle.tar")).unwrap_or(0) } else { 0 };
+        // Use archive sizes as the progress denominator. Scanning every tar
+        // header first made the UI sit at 10% for minutes on multi-gigabyte
+        // backups; extraction already reads the same bytes.
+        let content_total = std::fs::metadata(restore_folder.join("content.tar")).map(|metadata| metadata.len()).unwrap_or(0);
+        let fixes_total = if !fixes_directory.is_empty() { std::fs::metadata(restore_folder.join("fixes.tar")).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
+        let manifests_total = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() { std::fs::metadata(restore_folder.join("manifest-bundle.tar")).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
         let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
         let started = std::time::Instant::now();
