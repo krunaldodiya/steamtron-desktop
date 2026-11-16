@@ -196,6 +196,15 @@ Add `/ui/settings/igdb`:
   must answer from that cache without calling the FastAPI status endpoint.
   The backend status call is a cold-session/connection-recovery operation, not
   a per-Store-open operation.
+- R19: Store pages contain 36 items. The IGDB request uses `limit 37` and the
+  UI page contract uses 36 so the extra row can determine `has_next`.
+- R20: Search text, genre, and PC platform filtering are applied in the IGDB
+  query before the 36-item page is cut. The UI must not fetch 36 items and then
+  filter them client-side by genre, search, platform, or Steam availability.
+- R21: The Store uses independent page entries keyed by page number. A page
+  that is not cached is fetched directly by its page number; loading page 4
+  must not depend on pages 1–3 or skip a page. Existing 24-item catalogue cache
+  entries are invalidated by a versioned cache key.
 
 ## Acceptance criteria
 
@@ -219,6 +228,13 @@ Add `/ui/settings/igdb`:
   endpoint after the token is cached.
 - [ ] Cached genres are reused from `store_cached_genres`; a network genre
   fetch occurs only when the local cache is absent or empty.
+- [ ] Every non-final Store page renders up to 36 items, including page 4 and
+  page 5 in the reported case.
+- [ ] Genre, search, and PC platform constraints are present in the IGDB
+  request; the UI does not post-filter the returned page.
+- [ ] Page 4 fetches page 4 directly when uncached and does not skip page 5 or
+  depend on pages 1–3.
+- [ ] Old 24-item cache entries are not reused as 36-item pages.
 - [ ] Direct IGDB browse, genre, detail, pagination, Steam resolution, and Add
   to library behavior remain intact.
 - [ ] No token appears in logs, URLs, backups, `localStorage`, or command
@@ -242,7 +258,7 @@ Recorded after implementation:
 - `node --check crates/steamtron-desktop/ui/app.js`: passed.
 - `bash scripts/build-linux.sh`: deb and AppImage built; installed binary
   SHA-256 matched the release build
-  (`6b8eb989f2b9dba01c65820376f80ebd8f7fe94716d44a02b53a9639e5af0025`).
+  (`cd4703982c1d607402424f4b1a3e502e0198ceffdc8b26c9ce309b628295efaf`).
 - Local UI verification against an isolated FastAPI instance and isolated app
   data/cache:
   - With no cached catalogue and no connection, the Store showed only the
@@ -257,6 +273,23 @@ Recorded after implementation:
 - Genre cache path verified: `store_cached_genres` is read before the status
   probe, and the screen rendered the cached genre sidebar with the cached
   page.
+- 36-item pagination verified against live IGDB:
+  - Direct page 1, page 4, and page 5 requests each returned 37 rows
+    (`limit 37`; the UI uses the first 36 and `has_next`).
+  - The UI rendered 36 cards on page 4 and 36 cards on page 5.
+  - The pager showed page 4 as active with 36 titles per page; no page was
+    empty or reduced to a single card.
+- Server-side filtering verified:
+  - `Shooter` genre plus PC platforms returned 37 rows with every row
+    containing that genre.
+  - A text search plus PC platforms returned 37 rows for the first page.
+  - The UI no longer filters the returned page by platform or Steam
+    availability; those filters were removed from the page path.
+- Page isolation verified: pages 1, 4, and 5 loaded independently by page
+  number; the page map count reached 108 loaded titles without requiring a
+  contiguous 1–5 prefetch.
+- Cache versioning: catalogue keys now include `v2|36`, so old 24-item cache
+  entries are ignored rather than rendered as short pages.
 - Production deployment verified after pushing backend `224efbf`:
   - `GET /v1/igdb/status` returned 200 with `configured=true` and
     `connected=false` before connection.

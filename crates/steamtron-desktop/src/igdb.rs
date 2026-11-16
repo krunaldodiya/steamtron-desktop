@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 const IGDB_BASE: &str = "https://api.igdb.com/v4";
 const IGDB_MAX_BYTES: usize = 1_048_576;
 const MAX_PAGE: u32 = 1000;
-const PAGE_SIZE: u32 = 24;
+const PAGE_SIZE: u32 = 36;
 const REFRESH_SKEW_SECONDS: i64 = 120;
 const REQUEST_SPACING: Duration = Duration::from_millis(260);
 const GAME_FIELDS: &str = "name,summary,storyline,first_release_date,genres.name,cover.image_id,artworks.image_id,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,version_title,game_type.type,platforms.name";
@@ -331,6 +331,17 @@ fn normalize(game: &Value) -> Result<Value, String> {
     }))
 }
 
+const PC_PLATFORMS: &str = "platforms = (6,14,3)";
+
+fn where_clause(genre: Option<u64>) -> String {
+    let mut parts = Vec::new();
+    if let Some(id) = genre {
+        parts.push(format!("genres = {id}"));
+    }
+    parts.push(PC_PLATFORMS.to_owned());
+    format!("where {};", parts.join(" & "))
+}
+
 fn browse_query(search: &str, genre: Option<u64>, sort: &str, page: u32) -> String {
     let sort_clause = match sort {
         "latest" => "sort first_release_date desc;",
@@ -348,20 +359,16 @@ fn browse_query(search: &str, genre: Option<u64>, sort: &str, page: u32) -> Stri
             serde_json::to_string(search).unwrap_or_else(|_| "\"\"".into())
         )
     };
-    let genre_clause = genre
-        .map(|id| format!("where genres = {id};"))
-        .unwrap_or_default();
+    let where_clause = where_clause(genre);
     format!(
-        "{clause} {genre_clause} fields {GAME_FIELDS}; limit {}; offset {};",
+        "{clause} {where_clause} fields {GAME_FIELDS}; limit {}; offset {};",
         PAGE_SIZE + 1,
         (page.saturating_sub(1)) * PAGE_SIZE
     )
 }
 
 fn count_query(genre: Option<u64>) -> String {
-    genre
-        .map(|id| format!("where genres = {id};"))
-        .unwrap_or_default()
+    where_clause(genre)
 }
 
 fn validate_query(value: &str) -> Result<String, String> {
@@ -589,14 +596,14 @@ mod tests {
     fn browse_query_escapes_search_and_adds_genre() {
         let value = browse_query("A \"quoted\" game", Some(12), "popular", 3);
         assert!(value.contains("search \"A \\\"quoted\\\" game\";"));
-        assert!(value.contains("where genres = 12;"));
-        assert!(value.contains("limit 25; offset 48;"));
+        assert!(value.contains("where genres = 12 & platforms = (6,14,3);"));
+        assert!(value.contains("limit 37; offset 72;"));
     }
 
     #[test]
     fn browse_query_rejects_invalid_page_offsets_via_page_clamp() {
         let value = browse_query("", None, "latest", MAX_PAGE);
-        assert!(value.contains("offset 23976;"));
+        assert!(value.contains("offset 35964;"));
     }
 
     #[test]

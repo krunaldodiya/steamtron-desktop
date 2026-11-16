@@ -5105,9 +5105,9 @@ let storeQuery = "";
 let storeGenre = "";
 let storeSort = "popular";
 let storePage = 1;
-const STORE_PAGE_SIZE = 24;
-let storeBuffer = [];
-let storeServerPage = 0;
+const STORE_PAGE_SIZE = 36;
+let storePages = new Map();
+let storeLastPage = 0;
 let storeExhausted = false;
 let storeGenres = [];
 let storeLoading = false;
@@ -5158,7 +5158,7 @@ function managedGameForStoreItem(item) {
 }
 
 async function openStoreItem(id) {
-  const base = [...storeBuffer, ...storeRecent].find((entry) => String(entry.id) === String(id));
+  const base = [...storeLoadedItems(), ...storeRecent].find((entry) => String(entry.id) === String(id));
   if (!base) return;
   if (appView === "store") {
     const content = detailEl.querySelector(".store-content");
@@ -5357,56 +5357,22 @@ function renderStoreDetail({ focus = true } = {}) {
   }
 }
 
-async function mapLimit(items, limit, worker) {
-  const results = new Array(items.length);
-  let index = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (index < items.length) {
-      const current = index;
-      index += 1;
-      results[current] = await worker(items[current]);
-    }
-  });
-  await Promise.all(runners);
-  return results;
-}
-
-const steamAvailability = new Map();
-
-async function resolveSteamForItem(item) {
-  if (item.steam_app_id) return item.steam_app_id;
-  const key = String(item.id);
-  if (steamAvailability.has(key)) return steamAvailability.get(key);
-  try {
-    const appid = await invoke("store_resolve_steam_cached", {
-      igdbId: Number(item.id),
-      title: item.name,
-    });
-    const value = appid || null;
-    steamAvailability.set(key, value);
-    return value;
-  } catch (_error) {
-    return undefined; // network failure: keep the item rather than emptying the page
-  }
-}
-
-function isPcCatalogItem(item) {
-  const platforms = item.platforms || [];
-  if (!platforms.length) return true; // unknown platform data: keep the title
-  return platforms.some((platform) => {
-    const name = String(platform.name || "").toLowerCase();
-    return name.includes("windows") || name.includes("linux") || name.includes("macos") || name === "mac";
-  });
-}
-
 function resetStorePaging() {
   storeGeneration += 1;
-  storeBuffer = [];
-  storeServerPage = 0;
+  storePages = new Map();
+  storeLastPage = 0;
   storeExhausted = false;
   storePage = 1;
   storeError = "";
   storeRefreshing = false;
+}
+
+function storePageItems(page = storePage) {
+  return storePages.get(page) || [];
+}
+
+function storeLoadedItems() {
+  return [...storePages.values()].flat();
 }
 
 async function loadIgdbStatus() {
@@ -5530,38 +5496,24 @@ async function cachedStorePage(page) {
 async function paintCachedStorePage(page, generation) {
   const data = await cachedStorePage(page);
   if (!data || generation !== storeGeneration) return false;
-  const existing = new Set(storeBuffer.map((entry) => entry.id));
-  for (const item of data.items) {
-    if (!isPcCatalogItem(item) || existing.has(item.id)) continue;
-    existing.add(item.id);
-    storeBuffer.push(item);
-  }
-  storeServerPage = Math.max(storeServerPage, page);
-  return true;
+  await absorbStorePage(data, page, generation);
+  return storePageItems(page).length > 0;
 }
 
-async function absorbStorePage(data, serverPage, generation) {
-  const items = data.items || [];
-  const existing = new Set(storeBuffer.map((entry) => entry.id));
-  const candidates = items.filter((item) => isPcCatalogItem(item) && !existing.has(item.id));
-  // Verify Steam availability (cached per IGDB id) and keep only titles that
-  // genuinely exist on Steam; edition variants are matched.
-  const checked = await mapLimit(candidates, 5, async (item) => {
-    const steam = await resolveSteamForItem(item);
-    if (steam === undefined) return item;
-    if (!steam) return null;
-    return { ...item, steam_app_id: steam };
-  });
+async function absorbStorePage(data, page, generation) {
   if (generation !== storeGeneration) return false;
-  storeServerPage = Math.max(storeServerPage, serverPage);
-  for (const item of checked) {
-    if (!item) continue;
-    if (!storeBuffer.some((entry) => entry.id === item.id)) storeBuffer.push(item);
+  const items = Array.isArray(data?.items) ? data.items : [];
+  storePages.set(page, items);
+  if (items.length) storeLastPage = Math.max(storeLastPage, page);
+  const totalPages = typeof data?.total_pages === "number" ? data.total_pages : null;
+  if (!items.length) {
+    storeExhausted = true;
+    if (page > 1 && storeLastPage > 0) storePage = storeLastPage;
+  } else if (totalPages !== null && page >= totalPages) {
+    storeExhausted = true;
+  } else if (data?.has_next === false) {
+    storeExhausted = true;
   }
-  const totalPages = typeof data.total_pages === "number" ? data.total_pages : null;
-  if (!items.length) storeExhausted = true;
-  else if (totalPages !== null && storeServerPage >= totalPages) storeExhausted = true;
-  else if (data.has_next === false) storeExhausted = true;
   return true;
 }
 
@@ -5571,8 +5523,6 @@ async function ensureStorePage(page, render = true) {
   storeLoading = true;
   storeRefreshing = false;
   storeError = "";
-  const target = storePage * STORE_PAGE_SIZE;
-  let guard = 0;
 
   // Paint the local catalogue before any network/token probe. This is what
   // makes a warm Store open instant instead of showing "Checking IGDB…".
@@ -5600,43 +5550,32 @@ async function ensureStorePage(page, render = true) {
   await loadStoreGenres();
   if (generation !== storeGeneration) return;
 
-  // Paint cached server pages first, with no API request for them.
-  while (storeBuffer.length < target && !storeExhausted && guard < 20) {
-    guard += 1;
-    const nextServerPage = storeServerPage + 1;
-    const cached = await cachedStorePage(nextServerPage);
-    if (generation !== storeGeneration) return;
-    if (!cached) break;
-    await absorbStorePage(cached, nextServerPage, generation);
-    if (generation !== storeGeneration) return;
-  }
-  if (storeBuffer.length) {
+  // Cache-first. A missing page is fetched directly by its page number; the
+  // local page map keeps pages independent, so page 4 does not require pages
+  // 1-3 to be loaded and cannot inherit their filtered item counts.
+  if (painted) {
     storeLoading = false;
-    storeRefreshing = true;
+    storeRefreshing = false;
+    storeTried = true;
     if (render || appView === "store") renderStorePage();
+    return;
   }
 
-  // Only pages that are not cached are fetched from the network.
   try {
-    while (storeBuffer.length < target && !storeExhausted && guard < 20) {
-      guard += 1;
-      const nextServerPage = storeServerPage + 1;
-      const data = await invoke("store_catalog", {
-        query: storeQuery,
-        genre: storeGenre,
-        sort: storeSort,
-        page: nextServerPage,
-      });
-      if (generation !== storeGeneration) return;
-      await absorbStorePage(data, nextServerPage, generation);
-      if (generation !== storeGeneration) return;
-    }
+    const data = await invoke("store_catalog", {
+      query: storeQuery,
+      genre: storeGenre,
+      sort: storeSort,
+      page: storePage,
+    });
+    if (generation !== storeGeneration) return;
+    await absorbStorePage(data, storePage, generation);
   } catch (error) {
     const message = String(error);
     if (message.includes("IGDB_NOT_CONNECTED") || message.includes("IGDB_NOT_CONFIGURED")) {
       storeConnection = { ...(storeConnection || {}), connected: false, configured: !message.includes("IGDB_NOT_CONFIGURED") };
       storeConnectionError = "";
-    } else if (generation === storeGeneration && !storeBuffer.length) {
+    } else if (generation === storeGeneration && !storeLoadedItems().length) {
       // A cached catalogue stays usable when the API is offline.
       storeError = message;
     }
@@ -5652,7 +5591,7 @@ async function ensureStorePage(page, render = true) {
 async function openStore() {
   // If an earlier warm-up failed without cache, retry when the user opens the
   // Store instead of leaving the error on screen.
-  if (!storeBuffer.length) {
+  if (!storeLoadedItems().length) {
     resetStorePaging();
     await ensureStorePage(1);
   } else if (storeError) {
@@ -5675,7 +5614,7 @@ function renderStorePage() {
   const previousStoreId = previousInDetail ? previousActive.dataset?.storeId || "" : "";
   const previousPage = previousInDetail ? previousActive.dataset?.storePage || "" : "";
   const previousScroll = detailEl.querySelector(".store-content")?.scrollTop || 0;
-  if (!storeConnection && !storeBuffer.length) {
+  if (!storeConnection && !storeLoadedItems().length) {
     detailEl.innerHTML = `<div class="page store-page">
       <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Game data by IGDB.</p></header>
       <div class="store-connect-page"><div class="status">Checking IGDB connection…</div></div>
@@ -5699,9 +5638,9 @@ function renderStorePage() {
   const sortOptions = [["popular", "Most popular"], ["rating", "Top rated"], ["latest", "Newest"], ["name_asc", "A–Z"], ["name_desc", "Z–A"]]
     .map(([value, label]) => `<button class="store-option${value === storeSort ? " selected" : ""}" data-store-sort="${value}">${label}</button>`)
     .join("");
-  const visible = storeBuffer.slice((storePage - 1) * STORE_PAGE_SIZE, storePage * STORE_PAGE_SIZE);
-  const hasMore = !storeExhausted || storeBuffer.length > storePage * STORE_PAGE_SIZE;
-  const knownPages = storeExhausted ? Math.max(1, Math.ceil(storeBuffer.length / STORE_PAGE_SIZE)) : Infinity;
+  const visible = storePageItems();
+  const hasMore = !storeExhausted;
+  const knownPages = storeExhausted ? Math.max(1, storeLastPage) : Infinity;
   const windowStart = Math.max(1, storePage - 2);
   const pageNumbers = [];
   for (let page = windowStart; page < windowStart + 5 && page <= knownPages; page += 1) {
@@ -5713,7 +5652,7 @@ function renderStorePage() {
       ? "Store unavailable"
       : storeRefreshing
         ? "Saved catalogue · updating…"
-        : `${storeBuffer.length} PC titles`;
+        : `${storeLoadedItems().length} PC titles`;
   detailEl.innerHTML = `<div class="page store-page">
     <header class="page-head"><h1>Discover your next game</h1><p>PC and Steam-playable titles only. Browse the catalogue by genre and rating. Game data by IGDB.</p></header>
     <div class="store-body">

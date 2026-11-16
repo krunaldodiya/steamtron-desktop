@@ -3197,8 +3197,9 @@ async fn store_catalog(
     let page = page.max(1);
     let genre = genre.unwrap_or_default();
     let sort = sort.unwrap_or_default();
-    // Must match store_cached_catalog exactly: query|genre|sort|page.
-    let key = catalog_cache_key(&format!("{query}|{genre}|{sort}|{page}"));
+    // Must match store_cached_catalog exactly. v2 encodes the 36-item page
+    // contract so 24-item entries from the old store are never reused.
+    let key = catalog_cache_key(&format!("v2|36|{query}|{genre}|{sort}|{page}"));
     let value = igdb::catalog(
         &query,
         Some(&genre).filter(|value| !value.is_empty()).map(String::as_str),
@@ -3218,7 +3219,7 @@ fn store_cached_catalog(
     page: u32,
 ) -> Option<serde_json::Value> {
     let key = catalog_cache_key(&format!(
-        "{query}|{}|{}|{}",
+        "v2|36|{query}|{}|{}|{}",
         genre.unwrap_or_default(),
         sort.unwrap_or_default(),
         page.max(1)
