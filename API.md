@@ -99,7 +99,7 @@ Returns state without exposing the access token.
   "configured": true,
   "connected": true,
   "expires_at": 1800146342,
-  "connect_url": "https://steamtron.vercel.app/ui/settings"
+  "connect_url": "https://steamtron.vercel.app/settings"
 }
 ```
 
@@ -151,7 +151,7 @@ Creates or replaces the current user's IGDB token. No request body.
 Response is the same shape as `GET /v1/igdb/token`. The browser settings page
 uses the same operation internally.
 
-### `GET /ui/settings`
+### `GET /settings`
 
 Browser page for connecting or refreshing IGDB. Requires a browser session
 cookie. The desktop opens this page from the Store connection card.
@@ -295,5 +295,5 @@ The desktop maps `IGDB_NOT_CONNECTED` to the reconnect card and
 - The FastAPI service stores per-user IGDB connection rows in Turso/SQLite.
 - IGDB and Twitch requests use fixed HTTPS hosts. No user-controlled endpoint
   is accepted by the token client.
-- The backend settings page requires a session cookie even though `/ui` is
-  outside the bearer-token middleware.
+- The backend settings page requires a session cookie even though browser
+  pages are outside the bearer-token middleware.
