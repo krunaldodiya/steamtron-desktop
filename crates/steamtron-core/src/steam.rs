@@ -66,10 +66,29 @@ fn steam_registry_path() -> Vec<PathBuf> {
     result
 }
 
+fn is_steam_installation(root: &Path) -> bool {
+    if !root.join("steamapps").is_dir() {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    let markers = ["steam.exe", "steamapps/libraryfolders.vdf", "config/loginusers.vdf", "registry.vdf"];
+    #[cfg(not(target_os = "windows"))]
+    let markers = [
+        "steam.sh",
+        "linux32/steam",
+        "ubuntu12_32/steam",
+        "steamapps/libraryfolders.vdf",
+        "config/loginusers.vdf",
+        "config/config.vdf",
+        "registry.vdf",
+    ];
+    markers.iter().any(|marker| root.join(marker).is_file())
+}
+
 pub fn steam_root() -> Result<PathBuf, SteamError> {
     if let Some(value) = std::env::var_os("STEAMTRON_STEAM_ROOT") {
         let path = PathBuf::from(value);
-        if path.join("steamapps").is_dir() {
+        if is_steam_installation(&path) {
             return Ok(path);
         }
     }
@@ -86,7 +105,7 @@ pub fn steam_root() -> Result<PathBuf, SteamError> {
             }
         }
         for candidate in candidates {
-            if candidate.join("steamapps").is_dir() {
+            if is_steam_installation(&candidate) {
                 return Ok(candidate);
             }
         }
@@ -94,7 +113,7 @@ pub fn steam_root() -> Result<PathBuf, SteamError> {
             PathBuf::from("C:/Program Files (x86)/Steam"),
             PathBuf::from("C:/Program Files/Steam"),
         ] {
-            if candidate.join("steamapps").is_dir() {
+            if is_steam_installation(&candidate) {
                 return Ok(candidate);
             }
         }
@@ -110,7 +129,7 @@ pub fn steam_root() -> Result<PathBuf, SteamError> {
             home.join(".steam/steam"),
             home.join(".steam/root"),
         ] {
-            if candidate.join("steamapps").is_dir() {
+            if is_steam_installation(&candidate) {
                 return Ok(candidate);
             }
         }
@@ -302,6 +321,24 @@ fn field(text: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compatdata_only_root_is_not_a_steam_install() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("steamapps/compatdata/42/pfx")).unwrap();
+        assert!(!is_steam_installation(temp.path()));
+    }
+
+    #[test]
+    fn steam_marker_marks_a_real_install() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("steamapps")).unwrap();
+        #[cfg(target_os = "windows")]
+        fs::write(temp.path().join("steam.exe"), b"").unwrap();
+        #[cfg(not(target_os = "windows"))]
+        fs::write(temp.path().join("steam.sh"), b"").unwrap();
+        assert!(is_steam_installation(temp.path()));
+    }
 
     #[test]
     fn deduplicates_appids_across_libraries() {

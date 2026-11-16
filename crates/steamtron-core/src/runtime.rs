@@ -111,6 +111,9 @@ pub fn managed_launch_plan(
     if prefix.as_os_str().is_empty() {
         return Err(RuntimeError::MissingRuntime("game prefix"));
     }
+    if game.launch.prefix_mode == "steam" && crate::steam::steam_root().is_err() {
+        return Err(RuntimeError::MissingRuntime("Steam installation"));
+    }
     fs::create_dir_all(prefix).map_err(|error| RuntimeError::Io {
         path: prefix.clone(),
         source: error,

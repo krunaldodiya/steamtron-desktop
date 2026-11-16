@@ -62,3 +62,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0035](0035-persistent-bundle-store.md) | Persistent global Lua/manifest bundle store | done | 2026-11-16 |
 | [0036](0036-separate-appmanifest-lua-actions.md) | Remove the unused appmanifest action | done | 2026-11-16 |
 | [0037](0037-appmanifest-backup-and-manifest-folders.md) | Appmanifest backups and per-game manifest folders | done | 2026-11-16 |
+| [0038](0038-steam-installation-detection.md) | Reliable Steam installation detection | done | 2026-11-16 |
