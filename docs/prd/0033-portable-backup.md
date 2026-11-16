@@ -44,8 +44,8 @@ and fixes state are preserved.
 - R4: Archive content as `common/<folder>/...`, fixes as `fixes/<folder>/...`,
   and manifests as `manifests/<folder>/...`.
 - R5: Restore chooses a backup folder, validates `backup_format: 2`, verifies the
-  content checksum with byte/speed/ETA progress, extracts to staging, then
-  replaces the game root.
+  content checksum with byte/speed/ETA progress mapped to the first 10% of the
+  restore bar, extracts to staging for 10–100%, then replaces the game root.
 - R6: Restore moves fixes/manifests into place, rebuilds launch targets, marks
   the game installed, and saves it.
 - R7: Backup/restore show real byte progress from the six-stat operation
@@ -67,6 +67,10 @@ and fixes state are preserved.
   and fixes SHA-256 values; `content.tar` contains `common/The Binding of
   Isaac/...`; `fixes.tar` contains `fixes/The Binding of Isaac/...`;
   `manifest-bundle.tar` contains depot manifests.
+- Restore of the 9.77 GB Little Nightmares backup completed: its staging folder
+  grew incrementally, the content root became 9.2 GB, and the library entry
+  became confirmed with an Atlas/Binaries/Win64 launch target. The UI was
+  corrected so checksum verification no longer reports 100% before extraction.
 
 ## Decisions and risks
 

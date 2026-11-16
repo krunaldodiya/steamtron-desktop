@@ -3822,7 +3822,7 @@ fn sha256_file_with_progress(
         hasher.update(&buffer[..count]);
         written = written.saturating_add(count as u64);
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) || written >= total {
-            let percent = if total > 0 { written as f64 / total as f64 * 100.0 } else { 100.0 };
+            let percent = if total > 0 { written as f64 / total as f64 * 10.0 } else { 10.0 };
             emit_operation_stats(app, operation, game_id, stage, message, percent, written, total, started);
             last_emit = std::time::Instant::now();
         }
@@ -3843,13 +3843,15 @@ fn extract_tar_component(
     written: &mut u64,
     overall_total: u64,
     started: std::time::Instant,
+    progress_base: f64,
+    progress_span: f64,
 ) -> Result<(), String> {
     std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
     let file = std::fs::File::open(archive_path).map_err(|error| format!("{}: {error}", archive_path.display()))?;
     let mut archive = tar::Archive::new(file);
     let mut last_emit = std::time::Instant::now();
-    let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 0.0 };
-    emit_operation_stats(app, operation, game_id, stage, message, percent, *written, overall_total, started);
+    let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 0.0 };
+    emit_operation_stats(app, operation, game_id, stage, message, progress_base + fraction * progress_span, *written, overall_total, started);
     for entry in archive.entries().map_err(|error| error.to_string())? {
         operation_check(control)?;
         let mut entry = entry.map_err(|error| error.to_string())?;
@@ -3873,8 +3875,8 @@ fn extract_tar_component(
             *written = (*written).saturating_add(copied);
         }
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
-            let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
-            emit_operation_stats(app, operation, game_id, stage, message, percent, *written, overall_total, started);
+            let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 1.0 };
+            emit_operation_stats(app, operation, game_id, stage, message, progress_base + fraction * progress_span, *written, overall_total, started);
             last_emit = std::time::Instant::now();
         }
     }
@@ -3929,7 +3931,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
             unregister_operation("restore", "");
             return Err("Backup content checksum does not match its manifest.".into());
         }
-        emit_operation(&app, "restore", "", "verify", "running", "Backup checksum verified.");
+        emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files…", 10.0);
     }
     unregister_operation("restore", "");
 
@@ -3985,7 +3987,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
         let started = std::time::Instant::now();
-        extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", &emit_app, "restore", "", "extract", "Extracting game files…", &control, &mut written, overall_total, started)?;
+        extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", &emit_app, "restore", "", "extract", "Extracting game files…", &control, &mut written, overall_total, started, 10.0, 90.0)?;
         let staged_content = staging.join("common").join(&content_folder_worker);
         if !staged_content.is_dir() {
             return Err("Backup did not restore the expected game content.".into());
@@ -3999,7 +4001,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         std::fs::rename(&staged_content, &target_root_worker).map_err(|error| error.to_string())?;
 
         if !fixes_directory.is_empty() {
-            extract_tar_component(&restore_folder.join("fixes.tar"), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started)?;
+            extract_tar_component(&restore_folder.join("fixes.tar"), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 10.0, 90.0)?;
             let staged_fixes = staging.join("fixes").join(&content_folder_worker);
             if staged_fixes.is_dir() {
                 if let Some(destination) = managed_fixes_dir(&target_game_worker) {
@@ -4015,7 +4017,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         }
 
         if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
-            extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started)?;
+            extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 10.0, 90.0)?;
             let staged_manifests = staging.join("manifests").join(&content_folder_worker);
             if staged_manifests.is_dir() {
                 for entry in std::fs::read_dir(&staged_manifests).map_err(|error| error.to_string())?.flatten() {
