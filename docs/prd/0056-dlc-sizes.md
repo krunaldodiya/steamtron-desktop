@@ -17,6 +17,8 @@ names and release dates, but not install sizes.
   `smd search <dlc_appid> --manifests 0 --json`.
 - Results are cached in `~/.cache/steamtron/dlc-sizes.json`, including
   unknown (`0`).
+- SteamCMD and SMD are skipped entirely when every requested DLC is already in
+  the cache; repeated tab opens take under 1 ms.
 - The DLC tab fills size cells asynchronously; names and release dates render
   immediately.
 
@@ -25,8 +27,11 @@ names and release dates, but not install sizes.
 - Lies of P DLC `1938420` resolved to `4,379,102,004` bytes.
 - Little Nightmares PICS: DLC `601710` = `116,101,371` bytes, `584093` =
   `3,206,906` bytes.
-- DLC App IDs that are packages without depots (for example Little Nightmares
-  `584090`) have no PICS depot size and remain `—`.
+- Only DLC with their own content depot get a size. Little Nightmares
+  `601710` (Original Soundtrack) is the only listed DLC with one.
+- Package-only DLC App IDs (for example `584090`) have no PICS depot size and
+  remain `—`.
+- Cached lookup: 853 µs with no SteamCMD/SMD process.
 - `node --check` passes.
 - Desktop DLC tests pass.
 

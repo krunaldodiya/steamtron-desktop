@@ -22,14 +22,20 @@
 - `.steamtron-dlc.json` stores selected and installed DLC.
 - `.steamtron-dlc-backup/<appid>/` stores files overwritten by DLC.
 - Each installed DLC records SHA-256 hashes for safe removal.
-- SMD downloads each DLC App ID into a staging folder; files are copied into
-  the game root and recorded.
+- For DLC listed as a depot in the base game's Steam PICS data, SMD downloads
+  the selected depot IDs from the base Lua into staging. This is required for
+  DLC App IDs that SMD cannot resolve directly (for example Little Nightmares
+  601710).
+- Otherwise SMD downloads the DLC App ID directly.
+- Files are copied into the game root and recorded.
 - `.smd-dlcs.json` is updated with installed DLC IDs for Goldberg ownership.
 
 ## Verification
 
 - SMD downloaded a Lies of P soundtrack depot into a staging folder
   (340 MB class) successfully.
+- SMD downloaded Little Nightmares DLC `601710` from the base Lua with
+  `--depots 601710` into staging; it produced the OST folder and files.
 - Real-game selection toggle: selected then deselected 1938420 in Lies of P;
   state file returned to `selected: []`.
 - `installs_and_records_downloaded_dlc_files` passes.

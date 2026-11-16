@@ -238,9 +238,15 @@ fn find_block<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
-fn parse_pics_dlc_sizes(text: &str) -> BTreeMap<u32, u64> {
-    let mut sizes = BTreeMap::new();
-    let Some(depots) = find_block(text, "depots") else { return sizes };
+#[derive(Default)]
+struct PicsDlc {
+    sizes: BTreeMap<u32, u64>,
+    depots: BTreeMap<u32, Vec<String>>,
+}
+
+fn parse_pics_dlc(text: &str) -> PicsDlc {
+    let mut result = PicsDlc::default();
+    let Some(depots) = find_block(text, "depots") else { return result };
     let mut index = 0usize;
     let bytes = depots.as_bytes();
     while index < bytes.len() {
@@ -268,26 +274,27 @@ fn parse_pics_dlc_sizes(text: &str) -> BTreeMap<u32, u64> {
                     .captures_iter(block)
                     .filter_map(|captures| captures[1].parse::<u64>().ok())
                     .sum::<u64>();
-                *sizes.entry(dlc).or_insert(0) += total;
+                *result.sizes.entry(dlc).or_insert(0) += total;
+                result.depots.entry(dlc).or_default().push(key.to_owned());
             }
         }
         index = close + 1;
     }
-    sizes
+    result
 }
 
-fn steamcmd_sizes(base_appid: u32) -> BTreeMap<u32, u64> {
+fn steamcmd_dlc(base_appid: u32) -> PicsDlc {
     let layout = steamtron_core::paths::layout();
     let candidates = [
         layout.tools().join("steamcmd/steamcmd.sh"),
         layout.tools().join("steamcmd/steamcmd.exe"),
     ];
-    let Some(steamcmd) = candidates.into_iter().find(|path| path.is_file()) else { return BTreeMap::new() };
+    let Some(steamcmd) = candidates.into_iter().find(|path| path.is_file()) else { return PicsDlc::default() };
     let output = Command::new(steamcmd)
         .args(["+login", "anonymous", "+app_info_print", &base_appid.to_string(), "+quit"])
         .output();
-    let Ok(output) = output else { return BTreeMap::new() };
-    parse_pics_dlc_sizes(&String::from_utf8_lossy(&output.stdout))
+    let Ok(output) = output else { return PicsDlc::default() };
+    parse_pics_dlc(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Sum the depot sizes reported by Steam PICS / SMD for each DLC App ID.
@@ -295,11 +302,12 @@ pub fn dlc_sizes(game_id: &str, app_ids: &[u32]) -> BTreeMap<u32, u64> {
     let mut cache = load_size_cache();
     let mut result = BTreeMap::new();
     let mut changed = false;
+    let missing = app_ids.iter().any(|id| !cache.contains_key(&id.to_string()));
     let base_appid = Library::load().ok()
         .and_then(|library| library.game(game_id).cloned())
         .and_then(|game| game.metadata_app_id);
-    let pics = base_appid.map(steamcmd_sizes).unwrap_or_default();
-    let smd = download::resolve_smd().ok();
+    let pics = if missing { base_appid.map(steamcmd_dlc).map(|pics| pics.sizes).unwrap_or_default() } else { BTreeMap::new() };
+    let smd = if missing { download::resolve_smd().ok() } else { None };
     for app_id in app_ids {
         let key = app_id.to_string();
         if let Some(size) = cache.get(&key).copied() {
@@ -352,6 +360,15 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     let staging = cache.join("dlc").join(&game_id);
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|error| format!("{}: {error}", staging.display()))?;
+    let pics = game.metadata_app_id.map(steamcmd_dlc).unwrap_or_default();
+    let base_lua = game.metadata_app_id
+        .and_then(|id| steamtron_library::persistent_bundle(&id.to_string()))
+        .map(|bundle| {
+            let path = cache.join("dlc").join(format!("{game_id}-base.lua"));
+            let _ = fs::write(&path, bundle.lua);
+            path
+        })
+        .filter(|path| path.is_file());
     let total = pending.len();
     let mut dl_state = DownloadState {
         game_id: game_id.clone(),
@@ -379,12 +396,23 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         dl_state.depots_current = index as u32;
         dl_state.depots_done = index as u32;
         download::publish(&app, &dl_state);
-        let mut child = Command::new(&smd)
-            .arg("--data-dir").arg(cache.join("data"))
-            .arg("download").arg(app_id.to_string())
-            .args(["--like-steam", "--platform", "windows", "--language", "english", "-o"])
-            .arg(&staging)
-            .arg("--json")
+        let depots = pics.depots.get(app_id).filter(|depots| !depots.is_empty()).cloned();
+        let use_base_lua = depots.is_some() && base_lua.is_some();
+        let mut command = Command::new(&smd);
+        command.arg("--data-dir").arg(cache.join("data"));
+        if let (Some(depots), Some(base_lua)) = (depots.as_ref(), base_lua.as_ref()) {
+            command.arg("download").arg(base_lua)
+                .arg("--depots").arg(depots.join(","))
+                .args(["--like-steam", "--platform", "windows", "--language", "english", "--update"])
+                .arg(&staging)
+                .arg("--json");
+        } else {
+            command.arg("download").arg(app_id.to_string())
+                .args(["--like-steam", "--platform", "windows", "--language", "english", "-o"])
+                .arg(&staging)
+                .arg("--json");
+        }
+        let mut child = command
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -414,10 +442,14 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
             let _ = app.emit("download-complete", serde_json::json!({"gameId":game_id,"success":false,"cancelled":false,"message":dl_state.message}));
             return Err(dl_state.message);
         }
-        let folder = fs::read_dir(&staging).ok().into_iter().flatten().flatten()
-            .map(|entry| entry.path()).find(|path| path.is_dir())
-            .ok_or_else(|| format!("{title} download folder was not produced."))?;
-        let title = parse_title(&folder, *app_id);
+        let folder = if use_base_lua {
+            staging.clone()
+        } else {
+            fs::read_dir(&staging).ok().into_iter().flatten().flatten()
+                .map(|entry| entry.path()).find(|path| path.is_dir())
+                .ok_or_else(|| format!("{title} download folder was not produced."))?
+        };
+        let title = if use_base_lua { title.clone() } else { parse_title(&folder, *app_id) };
         install_downloaded(&root, &mut state, *app_id, &title, &folder)?;
         save_state(&root, &state)?;
         write_smd_dlc_choice(&root, &state);
