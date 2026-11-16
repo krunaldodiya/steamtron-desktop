@@ -71,3 +71,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0044](0044-name-platform-unlock-backend.md) | Name the platform unlock backend | done | 2026-11-16 |
 | [0045](0045-backend-install-requires-steam.md) | Backend install requires Steam | done | 2026-11-16 |
 | [0046](0046-backup-progress-streaming.md) | Stream backup progress through large files | done | 2026-11-16 |
+| [0047](0047-safe-backup-overwrite.md) | Safe backup overwrite | done | 2026-11-16 |

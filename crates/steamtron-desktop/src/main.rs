@@ -3534,6 +3534,30 @@ impl std::io::Read for ProgressReader<'_> {
     }
 }
 
+fn replace_backup_directory(package: &Path, final_path: &Path) -> Result<(), String> {
+    let name = final_path.file_name().and_then(|value| value.to_str()).unwrap_or("backup");
+    let previous = final_path.with_file_name(format!(".{name}.previous-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&previous);
+    let had_existing = final_path.exists();
+    if had_existing {
+        std::fs::rename(final_path, &previous).map_err(|error| error.to_string())?;
+    }
+    match std::fs::rename(package, final_path) {
+        Ok(()) => {
+            if had_existing {
+                let _ = std::fs::remove_dir_all(&previous);
+            }
+            Ok(())
+        }
+        Err(error) => {
+            if had_existing {
+                let _ = std::fs::rename(&previous, final_path);
+            }
+            Err(error.to_string())
+        }
+    }
+}
+
 fn backup_safe_folder(title: &str) -> String {
     let mut value: String = title
         .chars()
@@ -3852,10 +3876,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         let manifest_name = format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
         std::fs::write(package.join(manifest_name), serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
-        if final_path.exists() {
-            std::fs::remove_dir_all(&final_path).map_err(|error| error.to_string())?;
-        }
-        std::fs::rename(&package, &final_path).map_err(|error| error.to_string())?;
+        replace_backup_directory(&package, &final_path)?;
         let _ = std::fs::remove_dir(&staging);
         Ok(final_path)
     })
@@ -5868,6 +5889,23 @@ mod backup_manifest_tests {
         };
         let mut buffer = [0u8; 16];
         assert!(std::io::Read::read(&mut reader, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn replacing_a_backup_keeps_the_new_tree_and_removes_the_previous() {
+        let temp = tempfile::tempdir().unwrap();
+        let package = temp.path().join("staging/Game");
+        let final_path = temp.path().join("dest/Game");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::create_dir_all(&final_path).unwrap();
+        std::fs::write(package.join("new"), b"new").unwrap();
+        std::fs::write(final_path.join("old"), b"old").unwrap();
+        replace_backup_directory(&package, &final_path).unwrap();
+        assert!(final_path.join("new").is_file());
+        assert!(!final_path.join("old").exists());
+        assert!(!temp.path().join("dest").read_dir().unwrap().any(|entry| {
+            entry.unwrap().file_name().to_string_lossy().contains(".previous-")
+        }));
     }
 
     #[test]
