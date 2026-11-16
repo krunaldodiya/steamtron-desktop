@@ -3797,6 +3797,39 @@ fn tar_size(path: &Path) -> Result<u64, String> {
     Ok(total)
 }
 
+fn sha256_file_with_progress(
+    path: &Path,
+    app: &tauri::AppHandle,
+    operation: &str,
+    game_id: &str,
+    stage: &str,
+    message: &str,
+    control: &OperationControl,
+) -> Result<String, String> {
+    use sha2::Digest;
+    use std::io::Read;
+    let total = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
+    let mut file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = [0u8; 4 * 1024 * 1024];
+    let mut written = 0u64;
+    let started = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now();
+    loop {
+        operation_check(control)?;
+        let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+        written = written.saturating_add(count as u64);
+        if last_emit.elapsed() >= std::time::Duration::from_millis(200) || written >= total {
+            let percent = if total > 0 { written as f64 / total as f64 * 100.0 } else { 100.0 };
+            emit_operation_stats(app, operation, game_id, stage, message, percent, written, total, started);
+            last_emit = std::time::Instant::now();
+        }
+    }
+    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 fn extract_tar_component(
     archive_path: &Path,
     destination: &Path,
@@ -3815,6 +3848,8 @@ fn extract_tar_component(
     let file = std::fs::File::open(archive_path).map_err(|error| format!("{}: {error}", archive_path.display()))?;
     let mut archive = tar::Archive::new(file);
     let mut last_emit = std::time::Instant::now();
+    let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 0.0 };
+    emit_operation_stats(app, operation, game_id, stage, message, percent, *written, overall_total, started);
     for entry in archive.entries().map_err(|error| error.to_string())? {
         operation_check(control)?;
         let mut entry = entry.map_err(|error| error.to_string())?;
@@ -3886,14 +3921,17 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     if !content_tar.is_file() {
         return Err("Backup does not contain content.tar.".into());
     }
+    let checksum_control = register_operation("restore", "");
     if let Some(expected) = manifest.get("content_archive").and_then(|value| value.get("sha256")).and_then(|value| value.as_str()) {
-        emit_operation_at(&app, "restore", "", "verify", "running", "Verifying backup checksum…", 0.0);
-        let actual = sha256_file(&content_tar)?;
+        emit_operation_stats(&app, "restore", "", "verify", "Verifying backup checksum…", 0.0, 0, std::fs::metadata(&content_tar).map(|metadata| metadata.len()).unwrap_or(0), std::time::Instant::now());
+        let actual = sha256_file_with_progress(&content_tar, &app, "restore", "", "verify", "Verifying backup checksum…", &checksum_control)?;
         if actual != expected {
+            unregister_operation("restore", "");
             return Err("Backup content checksum does not match its manifest.".into());
         }
-        emit_operation_at(&app, "restore", "", "verify", "running", "Backup checksum verified.", 100.0);
+        emit_operation(&app, "restore", "", "verify", "running", "Backup checksum verified.");
     }
+    unregister_operation("restore", "");
 
     let mut library = Library::load().map_err(|error| error.to_string())?;
     let existing = appid

@@ -1385,10 +1385,16 @@ function openOperationManager(options = {}) {
   let total = 0;
   let speed = 0;
   let elapsed = 0;
+  const startedAt = Date.now();
+  const elapsedTimer = rich ? setInterval(() => {
+    if (!terminal && elapsedNode && elapsed === 0) elapsedNode.textContent = formatSeconds((Date.now() - startedAt) / 1000);
+  }, 1000) : null;
+  const stopElapsedTimer = () => { if (elapsedTimer) clearInterval(elapsedTimer); };
   const close = () => {
     if (closed) return;
     if (terminal) {
       closed = true;
+      stopElapsedTimer();
       if (unlisten) unlisten();
       unlisten = null;
       if (document.body.contains(backdrop)) backdrop.remove();
@@ -1446,6 +1452,7 @@ function openOperationManager(options = {}) {
   const complete = (message) => {
     if (closed) return;
     terminal = true;
+    stopElapsedTimer();
     setPercent(100);
     stage.textContent = message || "Complete";
     stage.classList.remove("error");
@@ -1455,6 +1462,7 @@ function openOperationManager(options = {}) {
   const fail = (message) => {
     if (closed) return;
     terminal = true;
+    stopElapsedTimer();
     stage.textContent = String(message);
     stage.classList.add("error");
     actions.classList.add("hidden");
@@ -1478,6 +1486,7 @@ function openOperationManager(options = {}) {
       await invoke("cancel_operation", { operation, gameId: options.gameId || "" });
       cancelled = true;
       terminal = true;
+      stopElapsedTimer();
       stage.textContent = "Cancelled";
       actions.classList.add("hidden");
       setOperationInline(operation, options.gameId || "", "Cancelled", "cancelled", currentPercent);

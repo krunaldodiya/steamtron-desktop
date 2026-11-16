@@ -44,7 +44,8 @@ and fixes state are preserved.
 - R4: Archive content as `common/<folder>/...`, fixes as `fixes/<folder>/...`,
   and manifests as `manifests/<folder>/...`.
 - R5: Restore chooses a backup folder, validates `backup_format: 2`, verifies the
-  content checksum, extracts to staging, then replaces the game root.
+  content checksum with byte/speed/ETA progress, extracts to staging, then
+  replaces the game root.
 - R6: Restore moves fixes/manifests into place, rebuilds launch targets, marks
   the game installed, and saves it.
 - R7: Backup/restore show real byte progress from the six-stat operation

@@ -679,8 +679,9 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .download-stat strong { display:block; color:var(--text); font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .download-meta { margin:0 0 2px; color:var(--muted); font-size:12px; min-height:16px; }
 .operation-modal { width:min(1100px, 94vw); height:auto; min-height:240px; }
-.operation-modal .download-progress-row { margin-bottom:0; }
+.operation-modal .download-progress-row { margin-bottom:16px; }
 .operation-percent { min-width:44px; text-align:right; color:var(--text); font-size:13px; }
+.operation-stats { margin-top:2px; }
 .operation-inline { margin-top:8px; }
 .operation-inline-progress { display:flex; align-items:center; gap:7px; }
 .operation-inline-progress .download-inline-track { flex:1; }
