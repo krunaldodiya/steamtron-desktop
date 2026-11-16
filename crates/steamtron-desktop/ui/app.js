@@ -957,6 +957,7 @@ function renderManagedPreview(game) {
 
 const managedDownloads = new Map();
 const downloadStatusChecked = new Set();
+const updatesCache = new Map();
 
 function downloadTerminal(state) {
   return ["done", "error", "cancelled"].includes(state?.status);
@@ -1614,6 +1615,7 @@ if (window.__TAURI__?.event?.listen) {
       showToast(payload.message || "Download cancelled");
       return;
     }
+    updatesCache.clear();
     notifyTaskResult("download", payload.gameId || "", Boolean(payload.success), payload.message || (payload.success ? "Download complete" : "Download failed"));
     if (payload.gameId) {
       const current = managedDownloads.get(payload.gameId);
@@ -4120,7 +4122,7 @@ function renderUpdatesPanel(host, game) {
   const list = host.querySelector("#updates-list");
   const auto = host.querySelector("#updates-auto");
   const pin = host.querySelector("#updates-pin");
-  let data = null;
+  let data = updatesCache.get(String(game.appid || game.metadata_app_id || "")) || null;
   let selectedVersion = "";
   const appid = String(game.appid || game.metadata_app_id || "");
   const gameName = game.name || game.title;
@@ -4132,6 +4134,7 @@ function renderUpdatesPanel(host, game) {
     list.replaceChildren();
     try {
       data = await invoke("update_versions", { appid });
+      updatesCache.set(appid, data);
       selectedVersion = data.pinned || data.installed || data.latest || "";
       render();
     } catch (error) { summary.textContent = String(error); summary.classList.add("error"); }
@@ -4166,19 +4169,24 @@ function renderUpdatesPanel(host, game) {
       list.appendChild(row);
     }
   };
-  host.querySelector("#updates-refresh").onclick = load;
+  host.querySelector("#updates-refresh").onclick = async () => { updatesCache.delete(appid); await load(); };
   auto.onclick = async () => {
     const stop = busy(auto, "Clearing pin…");
-    try { data = await invoke("clear_update_pin", { appid }); selectedVersion = data.installed || data.latest || ""; markRestartRequired(`${gameName} update pin cleared. Restart Steam to apply.`); stop(); render(); }
+    try { data = await invoke("clear_update_pin", { appid }); updatesCache.set(appid, data); selectedVersion = data.installed || data.latest || ""; markRestartRequired(`${gameName} update pin cleared. Restart Steam to apply.`); stop(); render(); }
     catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
   };
   pin.onclick = async () => {
     if (!selectedVersion) return;
     const stop = busy(pin, "Pinning…");
-    try { data = await invoke("update_pin", { appid, date: selectedVersion }); markRestartRequired(`${gameName} update pin changed. Restart Steam to apply.`); stop(); render(); }
+    try { data = await invoke("update_pin", { appid, date: selectedVersion }); updatesCache.set(appid, data); markRestartRequired(`${gameName} update pin changed. Restart Steam to apply.`); stop(); render(); }
     catch (error) { stop(); summary.textContent = String(error); summary.classList.add("error"); }
   };
-  load();
+  if (data) {
+    selectedVersion = data.pinned || data.installed || data.latest || "";
+    render();
+  } else {
+    void load();
+  }
 }
 
 async function loadBackend() {
