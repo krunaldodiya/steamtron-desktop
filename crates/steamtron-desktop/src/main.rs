@@ -3974,45 +3974,86 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         if !staged_content.is_dir() {
             return Err("Backup did not restore the expected game content.".into());
         }
-        if let Some(parent) = target_root_worker.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        if target_root_worker.exists() {
-            std::fs::remove_dir_all(&target_root_worker).map_err(|error| error.to_string())?;
-        }
-        std::fs::rename(&staged_content, &target_root_worker).map_err(|error| error.to_string())?;
-
-        if !fixes_directory.is_empty() {
+        // Extract every component before touching the installed game. A cancel
+        // or failure during extraction only discards the staging folder.
+        let staged_fixes = if !fixes_directory.is_empty() {
             let _ = extract_tar_component(&restore_folder.join("fixes.tar"), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
-            let staged_fixes = staging.join("fixes").join(&content_folder_worker);
-            if staged_fixes.is_dir() {
-                if let Some(destination) = managed_fixes_dir(&target_game_worker) {
-                    if destination.exists() {
-                        let _ = std::fs::remove_dir_all(&destination);
-                    }
-                    if let Some(parent) = destination.parent() {
-                        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-                    }
-                    std::fs::rename(&staged_fixes, &destination).map_err(|error| error.to_string())?;
-                }
+            let path = staging.join("fixes").join(&content_folder_worker);
+            path.is_dir().then_some(path)
+        } else {
+            None
+        };
+        let staged_manifests = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
+            let _ = extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let path = staging.join("manifests").join(&content_folder_worker);
+            path.is_dir().then_some(path)
+        } else {
+            None
+        };
+        operation_check(&control)?;
+        let _ = manifest_components;
+
+        // Commit with rollback. The previous content/fixes are moved aside in
+        // staging first; any commit error restores them and removes the new files.
+        let old_target = staging.join(".old-target");
+        if target_root_worker.exists() {
+            std::fs::rename(&target_root_worker, &old_target).map_err(|error| error.to_string())?;
+        }
+        let fixes_destination = managed_fixes_dir(&target_game_worker);
+        let old_fixes = staging.join(".old-fixes");
+        if let Some(destination) = &fixes_destination {
+            if destination.exists() {
+                std::fs::rename(destination, &old_fixes).map_err(|error| error.to_string())?;
             }
         }
-
-        if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
-            let _ = extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
-            let staged_manifests = staging.join("manifests").join(&content_folder_worker);
-            if staged_manifests.is_dir() {
-                for entry in std::fs::read_dir(&staged_manifests).map_err(|error| error.to_string())?.flatten() {
+        let commit = (|| -> Result<(), String> {
+            if let Some(parent) = target_root_worker.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            std::fs::rename(&staged_content, &target_root_worker).map_err(|error| error.to_string())?;
+            if let (Some(staged), Some(destination)) = (&staged_fixes, &fixes_destination) {
+                if let Some(parent) = destination.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                std::fs::rename(staged, destination).map_err(|error| error.to_string())?;
+            }
+            if let Some(staged_manifests) = &staged_manifests {
+                for entry in std::fs::read_dir(staged_manifests).map_err(|error| error.to_string())?.flatten() {
                     if entry.path().is_file() {
                         let name = entry.file_name();
-                        let _ = std::fs::copy(entry.path(), target_root_worker.join(&name));
+                        std::fs::copy(entry.path(), target_root_worker.join(&name)).map_err(|error| error.to_string())?;
                         let _ = std::fs::copy(entry.path(), steamtron_core::paths::layout().manifests().join(&name));
                     }
                 }
             }
+            Ok(())
+        })();
+        if let Err(error) = commit {
+            let _ = std::fs::remove_dir_all(&target_root_worker);
+            if old_target.exists() {
+                let _ = std::fs::rename(&old_target, &target_root_worker);
+            }
+            if let Some(destination) = &fixes_destination {
+                let _ = std::fs::remove_dir_all(destination);
+                if old_fixes.exists() {
+                    let _ = std::fs::rename(&old_fixes, destination);
+                }
+            }
+            return Err(error);
         }
-        let _ = manifest_components;
-        operation_check(&control)?;
+        if let Err(error) = operation_check(&control) {
+            let _ = std::fs::remove_dir_all(&target_root_worker);
+            if old_target.exists() {
+                let _ = std::fs::rename(&old_target, &target_root_worker);
+            }
+            if let Some(destination) = &fixes_destination {
+                let _ = std::fs::remove_dir_all(destination);
+                if old_fixes.exists() {
+                    let _ = std::fs::rename(&old_fixes, destination);
+                }
+            }
+            return Err(error);
+        }
         Ok(())
     })
     .await;

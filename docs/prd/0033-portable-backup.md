@@ -49,8 +49,10 @@ and fixes state are preserved.
   game root, and has no separate checksum phase.
 - R6: Restore moves fixes/manifests into place, rebuilds launch targets, marks
   the game installed, and saves it.
-- R7: Backup/restore show real byte progress from the six-stat operation
-  manager and support Cancel.
+- R7: Cancel or failure during extraction discards the staging folder and leaves
+  the installed game untouched. Commit moves the old content aside, installs the
+  new content, and rolls back on commit/cancel failure; staging is removed after
+  the library save.
 - R8: Existing `.tar.gz` backups are no longer the primary format.
 
 ## Acceptance criteria
@@ -84,9 +86,11 @@ and fixes state are preserved.
 
 ## Decisions and risks
 
-- Restoration extracts into `.restore-<pid>` staging and only replaces the
-  target root after extraction succeeds, so cancelling/failing does not destroy
-  existing content.
+- Restoration extracts content, fixes, and manifests into `.restore-<pid>`
+  staging first. The target is replaced only after checksum verification and a
+  final cancel check. Commit keeps the old target/fixes in staging until the
+  library save succeeds, so cancel/failure rolls back instead of leaving half
+  files.
 - The backup folder name is sanitized from the game title. An existing folder is
   never overwritten without an explicit in-app confirmation; the old backup is
   replaced only after the new package is fully staged.
