@@ -7,7 +7,7 @@ use std::time::UNIX_EPOCH;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use steamtron_core::library::{Library, managed_lua_path};
 use steamtron_core::steam;
@@ -17,7 +17,7 @@ use crate::LibraryError;
 const MAGIC_METADATA: u32 = 0x1F4812BE;
 const MAGIC_TERMINAL: u32 = 0x32C415AB;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateVersion {
     pub date: String,
     pub gids: BTreeMap<String, String>,
@@ -28,7 +28,7 @@ pub struct UpdateVersion {
     pub buildid: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Updates {
     pub appid: String,
     pub latest: String,
@@ -337,6 +337,36 @@ fn sources(depots: &BTreeMap<String, String>) -> Vec<PathBuf> {
 }
 
 pub fn available_updates(appid: &str) -> Result<Updates, LibraryError> {
+    available_updates_cached(appid, false)
+}
+
+pub fn available_updates_refresh(appid: &str) -> Result<Updates, LibraryError> {
+    available_updates_cached(appid, true)
+}
+
+fn available_updates_cached(appid: &str, refresh: bool) -> Result<Updates, LibraryError> {
+    let app_id_num = appid.parse::<u32>().ok();
+    if !refresh {
+        if let Some(game) = Library::load().ok().and_then(|library| library.game_by_app_id(app_id_num?).cloned()) {
+            let cache = crate::cache::load_for_game(&game);
+            if let Some(value) = cache.updates.as_ref() {
+                if let Some(data) = value.get("data").and_then(|value| serde_json::from_value::<Updates>(value.clone()).ok()) {
+                    return Ok(data);
+                }
+            }
+        }
+    }
+    let result = compute_updates(appid)?;
+    if let Some(game) = Library::load().ok().and_then(|library| library.game_by_app_id(app_id_num?).cloned()) {
+        let mut cache = crate::cache::load_for_game(&game);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
+        cache.updates = Some(serde_json::json!({"fetched_at": now, "data": result}));
+        let _ = crate::cache::save_for_game(&game, &cache);
+    }
+    Ok(result)
+}
+
+fn compute_updates(appid: &str) -> Result<Updates, LibraryError> {
     if !appid.bytes().all(|byte| byte.is_ascii_digit()) || appid.is_empty() {
         return Err(LibraryError::InvalidAppId);
     }
@@ -451,7 +481,7 @@ pub fn clear_pin(appid: &str) -> Result<Updates, LibraryError> {
         }
     }
     write_manifest_pin(appid, None)?;
-    available_updates(appid)
+    available_updates_refresh(appid)
 }
 
 pub fn pin_update(appid: &str, date: &str) -> Result<Updates, LibraryError> {

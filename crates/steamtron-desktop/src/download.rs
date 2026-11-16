@@ -712,6 +712,9 @@ fn finalize(app: &AppHandle, game_id: &str, root: &Path, download_dir: Option<Pa
                 let _ = library.save();
             }
         }
+        if let Ok(appid) = game_id.parse::<u32>() {
+            steamtron_library::cache::clear_updates_for_appid(appid);
+        }
         state.message = "Download complete".into();
     } else {
         if state.status == "cancelled" {

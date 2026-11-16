@@ -4126,14 +4126,14 @@ function renderUpdatesPanel(host, game) {
   let selectedVersion = "";
   const appid = String(game.appid || game.metadata_app_id || "");
   const gameName = game.name || game.title;
-  const load = async () => {
+  const load = async (force = false) => {
     const button = host.querySelector("#updates-refresh");
     const stop = busy(button, "Checking…");
     summary.classList.remove("error");
     summary.textContent = "Loading archived builds…";
     list.replaceChildren();
     try {
-      data = await invoke("update_versions", { appid });
+      data = await invoke("update_versions", { appid, refresh: force });
       updatesCache.set(appid, data);
       selectedVersion = data.pinned || data.installed || data.latest || "";
       render();
@@ -4169,7 +4169,7 @@ function renderUpdatesPanel(host, game) {
       list.appendChild(row);
     }
   };
-  host.querySelector("#updates-refresh").onclick = async () => { updatesCache.delete(appid); await load(); };
+  host.querySelector("#updates-refresh").onclick = async () => { updatesCache.delete(appid); await load(true); };
   auto.onclick = async () => {
     const stop = busy(auto, "Clearing pin…");
     try { data = await invoke("clear_update_pin", { appid }); updatesCache.set(appid, data); selectedVersion = data.installed || data.latest || ""; markRestartRequired(`${gameName} update pin cleared. Restart Steam to apply.`); stop(); render(); }

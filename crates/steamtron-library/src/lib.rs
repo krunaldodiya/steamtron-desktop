@@ -17,6 +17,7 @@ use steamtron_register::{RegistrationBackend, RegistrationRequest};
 
 pub mod updates;
 pub mod managed;
+pub mod cache;
 pub mod backup;
 
 pub(crate) const MAX_ARCHIVE: u64 = 128 * 1024 * 1024;

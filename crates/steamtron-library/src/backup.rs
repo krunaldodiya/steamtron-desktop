@@ -249,10 +249,16 @@ pub fn export_game_backups(
             zip.write_all(&appmanifest).map_err(|error| LibraryError::io(&temporary, error))?;
             zip.start_file(format!("{title}/manifest-bundle.tar"), options).map_err(LibraryError::Zip)?;
             zip.write_all(&tar_bytes).map_err(|error| LibraryError::io(&temporary, error))?;
-            let file = zip.finish().map_err(LibraryError::Zip)?;
-            file.sync_data().map_err(|error| LibraryError::io(&temporary, error))?;
             files += 2;
             bytes = bytes.saturating_add(appmanifest.len() as u64 + tar_bytes.len() as u64);
+            if let Ok(sidecar) = fs::read(game.installation.manifest.with_extension("cache.json")) {
+                zip.start_file(format!("{title}/appmanifest_{appid}.cache.json"), options).map_err(LibraryError::Zip)?;
+                zip.write_all(&sidecar).map_err(|error| LibraryError::io(&temporary, error))?;
+                files += 1;
+                bytes = bytes.saturating_add(sidecar.len() as u64);
+            }
+            let file = zip.finish().map_err(LibraryError::Zip)?;
+            file.sync_data().map_err(|error| LibraryError::io(&temporary, error))?;
             fs::rename(&temporary, &zip_path).map_err(|error| LibraryError::io(&zip_path, error))?;
             summaries.push(GameExportSummary {
                 title: game.title.clone(),
@@ -286,6 +292,7 @@ pub struct ImportSummary {
 #[derive(Default)]
 struct ImportedGame {
     appmanifest: Vec<u8>,
+    sidecar: Option<Vec<u8>>,
     lua: Option<String>,
     manifests: BTreeMap<String, Vec<u8>>,
     source: String,
@@ -316,7 +323,9 @@ fn read_folder(path: &Path) -> Result<Option<ImportedGame>, LibraryError> {
         let entry_path = entry.path();
         if !entry_path.is_file() { continue; }
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with("appmanifest_") && name.ends_with(".json") {
+        if name.starts_with("appmanifest_") && name.ends_with(".cache.json") {
+            game.sidecar = Some(fs::read(&entry_path).map_err(|error| LibraryError::io(&entry_path, error))?);
+        } else if name.starts_with("appmanifest_") && name.ends_with(".json") {
             appmanifest = Some(fs::read(&entry_path).map_err(|error| LibraryError::io(&entry_path, error))?);
         } else if name == "manifest-bundle.tar" {
             let data = fs::read(&entry_path).map_err(|error| LibraryError::io(&entry_path, error))?;
@@ -359,7 +368,9 @@ fn read_zip(path: &Path) -> Result<Option<ImportedGame>, LibraryError> {
         if name == "steamtron-backup.json" { legacy = true; continue; }
         let mut data = Vec::new();
         entry.read_to_end(&mut data).map_err(|error| LibraryError::Archive(error.to_string()))?;
-        if base.starts_with("appmanifest_") && base.ends_with(".json") {
+        if base.starts_with("appmanifest_") && base.ends_with(".cache.json") {
+            game.sidecar = Some(data);
+        } else if base.starts_with("appmanifest_") && base.ends_with(".json") {
             game.appmanifest = data;
         } else if base == "manifest-bundle.tar" {
             parse_manifest_tar(&data, &mut game)?;
@@ -494,6 +505,19 @@ fn import_one(library: &mut Library, drive: &Path, imported: &ImportedGame) -> R
     if let Some(manifest_path) = Some(game.installation.manifest.clone()) {
         if let Some(parent) = manifest_path.parent() { fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?; }
         fs::write(&manifest_path, &imported.appmanifest).map_err(|error| LibraryError::io(&manifest_path, error))?;
+    }
+    if let Some(sidecar) = &imported.sidecar {
+        let path = game.installation.manifest.with_extension("cache.json");
+        let newer = fs::read(&path).ok()
+            .and_then(|data| serde_json::from_slice::<serde_json::Value>(&data).ok())
+            .and_then(|value| value.get("dlc").and_then(|dlc| dlc.get("fetched_at")).and_then(|value| value.as_u64()))
+            .unwrap_or(0)
+            <= serde_json::from_slice::<serde_json::Value>(sidecar).ok()
+                .and_then(|value| value.get("dlc").and_then(|dlc| dlc.get("fetched_at")).and_then(|value| value.as_u64()))
+                .unwrap_or(0);
+        if newer {
+            fs::write(&path, sidecar).map_err(|error| LibraryError::io(&path, error))?;
+        }
     }
     if let Some(lua) = &imported.lua {
         let app = appid.to_string();

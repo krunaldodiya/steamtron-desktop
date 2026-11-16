@@ -384,9 +384,13 @@ fn remove_game(appid: String) -> Result<RemovedGame, String> {
 }
 
 #[tauri::command]
-fn update_versions(appid: String) -> Result<Updates, String> {
+fn update_versions(appid: String, refresh: Option<bool>) -> Result<Updates, String> {
     require_auth()?;
-    available_updates(&appid).map_err(|error| error.to_string())
+    if refresh.unwrap_or(false) {
+        steamtron_library::updates::available_updates_refresh(&appid).map_err(|error| error.to_string())
+    } else {
+        available_updates(&appid).map_err(|error| error.to_string())
+    }
 }
 
 #[tauri::command]
@@ -3322,16 +3326,20 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
         .or_else(|| app_id.to_string().parse::<u32>().ok().and_then(|id| steamtron_library::persistent_bundle(&id.to_string())).map(|bundle| bundle.lua))
         .unwrap_or_default();
     let dlc_state = dlc::load_state(&game.installation.root);
+    let mut sidecar = steamtron_library::cache::load_for_game(game);
     let cache_path = steamtron_core::paths::layout().cache_dir().join("dlc-catalog.json");
     let mut cache: serde_json::Value = std::fs::read(&cache_path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    let cache_entry = cache.get(app_id.to_string()).cloned().filter(|entry| {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
+    let fresh = |entry: &serde_json::Value| {
         let fetched = entry.get("fetched_at").and_then(|value| value.as_u64()).unwrap_or(0);
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
         now.saturating_sub(fetched) < 30 * 24 * 60 * 60
-    });
+    };
+    let cache_entry = cache.get(app_id.to_string()).cloned().filter(fresh)
+        .or_else(|| sidecar.dlc.clone().filter(fresh));
+    let cached_at = cache_entry.as_ref().and_then(|entry| entry.get("fetched_at")).and_then(|value| value.as_u64()).unwrap_or(now);
     let entries: Vec<(u32, String, String)> = if let Some(entry) = cache_entry.as_ref() {
         entry.get("entries").and_then(|value| value.as_array()).map(|items| {
             items.iter().filter_map(|item| {
@@ -3391,6 +3399,20 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
         let _ = std::fs::write(&cache_path, serde_json::to_vec_pretty(&cache).unwrap_or_default());
         fetched_entries
     };
+    let previous_sizes: std::collections::BTreeMap<u32, u64> = sidecar.dlc.as_ref()
+        .and_then(|value| value.get("entries"))
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter_map(|item| Some((item.get("app_id")?.as_u64()? as u32, item.get("size")?.as_u64()?))).collect())
+        .unwrap_or_default();
+    sidecar.dlc = Some(serde_json::json!({
+        "fetched_at": cached_at,
+        "entries": entries.iter().map(|(id, name, released)| {
+            let mut entry = serde_json::json!({"app_id": id, "name": name, "released": released});
+            if let Some(size) = previous_sizes.get(id) { entry["size"] = serde_json::json!(size); }
+            entry
+        }).collect::<Vec<_>>(),
+    }));
+    let _ = steamtron_library::cache::save_for_game(game, &sidecar);
     let mut result = Vec::new();
     for (id, name, released) in entries {
         let marked = lua.contains(&format!("AppID: {id}"))
@@ -4074,6 +4096,12 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         let manifest_name = format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
         std::fs::write(package.join(manifest_name), serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
+        let sidecar = game.installation.manifest.with_extension("cache.json");
+        if sidecar.is_file() {
+            if let Some(name) = sidecar.file_name() {
+                let _ = std::fs::copy(&sidecar, package.join(name));
+            }
+        }
         emit_operation_at(&emit_app, "backup", &game_id_emit, "finalize", "running", "Finalizing backup…", 100.0);
         replace_backup_directory(&package, &final_path)?;
         let _ = std::fs::remove_dir(&staging);
@@ -4463,6 +4491,10 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     std::fs::write(&appmanifest_temporary, serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?)
         .map_err(|error| error.to_string())?;
     std::fs::rename(&appmanifest_temporary, &appmanifest_path).map_err(|error| error.to_string())?;
+    let sidecar_source = manifest_path.with_extension("cache.json");
+    if sidecar_source.is_file() {
+        let _ = std::fs::copy(&sidecar_source, appmanifest_path.with_extension("cache.json"));
+    }
     library.upsert_game(game.clone()).map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
     let _ = std::fs::remove_dir_all(&staging_cleanup);

@@ -385,18 +385,31 @@ pub fn dlc_sizes(game_id: &str, app_ids: &[u32]) -> BTreeMap<u32, u64> {
     let mut cache = load_size_cache();
     let mut result = BTreeMap::new();
     let mut changed = false;
-    let missing = app_ids.iter().any(|id| !cache.contains_key(&id.to_string()));
-    let base_appid = Library::load().ok()
-        .and_then(|library| library.game(game_id).cloned())
-        .and_then(|game| game.metadata_app_id);
-    let pics = if missing { base_appid.map(steamcmd_dlc).map(|pics| pics.sizes).unwrap_or_default() } else { BTreeMap::new() };
-    let smd = if missing { download::resolve_smd().ok() } else { None };
+    let mut sidecar = None;
+    let game = Library::load().ok().and_then(|library| library.game(game_id).cloned());
+    if let Some(game) = &game {
+        sidecar = Some(steamtron_library::cache::load_for_game(game));
+    }
+    let sidecar_sizes: BTreeMap<u32, u64> = sidecar.as_ref()
+        .and_then(|cache| cache.dlc.as_ref())
+        .and_then(|value| value.get("entries"))
+        .and_then(|value| value.as_array())
+        .map(|items| items.iter().filter_map(|item| Some((item.get("app_id")?.as_u64()? as u32, item.get("size")?.as_u64()?))).collect())
+        .unwrap_or_default();
     for app_id in app_ids {
         let key = app_id.to_string();
-        if let Some(size) = cache.get(&key).copied() {
+        if let Some(size) = cache.get(&key).copied().or_else(|| sidecar_sizes.get(app_id).copied()) {
             result.insert(*app_id, size);
             continue;
         }
+    }
+    let missing = app_ids.iter().any(|id| !result.contains_key(id));
+    let base_appid = game.as_ref().and_then(|game| game.metadata_app_id);
+    let pics = if missing { base_appid.map(steamcmd_dlc).map(|pics| pics.sizes).unwrap_or_default() } else { BTreeMap::new() };
+    let smd = if missing { download::resolve_smd().ok() } else { None };
+    for app_id in app_ids {
+        if result.contains_key(app_id) { continue; }
+        let key = app_id.to_string();
         if let Some(size) = pics.get(app_id).copied() {
             cache.insert(key, size);
             result.insert(*app_id, size);
@@ -422,6 +435,21 @@ pub fn dlc_sizes(game_id: &str, app_ids: &[u32]) -> BTreeMap<u32, u64> {
         changed = true;
     }
     if changed { save_size_cache(&cache); }
+    if let (Some(game), Some(mut sidecar)) = (game.as_ref(), sidecar.take()) {
+        let dlc = sidecar.dlc.get_or_insert_with(|| serde_json::json!({"entries": []}));
+        if dlc.get("entries").and_then(|value| value.as_array()).is_none() {
+            dlc["entries"] = serde_json::json!([]);
+        }
+        for (app_id, size) in &result {
+            let entries = dlc["entries"].as_array_mut().expect("entries array");
+            if let Some(entry) = entries.iter_mut().find(|entry| entry.get("app_id").and_then(|value| value.as_u64()) == Some(*app_id as u64)) {
+                entry["size"] = serde_json::json!(size);
+            } else {
+                entries.push(serde_json::json!({"app_id": app_id, "name": format!("DLC {app_id}"), "released": "", "size": size}));
+            }
+        }
+        let _ = steamtron_library::cache::save_for_game(game, &sidecar);
+    }
     result
 }
 
@@ -563,6 +591,9 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
     }
     let _ = fs::remove_dir_all(&staging);
     download::clear_active_pid(&game_id);
+    if let Some(appid) = game.metadata_app_id {
+        steamtron_library::cache::clear_updates_for_appid(appid);
+    }
     dl_state.status = "done".into();
     dl_state.percent = 100.0;
     dl_state.completed = total_bytes;
