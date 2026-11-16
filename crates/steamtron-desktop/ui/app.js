@@ -1243,6 +1243,7 @@ const OPERATION_LABELS = {
   backup: ["Backing up game files…", "Back up game files…"],
   verify: ["Verifying files integrity…", "Verify files integrity"],
   restore: ["Restoring game backup…", "Restore…"],
+  "library-export": ["Exporting game backups…", "Export games…"],
 };
 const operationInlineTimers = new WeakMap();
 const inlineOperations = new Set();
@@ -4358,7 +4359,7 @@ async function renderGeneralSettings(host) {
       ${settingsRow(email, profile?.base_url || "SteamTron account", '<button id="setting-signout">Sign out</button>')}
     </div></section>
     <section class="settings-section"><h2>Maintenance</h2><p>Library backup, restore and desktop integration.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Library backup</strong><span>Library index, drives, games, Lua manifests and appmanifests. Game content and fixes are covered by per-game backups.</span></div><div class="row-control settings-inline"><button id="setting-backup">Backup…</button><button id="setting-restore">Restore…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one ZIP per game with metadata.json, lua/&lt;appid&gt;.lua and all depot manifests. Missing Lua/manifests are generated first.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export games…</button><button id="setting-restore">Restore legacy backup…</button></div></div>
       ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
       ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
     </div></section>
@@ -4396,14 +4397,27 @@ async function renderGeneralSettings(host) {
       showAuthGate("Signed out. Sign in to continue.");
     } catch (error) { showToast(String(error), true); }
   };
-  host.querySelector("#setting-backup").onclick = async (event) => {
-    const stop = busy(event.target, "Backing up…");
+  host.querySelector("#setting-export-games").onclick = async () => {
+    const operation = ensureOperationManager("library-export", "", {
+      operation: "library-export",
+      title: "Exporting game backups",
+    });
+    if (!operation) return;
+    beginOperation("library-export", "");
+    await operation.ready;
     try {
-      const result = await invoke("export_backup");
-      stop();
-      if (!result) { showToast("Backup cancelled."); return; }
-      showToast(`Backup written: ${result.path} (${result.games} games, ${result.files} files)`);
-    } catch (error) { stop(); showToast(String(error), true); }
+      const result = await invoke("export_game_backups", { destination: null });
+      if (!result) { cancelOperation("library-export", ""); operation.discard(); showToast("Export cancelled."); return; }
+      finishOperation("library-export", "", `Exported ${result.games} games`);
+      operation.complete(`Exported ${result.games} game backups to ${result.folder}`);
+      const generated = result.generated_lua ? `, generated ${result.generated_lua} Lua` : "";
+      const missing = result.missing_manifests ? `, ${result.missing_manifests} manifests still missing` : "";
+      showToast(`Exported ${result.games} games (${result.files} files${generated}${missing})`);
+    } catch (error) {
+      if (operation.isCancelled()) return;
+      failOperation("library-export", "", String(error));
+      operation.fail(String(error));
+    }
   };
   host.querySelector("#setting-restore").onclick = async (event) => {
     if (!(await confirmDialog({ title: "Restore backup", message: "Restore this backup? It replaces the current library index, drives and settings and may overwrite Lua and appmanifest files. Game content and fixes are not included. Steam is not required.", confirmLabel: "Restore" }))) return;

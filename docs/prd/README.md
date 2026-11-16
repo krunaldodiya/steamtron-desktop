@@ -58,3 +58,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0031](0031-store-retry.md) | Retry Store requests with a fresh client | done | 2026-11-15 |
 | [0032](0032-direct-verify.md) | Verify with cached manifests through DepotDownloaderMod | active | 2026-11-15 |
 | [0033](0033-portable-backup.md) | Portable backup folders (format 2) | active | 2026-11-15 |
+| [0034](0034-per-game-library-export.md) | Per-game library metadata export | done | 2026-11-16 |

@@ -703,6 +703,42 @@ async fn export_backup() -> Result<Option<backup::BackupSummary>, String> {
 }
 
 #[tauri::command]
+async fn export_game_backups(app: tauri::AppHandle, destination: Option<String>) -> Result<Option<serde_json::Value>, String> {
+    require_auth()?;
+    let folder = if let Some(destination) = destination {
+        std::path::PathBuf::from(destination)
+    } else {
+        let Some(folder) = rfd::FileDialog::new()
+            .set_title("Choose a folder for per-game backups")
+            .pick_folder()
+        else {
+            return Ok(None);
+        };
+        folder
+    };
+    let control = register_operation("library-export", "");
+    let emit_app = app.clone();
+    let emit_control = control.clone();
+    let emit_folder = folder.clone();
+    let summary = tauri::async_runtime::spawn_blocking(move || {
+        backup::export_game_backups(&emit_folder, &mut |done, total, message| {
+            operation_check(&emit_control)?;
+            let percent = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+            emit_operation_at(&emit_app, "library-export", "", "export", "running", message, percent);
+            Ok(())
+        })
+        .map_err(|error| error.to_string())
+    })
+    .await;
+    unregister_operation("library-export", "");
+    let summary = summary.map_err(|error| format!("export task failed: {error}"))??;
+    emit_operation_at(&app, "library-export", "", "done", "done", "Export complete", 100.0);
+    serde_json::to_value(summary)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn restore_backup() -> Result<Option<backup::RestoreSummary>, String> {
     require_auth()?;
     let Some(path) = rfd::FileDialog::new()
@@ -5566,6 +5602,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_status,
             export_backup,
+            export_game_backups,
             restore_backup,
             game_artwork,
             search_games,
