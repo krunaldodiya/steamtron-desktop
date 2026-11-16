@@ -341,6 +341,11 @@ pub(crate) fn read_persistent_bundle(appid: &str) -> Option<Bundle> {
     read_bundle_file(&persistent_bundle_path(appid))
 }
 
+/// Read the globally persisted Lua/manifest bundle for a game.
+pub fn persistent_bundle(appid: &str) -> Option<Bundle> {
+    read_persistent_bundle(appid)
+}
+
 pub fn download_bundle(appid: &str) -> Result<Bundle, LibraryError> {
     if normalize_appid(appid).as_deref() != Some(appid) {
         return Err(LibraryError::InvalidAppId);

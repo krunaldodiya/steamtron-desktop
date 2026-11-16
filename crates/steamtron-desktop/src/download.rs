@@ -199,9 +199,7 @@ pub(crate) fn configure_smd(data_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn smd_lua(app_id: u32, lua_path: &Path, cache: &Path) -> Result<PathBuf, String> {
-    let content = std::fs::read_to_string(lua_path)
-        .map_err(|error| format!("{}: {error}", lua_path.display()))?;
+pub(crate) fn smd_lua_text(content: &str, app_id: u32) -> String {
     let mut output = String::with_capacity(content.len());
     let app = app_id.to_string();
     for line in content.lines() {
@@ -215,9 +213,15 @@ pub(crate) fn smd_lua(app_id: u32, lua_path: &Path, cache: &Path) -> Result<Path
         output.push_str(line);
         output.push('\n');
     }
+    output
+}
+
+pub(crate) fn smd_lua(app_id: u32, lua_path: &Path, cache: &Path) -> Result<PathBuf, String> {
+    let content = std::fs::read_to_string(lua_path)
+        .map_err(|error| format!("{}: {error}", lua_path.display()))?;
     std::fs::create_dir_all(cache).map_err(|error| error.to_string())?;
     let target = cache.join(format!("{app_id}.smd.lua"));
-    std::fs::write(&target, output).map_err(|error| error.to_string())?;
+    std::fs::write(&target, smd_lua_text(&content, app_id)).map_err(|error| error.to_string())?;
     Ok(target)
 }
 

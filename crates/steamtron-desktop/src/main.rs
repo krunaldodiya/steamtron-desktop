@@ -3581,6 +3581,38 @@ fn collect_component(root: &Path) -> Result<(Vec<PathBuf>, Vec<(PathBuf, u64)>, 
     Ok((directories, files, total))
 }
 
+fn backup_manifest_entries(
+    app_id: Option<u32>,
+    game_id: &str,
+    lua: Option<&Path>,
+    persistent: Option<&steamtron_library::Bundle>,
+    root: &Path,
+    manifest_source: &Path,
+) -> Vec<(String, Vec<u8>)> {
+    let lua_text = lua
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .or_else(|| persistent.map(|bundle| bundle.lua.clone()));
+    let Some(lua_text) = lua_text else { return Vec::new() };
+    let app = app_id.map(|id| id.to_string()).unwrap_or_else(|| game_id.to_owned());
+    let mut entries = std::collections::BTreeMap::new();
+    entries.insert(format!("{app}.lua"), lua_text.as_bytes().to_vec());
+    if let Some(id) = app_id {
+        entries.insert(format!("{id}.smd.lua"), download::smd_lua_text(&lua_text, id).into_bytes());
+    }
+    let (depots, _) = parse_lua_metadata(&lua_text);
+    for (depot, manifest) in depots {
+        let name = format!("{depot}_{manifest}.manifest");
+        let data = [root.join(&name), manifest_source.join(&name)]
+            .into_iter()
+            .find_map(|path| std::fs::read(path).ok())
+            .or_else(|| persistent.and_then(|bundle| bundle.manifests.get(&name).cloned()));
+        if let Some(data) = data {
+            entries.insert(name, data);
+        }
+    }
+    entries.into_iter().collect()
+}
+
 #[tauri::command]
 async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination: Option<String>, replace: bool) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::Library;
@@ -3630,6 +3662,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
     let fixes = managed_fixes_dir(&game);
     let lua = steamtron_core::library::managed_lua_path(&game);
     let app_id = game.metadata_app_id;
+    let persistent = app_id.and_then(|id| steamtron_library::persistent_bundle(&id.to_string()));
     let title = game.title.clone();
     let game_id_emit = game_id.clone();
     let emit_app = app.clone();
@@ -3647,19 +3680,23 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         let manifest_source = app_id
             .map(|id| steamtron_core::paths::layout().manifests_for(&id.to_string()))
             .unwrap_or_else(|| steamtron_core::paths::layout().manifests());
+        let entries = backup_manifest_entries(
+            app_id,
+            &game.id,
+            lua.as_deref(),
+            persistent.as_ref(),
+            &root,
+            &manifest_source,
+        );
+        let cache = package.join(".manifest-cache");
         let mut manifest_files = Vec::new();
-        if let Some(lua) = lua.as_ref().and_then(|path| std::fs::read_to_string(path).ok()) {
-            let (depots, _) = parse_lua_metadata(&lua);
-            for (depot, manifest) in depots {
-                let name = format!("{depot}_{manifest}.manifest");
-                let source = [root.join(&name), manifest_source.join(&name)]
-                    .into_iter()
-                    .find(|path| path.is_file());
-                if let Some(source) = source {
-                    let metadata = std::fs::metadata(&source).map_err(|error| error.to_string())?;
-                    manifest_files.push((source, metadata.len()));
-                }
-            }
+        if !entries.is_empty() {
+            std::fs::create_dir_all(&cache).map_err(|error| error.to_string())?;
+        }
+        for (name, data) in entries {
+            let path = cache.join(name);
+            std::fs::write(&path, &data).map_err(|error| error.to_string())?;
+            manifest_files.push((path, data.len() as u64));
         }
         let manifests_total: u64 = manifest_files.iter().map(|(_, size)| *size).sum();
         let overall_total = content_total + fixes_total + manifests_total;
@@ -3779,6 +3816,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
             "proton": game.launch.proton,
             "fixes_enabled": game.fixes_enabled,
         });
+        let _ = std::fs::remove_dir_all(package.join(".manifest-cache"));
         let manifest_name = format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
         std::fs::write(package.join(manifest_name), serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
@@ -5762,6 +5800,32 @@ mod artwork_title_tests {
         assert!(!store_title_matches("Red Dead Redemption", "Red Dead Redemption 2"));
         assert!(!store_title_matches("Uncharted 4: A Thief's End", "Uncharted: Legacy of Thieves Collection"));
         assert!(!store_title_matches("Batman: Arkham Asylum", "Batman: Arkham City"));
+    }
+}
+
+#[cfg(test)]
+mod backup_manifest_tests {
+    use super::*;
+
+    #[test]
+    fn backup_includes_lua_smd_lua_and_bundle_manifests() {
+        let mut manifests = std::collections::BTreeMap::new();
+        manifests.insert("42_1.manifest".to_owned(), vec![1, 2, 3]);
+        let bundle = steamtron_library::Bundle {
+            lua: "addappid(42,0,\"key\")\nsetManifestid(42,\"1\")\n".to_owned(),
+            manifests,
+        };
+        let entries = backup_manifest_entries(
+            Some(42),
+            "42",
+            None,
+            Some(&bundle),
+            Path::new("/nonexistent-game-root"),
+            Path::new("/nonexistent-manifest-store"),
+        );
+        let names: Vec<&str> = entries.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["42.lua", "42.smd.lua", "42_1.manifest"]);
+        assert_eq!(entries.iter().find(|(name, _)| name == "42_1.manifest").unwrap().1, vec![1, 2, 3]);
     }
 }
 
