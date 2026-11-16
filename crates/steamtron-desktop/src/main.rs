@@ -3250,9 +3250,9 @@ fn store_cached_catalog(
 }
 
 #[tauri::command]
-async fn managed_dlc_sizes(app_ids: Vec<u32>) -> Result<serde_json::Value, String> {
+async fn managed_dlc_sizes(game_id: String, app_ids: Vec<u32>) -> Result<serde_json::Value, String> {
     require_auth()?;
-    let sizes = tauri::async_runtime::spawn_blocking(move || dlc::dlc_sizes(&app_ids))
+    let sizes = tauri::async_runtime::spawn_blocking(move || dlc::dlc_sizes(&game_id, &app_ids))
         .await
         .map_err(|error| format!("DLC size task failed: {error}"))?;
     serde_json::to_value(sizes).map_err(|error| error.to_string())

@@ -11,16 +11,22 @@ names and release dates, but not install sizes.
 
 ## Implementation
 
-- New `managed_dlc_sizes` command sums `size_bytes` from
+- Steam PICS (`steamcmd +app_info_print <base_appid>`) is queried once per
+  base game and DLC depot sizes are summed by `dlcappid`.
+- If PICS has no DLC depot, fall back to
   `smd search <dlc_appid> --manifests 0 --json`.
-- Results are cached in `~/.cache/steamtron/dlc-sizes.json`.
+- Results are cached in `~/.cache/steamtron/dlc-sizes.json`, including
+  unknown (`0`).
 - The DLC tab fills size cells asynchronously; names and release dates render
   immediately.
 
 ## Verification
 
 - Lies of P DLC `1938420` resolved to `4,379,102,004` bytes.
-- The value was written to the DLC size cache.
+- Little Nightmares PICS: DLC `601710` = `116,101,371` bytes, `584093` =
+  `3,206,906` bytes.
+- DLC App IDs that are packages without depots (for example Little Nightmares
+  `584090`) have no PICS depot size and remain `—`.
 - `node --check` passes.
 - Desktop DLC tests pass.
 

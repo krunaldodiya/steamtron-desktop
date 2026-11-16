@@ -2030,7 +2030,7 @@ function openManagedGameOptions(game) {
           <tbody>${rows || '<tr><td colspan="4">No DLC entries were reported for this game.</td></tr>'}</tbody></table>`;
         const sizeIds = entries.map((entry) => entry.app_id);
         if (sizeIds.length) {
-          void invoke("managed_dlc_sizes", { appIds: sizeIds }).then((sizes) => {
+          void invoke("managed_dlc_sizes", { gameId: game.id, appIds: sizeIds }).then((sizes) => {
             for (const cell of pane.querySelectorAll("[data-dlc-size]")) {
               const size = Number(sizes[cell.dataset.dlcSize]) || 0;
               cell.textContent = size > 0 ? formatBytes(size) : "—";

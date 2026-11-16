@@ -218,16 +218,98 @@ fn save_size_cache(cache: &BTreeMap<String, u64>) {
     }
 }
 
-/// Sum the depot sizes reported by SMD for each DLC App ID.
-pub fn dlc_sizes(app_ids: &[u32]) -> BTreeMap<u32, u64> {
+fn find_block<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{key}\"");
+    let start = text.find(&needle)?;
+    let open = text[start..].find('{')? + start;
+    let mut depth = 0usize;
+    for (offset, character) in text[open..].char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&text[open + 1..open + offset]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_pics_dlc_sizes(text: &str) -> BTreeMap<u32, u64> {
+    let mut sizes = BTreeMap::new();
+    let Some(depots) = find_block(text, "depots") else { return sizes };
+    let mut index = 0usize;
+    let bytes = depots.as_bytes();
+    while index < bytes.len() {
+        if depots.as_bytes()[index] != b'"' { index += 1; continue; }
+        let Some(key_end) = depots[index + 1..].find('"').map(|value| index + 1 + value) else { break };
+        let key = &depots[index + 1..key_end];
+        let Some(open) = depots[key_end + 1..].find('{').map(|value| key_end + 1 + value) else { index = key_end + 1; continue };
+        let mut depth = 0usize;
+        let mut close = None;
+        for (offset, character) in depots[open..].char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 { close = Some(open + offset); break; }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else { break };
+        if key.chars().all(|character| character.is_ascii_digit()) {
+            let block = &depots[open + 1..close];
+            if let Some(dlc) = regex::Regex::new(r#""dlcappid"\s+"(\d+)""#).unwrap().captures(block).and_then(|captures| captures[1].parse::<u32>().ok()) {
+                let total = regex::Regex::new(r#""size"\s+"(\d+)""#).unwrap()
+                    .captures_iter(block)
+                    .filter_map(|captures| captures[1].parse::<u64>().ok())
+                    .sum::<u64>();
+                *sizes.entry(dlc).or_insert(0) += total;
+            }
+        }
+        index = close + 1;
+    }
+    sizes
+}
+
+fn steamcmd_sizes(base_appid: u32) -> BTreeMap<u32, u64> {
+    let layout = steamtron_core::paths::layout();
+    let candidates = [
+        layout.tools().join("steamcmd/steamcmd.sh"),
+        layout.tools().join("steamcmd/steamcmd.exe"),
+    ];
+    let Some(steamcmd) = candidates.into_iter().find(|path| path.is_file()) else { return BTreeMap::new() };
+    let output = Command::new(steamcmd)
+        .args(["+login", "anonymous", "+app_info_print", &base_appid.to_string(), "+quit"])
+        .output();
+    let Ok(output) = output else { return BTreeMap::new() };
+    parse_pics_dlc_sizes(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Sum the depot sizes reported by Steam PICS / SMD for each DLC App ID.
+pub fn dlc_sizes(game_id: &str, app_ids: &[u32]) -> BTreeMap<u32, u64> {
     let mut cache = load_size_cache();
     let mut result = BTreeMap::new();
     let mut changed = false;
+    let base_appid = Library::load().ok()
+        .and_then(|library| library.game(game_id).cloned())
+        .and_then(|game| game.metadata_app_id);
+    let pics = base_appid.map(steamcmd_sizes).unwrap_or_default();
     let smd = download::resolve_smd().ok();
     for app_id in app_ids {
         let key = app_id.to_string();
         if let Some(size) = cache.get(&key).copied() {
             result.insert(*app_id, size);
+            continue;
+        }
+        if let Some(size) = pics.get(app_id).copied() {
+            cache.insert(key, size);
+            result.insert(*app_id, size);
+            changed = true;
             continue;
         }
         let Some(smd) = smd.as_ref() else { continue };
