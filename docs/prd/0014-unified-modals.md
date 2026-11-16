@@ -101,3 +101,24 @@ has no decorative search icon.
 
 - Audit: prior dialog inventory in this session.
 - Related: `docs/prd/0002-nav-focus.md`, `docs/prd/0013-guest-login.md`
+
+## Follow-up 2026-11-16 — add-to-library error dialog
+
+### Problem
+
+The add-to-library failure state rendered an extra primary **Close** button in
+the dialog body while the shared header already provided maximize and close.
+That produced two visible close controls, contradicting R1's "maximize and
+close" shell.
+
+### Fix
+
+The body action was removed. The failure state now leaves the error text visible
+and focuses the single top-right close control. The empty action container was
+removed from the dialog markup.
+
+### Verification
+
+- `node --check crates/steamtron-desktop/ui/app.js` passed.
+- `rg 'add-progress-close|add-progress-actions'` returns no matches.
+- Dialog chrome remains the shared header: maximize then close.

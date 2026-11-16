@@ -5205,13 +5205,11 @@ function openAddProgress(title) {
     <h3 class="add-progress-title">${escape(title)}</h3>
     <div class="auth-spinner" id="add-progress-spinner"></div>
     <p class="add-progress-status" id="add-progress-status">Preparing…</p>
-    <div class="add-progress-actions" id="add-progress-actions"></div>
   </div>`;
   document.body.appendChild(backdrop);
   registerDialog(backdrop);
   const spinner = backdrop.querySelector("#add-progress-spinner");
   const status = backdrop.querySelector("#add-progress-status");
-  const actions = backdrop.querySelector("#add-progress-actions");
   return {
     setStatus(message) {
       status.textContent = message;
@@ -5222,10 +5220,8 @@ function openAddProgress(title) {
       spinner.classList.add("hidden");
       status.textContent = message;
       status.classList.add("error");
-      actions.innerHTML = '<button id="add-progress-close" class="primary">Close</button>';
-      const close = actions.querySelector("#add-progress-close");
-      close.onclick = () => backdrop.remove();
-      focusControl(close);
+      const close = backdrop.querySelector(".dialog-close");
+      if (close) focusControl(close);
     },
   };
 }
