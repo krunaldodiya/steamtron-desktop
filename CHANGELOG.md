@@ -5,7 +5,16 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.6] - 2026-11-17
+
+### Fixed
+
+- The Windows installer copies `winfsp-x64.dll` beside the SteamTron executable
+  when WinFsp is already installed, so the normal shortcut launches without a
+  separate PATH launcher.
+
 ## [0.1.5] - 2026-11-16
+
 
 ### Changed
 
@@ -73,6 +82,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.6]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.6
 [0.1.5]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.5
 [0.1.4]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.4
 [0.1.3]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.3
