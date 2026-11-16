@@ -813,6 +813,8 @@ document.addEventListener("click", (event) => {
 async function updateManagedDlcAction(game) {
   const button = detailEl.querySelector("#managed-play");
   if (!button) return;
+  const activeDownload = managedDownloads.get(game.id);
+  if (activeDownload && !downloadTerminal(activeDownload)) return;
   try {
     const state = await invoke("managed_dlc_state", { gameId: game.id });
     const installed = new Set(state.installed || []);

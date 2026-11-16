@@ -87,3 +87,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0060](0060-rebase-stale-launch-target.md) | Rebase stale launch targets | done | 2026-11-16 |
 | [0061](0061-existing-prefix-without-steam.md) | Use an existing Steam-style prefix without Steam | done | 2026-11-16 |
 | [0062](0062-dlc-content-group-progress.md) | DLC content-group progress | done | 2026-11-16 |
+| [0063](0063-dlc-downloading-button.md) | Keep the Downloading button while DLC runs | done | 2026-11-16 |
