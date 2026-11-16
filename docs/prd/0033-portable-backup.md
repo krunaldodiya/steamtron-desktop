@@ -71,6 +71,8 @@ and fixes state are preserved.
   grew incrementally, the content root became 9.2 GB, and the library entry
   became confirmed with an Atlas/Binaries/Win64 launch target. The UI was
   corrected so checksum verification no longer reports 100% before extraction.
+- Fixed a SIGSEGV during checksum: the hashing function allocated a 4 MiB buffer
+  on a tokio blocking-thread stack. The buffer is now heap-allocated.
 
 ## Decisions and risks
 

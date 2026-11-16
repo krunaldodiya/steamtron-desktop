@@ -3771,32 +3771,6 @@ struct BackupMetadata {
     game_id: String,
 }
 
-fn sha256_file(path: &Path) -> Result<String, String> {
-    use sha2::Digest;
-    let mut file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let mut hasher = sha2::Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
-    loop {
-        let count = std::io::Read::read(&mut file, &mut buffer).map_err(|error| error.to_string())?;
-        if count == 0 { break; }
-        hasher.update(&buffer[..count]);
-    }
-    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-fn tar_size(path: &Path) -> Result<u64, String> {
-    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let mut archive = tar::Archive::new(file);
-    let mut total = 0u64;
-    for entry in archive.entries().map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        if !entry.header().entry_type().is_dir() {
-            total = total.saturating_add(entry.size());
-        }
-    }
-    Ok(total)
-}
-
 fn sha256_file_with_progress(
     path: &Path,
     app: &tauri::AppHandle,
@@ -3811,7 +3785,9 @@ fn sha256_file_with_progress(
     let total = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
     let mut file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let mut hasher = sha2::Sha256::new();
-    let mut buffer = [0u8; 4 * 1024 * 1024];
+    // Keep the I/O buffer on the heap: tokio blocking threads do not have
+    // enough stack space for a multi-megabyte array.
+    let mut buffer = vec![0u8; 4 * 1024 * 1024];
     let mut written = 0u64;
     let started = std::time::Instant::now();
     let mut last_emit = std::time::Instant::now();
@@ -3828,6 +3804,19 @@ fn sha256_file_with_progress(
         }
     }
     Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn tar_size(path: &Path) -> Result<u64, String> {
+    let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut archive = tar::Archive::new(file);
+    let mut total = 0u64;
+    for entry in archive.entries().map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.header().entry_type().is_dir() {
+            total = total.saturating_add(entry.size());
+        }
+    }
+    Ok(total)
 }
 
 fn extract_tar_component(
