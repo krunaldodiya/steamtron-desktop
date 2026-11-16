@@ -4359,7 +4359,7 @@ async function renderGeneralSettings(host) {
       ${settingsRow(email, profile?.base_url || "SteamTron account", '<button id="setting-signout">Sign out</button>')}
     </div></section>
     <section class="settings-section"><h2>Maintenance</h2><p>Library backup, restore and desktop integration.</p><div class="settings-card">
-      <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one folder per game with the exact appmanifest and manifest bundle. Game content and fixes are not included.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export games…</button><button id="setting-import-games">Import ZIPs…</button><button id="setting-import-folder">Import folder…</button></div></div>
+      <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one ZIP per game with the exact appmanifest and manifest bundle. Game content and fixes are not included.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export games…</button><button id="setting-import-games">Import ZIPs…</button><button id="setting-import-folder">Import folder…</button></div></div>
       ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
       ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
     </div></section>

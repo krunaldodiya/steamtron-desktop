@@ -1,4 +1,4 @@
-# Folder metadata export and import
+# ZIP metadata export and import
 
 - Status: done
 - Date: 2026-11-16
@@ -14,13 +14,13 @@ exported library metadata back.
 
 ## Requirements
 
-- R1: Export one folder per game using the per-game backup layout, omitting only
+- R1: Export one ZIP per game using the per-game backup layout, omitting only
   `content.tar` and `fixes.tar`.
-- R2: The folder contains `appmanifest_<appid>.json` copied exactly from
+- R2: The ZIP contains `appmanifest_<appid>.json` copied exactly from
   `game.installation.manifest`.
-- R3: The folder contains `manifest-bundle.tar` with Lua, SMD Lua, and depot
+- R3: The ZIP contains `manifest-bundle.tar` with Lua, SMD Lua, and depot
   manifests.
-- R4: No `metadata.json` and no ZIP wrapper are produced.
+- R4: No `metadata.json` and no extra wrapper files are produced.
 - R5: Import accepts one or more backup ZIPs or a folder containing ZIPs.
 - R6: Import also accepts exported folders containing `appmanifest_*.json`.
 - R7: Import writes the exact appmanifest, restores the persistent bundle, and
@@ -28,12 +28,12 @@ exported library metadata back.
 
 ## Verification
 
-- Exported 21 games to `/tmp/steamtron-export-folder`; each is a folder with
+- Exported 21 games to `/tmp/steamtron-export-zips`; each ZIP has exactly
   `appmanifest_<appid>.json` and `manifest-bundle.tar`.
 - Isaac's exported appmanifest is byte-identical to
   `/mnt/krunal/SteamTronLibrary/steamtronapps/appmanifest_113200.json`.
-- Imported that export folder into a temporary library: 21 imported, 0 skipped,
-  and Isaac's appmanifest remained byte-identical.
+- Imported that folder of ZIPs into a temporary library: 21 imported, 0 skipped,
+  exact appmanifest preserved, persistent bundle restored.
 - Tests `imports_a_game_folder_and_writes_the_exact_appmanifest` and
   `imports_an_exported_zip` pass.
 

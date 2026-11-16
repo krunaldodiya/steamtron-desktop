@@ -5,13 +5,14 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
-use zip::ZipArchive;
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use steamtron_core::library::{
     game_layout, Artwork, Game, InstallMode, Installation, LaunchSettings, LaunchTarget, Library,
@@ -194,61 +195,73 @@ pub fn export_game_backups(
             }
         }
 
-        let package = destination.join(&title);
-        if package.exists() {
-            fs::remove_dir_all(&package).map_err(|error| LibraryError::io(&package, error))?;
+        let stale_folder = destination.join(&title);
+        if stale_folder.is_dir()
+            && stale_folder.join("manifest-bundle.tar").is_file()
+            && !stale_folder.join("content.tar").exists()
+            && !stale_folder.join("fixes.tar").exists()
+        {
+            fs::remove_dir_all(&stale_folder).map_err(|error| LibraryError::io(&stale_folder, error))?;
         }
-        fs::create_dir_all(&package).map_err(|error| LibraryError::io(&package, error))?;
+        let zip_path = destination.join(format!("{title}.zip"));
+        let temporary = destination.join(format!(".{title}.zip.tmp"));
         crate::managed::ensure_appmanifest(game)?;
         let appmanifest = if game.installation.manifest.is_file() {
             fs::read(&game.installation.manifest).map_err(|error| LibraryError::io(&game.installation.manifest, error))?
         } else {
             serde_json::to_vec_pretty(&game_appmanifest(game)).map_err(|error| LibraryError::Archive(error.to_string()))?
         };
-        let appmanifest_path = package.join(format!("appmanifest_{appid}.json"));
-        fs::write(&appmanifest_path, &appmanifest).map_err(|error| LibraryError::io(&appmanifest_path, error))?;
-        files += 1;
-        bytes = bytes.saturating_add(appmanifest.len() as u64);
 
-        let tar_path = package.join("manifest-bundle.tar");
-        let file = fs::File::create(&tar_path).map_err(|error| LibraryError::io(&tar_path, error))?;
-        let mut archive = tar::Builder::new(file);
-        let top = format!("manifests/{title}");
-        let mut header = tar::Header::new_gnu();
-        header.set_entry_type(tar::EntryType::Directory);
-        header.set_size(0);
-        header.set_mode(0o755);
-        header.set_cksum();
-        archive.append_data(&mut header, &top, std::io::empty()).map_err(|error| LibraryError::Archive(error.to_string()))?;
-        let mut append = |name: &str, data: &[u8]| -> Result<(), LibraryError> {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(data.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            archive.append_data(&mut header, format!("{top}/{name}"), data)
-                .map_err(|error| LibraryError::Archive(error.to_string()))?;
-            files += 1;
-            bytes = bytes.saturating_add(data.len() as u64);
-            Ok(())
-        };
-        append(&format!("{appid}.lua"), lua.as_bytes())?;
-        if let Some(id) = game.metadata_app_id {
-            append(&format!("{id}.smd.lua"), smd_lua_text(&lua, id).as_bytes())?;
-        }
+        let mut tar_bytes = Vec::new();
         let manifest_count = manifest_data.len();
-        for (name, data) in manifest_data {
-            append(&name, &data)?;
+        {
+            let mut archive = tar::Builder::new(&mut tar_bytes);
+            let top = format!("manifests/{title}");
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_size(0);
+            header.set_mode(0o755);
+            header.set_cksum();
+            archive.append_data(&mut header, &top, std::io::empty()).map_err(|error| LibraryError::Archive(error.to_string()))?;
+            let mut append = |name: &str, data: &[u8]| -> Result<(), LibraryError> {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                archive.append_data(&mut header, format!("{top}/{name}"), data)
+                    .map_err(|error| LibraryError::Archive(error.to_string()))?;
+                Ok(())
+            };
+            append(&format!("{appid}.lua"), lua.as_bytes())?;
+            if let Some(id) = game.metadata_app_id {
+                append(&format!("{id}.smd.lua"), smd_lua_text(&lua, id).as_bytes())?;
+            }
+            for (name, data) in manifest_data {
+                append(&name, &data)?;
+            }
+            archive.finish().map_err(|error| LibraryError::Archive(error.to_string()))?;
         }
-        let file = archive.into_inner().map_err(|error| LibraryError::Archive(error.to_string()))?;
-        file.sync_all().map_err(|error| LibraryError::io(&tar_path, error))?;
-        bytes = bytes.saturating_add(fs::metadata(&tar_path).map(|metadata| metadata.len()).unwrap_or(0));
-        summaries.push(GameExportSummary {
-            title: game.title.clone(),
-            path: package.display().to_string(),
-            lua: true,
-            manifests: manifest_count,
-            bytes: fs::metadata(&tar_path).map(|metadata| metadata.len()).unwrap_or(0),
-        });
+        {
+            let file = fs::File::create(&temporary).map_err(|error| LibraryError::io(&temporary, error))?;
+            let mut zip = ZipWriter::new(file);
+            let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+            zip.start_file(format!("{title}/appmanifest_{appid}.json"), options).map_err(LibraryError::Zip)?;
+            zip.write_all(&appmanifest).map_err(|error| LibraryError::io(&temporary, error))?;
+            zip.start_file(format!("{title}/manifest-bundle.tar"), options).map_err(LibraryError::Zip)?;
+            zip.write_all(&tar_bytes).map_err(|error| LibraryError::io(&temporary, error))?;
+            let file = zip.finish().map_err(LibraryError::Zip)?;
+            file.sync_all().map_err(|error| LibraryError::io(&temporary, error))?;
+            files += 2;
+            bytes = bytes.saturating_add(appmanifest.len() as u64 + tar_bytes.len() as u64);
+            fs::rename(&temporary, &zip_path).map_err(|error| LibraryError::io(&zip_path, error))?;
+            summaries.push(GameExportSummary {
+                title: game.title.clone(),
+                path: zip_path.display().to_string(),
+                lua: true,
+                manifests: manifest_count,
+                bytes: fs::metadata(&zip_path).map(|metadata| metadata.len()).unwrap_or(0),
+            });
+        }
     }
     progress(total, total, "Export complete").map_err(LibraryError::Archive)?;
     Ok(LibraryExportSummary {
