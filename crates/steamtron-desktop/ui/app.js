@@ -1994,7 +1994,7 @@ function openManagedGameOptions(game) {
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
           <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
-          <div class="files-card"><p class="pane-note">Download the latest Lua/manifest bundle. Steam registration is refreshed only when a ready Steam backend is available.</p><button class="files-wide" id="files-regenerate">Regenerate manifests</button></div>`;
+          <div class="files-card"><p class="pane-note">Generate the Lua/depot manifests from the persistent bundle store, or generate the Steam appmanifest from the registered entry.</p><div class="files-pair"><button id="files-appmanifest">Generate app manifest</button><button id="files-regenerate">Generate Lua/manifests</button></div></div>`;
 
         const status = pane.querySelector("#files-status");
         const refreshGameAndTab = async () => {
@@ -2152,9 +2152,14 @@ function openManagedGameOptions(game) {
           if (!result) throw new Error("Import cancelled.");
           return result;
         }, (result) => `Imported ${result.files} save file${result.files === 1 ? "" : "s"}`, async () => {});
+        pane.querySelector("#files-appmanifest").onclick = (event) => run(event.currentTarget,
+          () => invoke("generate_managed_appmanifest", { gameId: game.id }),
+          (result) => result.created
+            ? `Generated ${result.appmanifest}`
+            : `App manifest already exists: ${result.appmanifest}`);
         pane.querySelector("#files-regenerate").onclick = (event) => run(event.currentTarget,
           () => invoke("regenerate_managed_manifests", { gameId: game.id }),
-          (result) => result.warning || `Regenerated manifests (${result.manifests} depot manifest${result.manifests === 1 ? "" : "s"})`);
+          (result) => `Generated Lua manifest and ${result.manifests} depot manifest${result.manifests === 1 ? "" : "s"}`);
       };
       void renderFilesTab();
       return;

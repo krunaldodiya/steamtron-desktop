@@ -4252,43 +4252,54 @@ async fn regenerate_managed_manifests(game_id: String) -> Result<serde_json::Val
         use steamtron_library::managed::{write_managed_lua, write_managed_manifests};
 
         let bundle = steamtron_library::download_bundle(&app_id.to_string()).map_err(|error| error.to_string())?;
-        let (lua, lua_path) = write_managed_lua(&game, &bundle.lua).map_err(|error| error.to_string())?;
+        let (_, lua_path) = write_managed_lua(&game, &bundle.lua).map_err(|error| error.to_string())?;
         write_managed_manifests(&bundle.manifests).map_err(|error| error.to_string())?;
-        let backend = platform_backend().ok().filter(|backend| {
-            backend
-                .status()
-                .map(|status| status.ready)
-                .unwrap_or(false)
-        });
-        let mut registered = false;
-        let mut warning = None;
-        if let Some(backend) = backend {
-            match backend.register(&steamtron_register::RegistrationRequest {
-                app_id: &app_id.to_string(),
-                title: &game.title,
-                lua: &lua,
-                manifests: &bundle.manifests,
-            }) {
-                Ok(_) => registered = true,
-                Err(error) => {
-                    warning = Some(format!(
-                        "Local manifests refreshed, but Steam registration failed: {error}"
-                    ));
-                }
-            }
-        } else {
-            warning = Some("Local manifests refreshed. Steam was not detected, so Steam registration was skipped.".into());
-        }
         Ok::<_, String>(serde_json::json!({
             "appid": app_id,
             "manifests": bundle.manifests.len(),
             "lua": lua_path.display().to_string(),
-            "registered": registered,
-            "warning": warning,
         }))
     })
     .await
     .map_err(|error| format!("manifest task failed: {error}"))?
+}
+
+#[tauri::command]
+async fn generate_managed_appmanifest(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
+    let app_id = game.metadata_app_id.ok_or_else(|| "This game has no Steam App ID.".to_string())?;
+    let appid = app_id.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lua = steamtron_core::library::managed_lua_path(&game).filter(|path| path.is_file())
+            .or_else(|| steam::steam_root().ok().map(|root| root.join("config/stplug-in").join(format!("{appid}.lua"))).filter(|path| path.is_file()))
+            .ok_or_else(|| "Generate Lua/manifests first, then generate the app manifest.".to_string())?;
+        let _ = lua;
+        let repaired = repair_missing_appmanifests().map_err(|error| error.to_string())?;
+        if let Some(entry) = repaired.iter().find(|entry| entry.appid == appid) {
+            return Ok::<_, String>(serde_json::json!({
+                "appid": appid,
+                "appmanifest": entry.appmanifest,
+                "created": true,
+            }));
+        }
+        for library in steam::libraries().unwrap_or_default() {
+            let acf = library.join(format!("appmanifest_{appid}.acf"));
+            if acf.is_file() {
+                return Ok(serde_json::json!({
+                    "appid": appid,
+                    "appmanifest": acf.display().to_string(),
+                    "created": false,
+                }));
+            }
+        }
+        Err("No Steam library entry was found. Register the game with Steam first, then generate the app manifest.".into())
+    })
+    .await
+    .map_err(|error| format!("app manifest task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -5663,6 +5674,7 @@ fn main() {
             uninstall_managed_game,
             cancel_operation,
             regenerate_managed_manifests,
+            generate_managed_appmanifest,
             steam_download_size,
             remove_managed_game,
             detach_umutron_paths,
