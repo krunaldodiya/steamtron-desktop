@@ -1,5 +1,25 @@
 # Agent rules
 
+## Never assume, bluff, or hallucinate — mandatory
+
+Every claim about behavior must be backed by evidence actually produced in the
+current session.
+
+- Do not report a fix as done, working, verified, or tested unless the specific
+  command, test, or UI interaction was run and its output was observed.
+- Distinguish code inspection from runtime proof. If only the code was read,
+  say that; do not describe it as runtime verification.
+- Use `[INFERENCE]` for conclusions that are reasoned but not directly tested.
+- If the surface cannot be exercised with available tools, say so explicitly
+  and report exactly what was verified instead.
+- UI changes require verification against the rebuilt, installed binary. A
+  stale running process or an earlier build is not evidence.
+- Re-run the relevant scenario after the final change. Do not claim success
+  from a previous run, a sibling command, or an assumption about what the code
+  should do.
+- Never fabricate command output, test results, screenshots, or dialog
+  behavior.
+
 ## Every feature or issue gets a PRD — mandatory
 
 No implementation work starts before its PRD exists.
