@@ -1354,12 +1354,12 @@ function openOperationManager(options = {}) {
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `<div class="modal download-modal operation-modal" id="operation-manager"><div class="modal-head"><h2>${escape(title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
-    <p class="download-stage" id="operation-stage">Starting…</p>
     <div class="download-progress-row"><div class="download-bar operation-bar"><span></span></div><strong class="operation-percent" id="operation-percent">0%</strong>
       <div class="download-actions-inline" id="operation-actions">
         <button class="game-icon-button download-cancel-icon" id="operation-cancel" title="Cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
       </div>
     </div>
+    <p class="download-stage operation-activity" id="operation-stage">Starting…</p>
     ${rich ? `<div class="download-stats operation-stats">
       <div class="download-stat"><span>Transferred</span><strong id="operation-completed">—</strong></div>
       <div class="download-stat"><span>Total size</span><strong id="operation-total">—</strong></div>

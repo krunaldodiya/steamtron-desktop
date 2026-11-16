@@ -74,3 +74,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0047](0047-safe-backup-overwrite.md) | Safe backup overwrite | done | 2026-11-16 |
 | [0048](0048-backup-free-space-preflight.md) | Backup free-space preflight | done | 2026-11-16 |
 | [0049](0049-desktop-task-notifications.md) | Desktop notifications for long tasks | done | 2026-11-16 |
+| [0050](0050-backup-restore-activity-line.md) | Current-file activity for backup and restore | done | 2026-11-16 |

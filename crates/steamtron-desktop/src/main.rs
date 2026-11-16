@@ -3683,7 +3683,7 @@ fn archive_component(
     total_bytes: u64,
     written: &mut u64,
     overall_total: u64,
-    emit: &mut dyn FnMut(f64, u64, u64),
+    emit: &mut dyn FnMut(f64, u64, u64, &str),
     control: &OperationControl,
 ) -> Result<(String, u64), String> {
     use sha2::Digest;
@@ -3709,12 +3709,13 @@ fn archive_component(
         let path = format!("{top_prefix}/{}", relative.to_string_lossy().replace('\\', "/"));
         archive.append_data(&mut header, path, std::io::empty()).map_err(|error| error.to_string())?;
     }
-    let mut last_emit = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(200);
     for (relative, size) in files {
         operation_check(control)?;
         let path = source.join(relative);
         let input = std::fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
         let archive_path = format!("{top_prefix}/{}", relative.to_string_lossy().replace('\\', "/"));
+        let activity = format!("Archiving {}", relative.to_string_lossy().replace('\\', "/"));
         let mut header = tar::Header::new_gnu();
         header.set_entry_type(tar::EntryType::Regular);
         header.set_size(*size);
@@ -3724,7 +3725,7 @@ fn archive_component(
             *written = written.saturating_add(count);
             if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
                 let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
-                emit(percent, *written, overall_total);
+                emit(percent, *written, overall_total, &activity);
                 last_emit = std::time::Instant::now();
             }
         };
@@ -3734,7 +3735,7 @@ fn archive_component(
     }
     if overall_total > 0 {
         let percent = *written as f64 / overall_total as f64 * 100.0;
-        emit(percent, *written, overall_total);
+        emit(percent, *written, overall_total, "Archive complete");
     }
     let writer = archive.into_inner().map_err(|error| error.to_string())?;
     writer.inner.sync_all().map_err(|error| error.to_string())?;
@@ -3878,7 +3879,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         let mut written = 0u64;
         let started = std::time::Instant::now();
 
-        let mut content_emit = |percent, completed, total| emit_operation_stats(&emit_app, "backup", &game_id_emit, "content", "Backing up game content…", percent, completed, total, started);
+        let mut content_emit = |percent, completed, total, message: &str| emit_operation_stats(&emit_app, "backup", &game_id_emit, "content", message, percent, completed, total, started);
         let (content_sha, _) = archive_component(
             &root,
             &package.join("content.tar"),
@@ -3893,7 +3894,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         )?;
         operation_check(&control)?;
         let (fixes_sha, _) = if fixes_total > 0 {
-            let mut fixes_emit = |percent, completed, total| emit_operation_stats(&emit_app, "backup", &game_id_emit, "fixes", "Backing up fixes…", percent, completed, total, started);
+            let mut fixes_emit = |percent, completed, total, message: &str| emit_operation_stats(&emit_app, "backup", &game_id_emit, "fixes", message, percent, completed, total, started);
             archive_component(
                 fixes.as_ref().expect("fixes checked above"),
                 &package.join("fixes.tar"),
@@ -3932,7 +3933,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
                 written = written.saturating_add(*size);
                 if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
                     let percent = if overall_total > 0 { written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
-                    emit_operation_stats(&emit_app, "backup", &game_id_emit, "manifests", "Backing up depot manifests…", percent, written, overall_total, started);
+                    emit_operation_stats(&emit_app, "backup", &game_id_emit, "manifests", &format!("Archiving {name}"), percent, written, overall_total, started);
                     last_emit = std::time::Instant::now();
                 }
             }
@@ -3985,9 +3986,11 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
             "fixes_enabled": game.fixes_enabled,
         });
         let _ = std::fs::remove_dir_all(package.join(".manifest-cache"));
+        emit_operation_at(&emit_app, "backup", &game_id_emit, "metadata", "running", "Writing appmanifest…", 100.0);
         let manifest_name = format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
         std::fs::write(package.join(manifest_name), serde_json::to_vec_pretty(&metadata).map_err(|error| error.to_string())?)
             .map_err(|error| error.to_string())?;
+        emit_operation_at(&emit_app, "backup", &game_id_emit, "finalize", "running", "Finalizing backup…", 100.0);
         replace_backup_directory(&package, &final_path)?;
         let _ = std::fs::remove_dir(&staging);
         Ok(final_path)
@@ -4064,6 +4067,7 @@ fn extract_tar_component(
     let mut last_emit = std::time::Instant::now();
     let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 0.0 };
     emit_operation_stats(app, operation, game_id, stage, message, progress_base + fraction * progress_span, *written, overall_total, started);
+    last_emit = std::time::Instant::now() - std::time::Duration::from_millis(200);
     for entry in archive.entries().map_err(|error| error.to_string())? {
         operation_check(control)?;
         let mut entry = entry.map_err(|error| error.to_string())?;
@@ -4071,6 +4075,13 @@ fn extract_tar_component(
         let text = path.to_string_lossy().replace('\\', "/");
         if !text.starts_with(allowed_prefix) || text.split('/').any(|part| part == "..") {
             return Err("Backup contains an unsafe path.".into());
+        }
+        let shown = text.strip_prefix(allowed_prefix).unwrap_or(&text);
+        let activity = format!("Restoring {shown}");
+        if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+            let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 1.0 };
+            emit_operation_stats(app, operation, game_id, stage, &activity, progress_base + fraction * progress_span, *written, overall_total, started);
+            last_emit = std::time::Instant::now();
         }
         let target = destination.join(&path);
         if !target.starts_with(destination) {
@@ -4093,14 +4104,14 @@ fn extract_tar_component(
                 *written = (*written).saturating_add(count as u64);
                 if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
                     let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 1.0 };
-                    emit_operation_stats(app, operation, game_id, stage, message, progress_base + fraction * progress_span, *written, overall_total, started);
+                    emit_operation_stats(app, operation, game_id, stage, &activity, progress_base + fraction * progress_span, *written, overall_total, started);
                     last_emit = std::time::Instant::now();
                 }
             }
         }
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
             let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 1.0 };
-            emit_operation_stats(app, operation, game_id, stage, message, progress_base + fraction * progress_span, *written, overall_total, started);
+            emit_operation_stats(app, operation, game_id, stage, &activity, progress_base + fraction * progress_span, *written, overall_total, started);
             last_emit = std::time::Instant::now();
         }
     }
@@ -4236,6 +4247,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         operation_check(&control)?;
         let _ = manifest_components;
 
+        emit_operation_at(&emit_app, "restore", "", "commit", "running", "Finalizing restored files…", 100.0);
         // Commit with rollback. The previous content/fixes are moved aside in
         // staging first; any commit error restores them and removes the new files.
         let old_target = staging.join(".old-target");
@@ -6057,6 +6069,7 @@ mod backup_manifest_tests {
         };
         let mut written = 0u64;
         let mut percents = Vec::new();
+        let mut activities = Vec::new();
         archive_component(
             &source,
             &tar_path,
@@ -6066,11 +6079,12 @@ mod backup_manifest_tests {
             data.len() as u64,
             &mut written,
             data.len() as u64,
-            &mut |percent, _, _| percents.push(percent),
+            &mut |percent, _, _, message| { percents.push(percent); activities.push(message.to_owned()); },
             &control,
         ).unwrap();
         assert_eq!(written, data.len() as u64);
         assert_eq!(percents.last().copied(), Some(100.0));
+        assert!(activities.iter().any(|message| message.contains("Archiving large.bin")));
         let mut archive = tar::Archive::new(std::fs::File::open(&tar_path).unwrap());
         let mut restored = Vec::new();
         for entry in archive.entries().unwrap() {
