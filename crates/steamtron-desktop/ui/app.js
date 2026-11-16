@@ -1408,6 +1408,7 @@ function openOperationManager(options = {}) {
   };
   const show = () => {
     if (closed) return;
+    if (!document.body.contains(backdrop)) document.body.appendChild(backdrop);
     backdrop.classList.remove("hidden");
     registerDialog(backdrop, { title });
     syncDialogBlocking();

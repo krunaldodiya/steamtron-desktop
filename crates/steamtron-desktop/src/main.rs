@@ -3515,6 +3515,25 @@ impl<W: std::io::Write> std::io::Write for HashingWriter<W> {
     }
 }
 
+struct ProgressReader<'a> {
+    inner: std::fs::File,
+    on_read: &'a mut dyn FnMut(u64),
+    cancelled: &'a std::sync::atomic::AtomicBool,
+}
+
+impl std::io::Read for ProgressReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Operation cancelled"));
+        }
+        let count = std::io::Read::read(&mut self.inner, buffer)?;
+        if count > 0 {
+            (self.on_read)(count as u64);
+        }
+        Ok(count)
+    }
+}
+
 fn backup_safe_folder(title: &str) -> String {
     let mut value: String = title
         .chars()
@@ -3534,12 +3553,8 @@ fn archive_component(
     total_bytes: u64,
     written: &mut u64,
     overall_total: u64,
-    app: &tauri::AppHandle,
-    game_id: &str,
-    stage: &str,
-    message: &str,
+    emit: &mut dyn FnMut(f64, u64, u64),
     control: &OperationControl,
-    started: std::time::Instant,
 ) -> Result<(String, u64), String> {
     use sha2::Digest;
     let file = std::fs::File::create(component_path).map_err(|error| error.to_string())?;
@@ -3568,15 +3583,28 @@ fn archive_component(
     for (relative, size) in files {
         operation_check(control)?;
         let path = source.join(relative);
-        let mut input = std::fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let input = std::fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
         let archive_path = format!("{top_prefix}/{}", relative.to_string_lossy().replace('\\', "/"));
-        archive.append_file(archive_path, &mut input).map_err(|error| format!("{}: {error}", path.display()))?;
-        *written = written.saturating_add(*size);
-        if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
-            let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
-            emit_operation_stats(app, "backup", game_id, stage, message, percent, *written, overall_total, started);
-            last_emit = std::time::Instant::now();
-        }
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_size(*size);
+        header.set_mode(0o644);
+        header.set_cksum();
+        let mut progress = |count: u64| {
+            *written = written.saturating_add(count);
+            if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                let percent = if overall_total > 0 { *written as f64 / overall_total as f64 * 100.0 } else { 100.0 };
+                emit(percent, *written, overall_total);
+                last_emit = std::time::Instant::now();
+            }
+        };
+        let mut reader = ProgressReader { inner: input, on_read: &mut progress, cancelled: &control.cancelled };
+        archive.append_data(&mut header, archive_path, &mut reader)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    if overall_total > 0 {
+        let percent = *written as f64 / overall_total as f64 * 100.0;
+        emit(percent, *written, overall_total);
     }
     let writer = archive.into_inner().map_err(|error| error.to_string())?;
     writer.inner.sync_all().map_err(|error| error.to_string())?;
@@ -3714,6 +3742,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         let mut written = 0u64;
         let started = std::time::Instant::now();
 
+        let mut content_emit = |percent, completed, total| emit_operation_stats(&emit_app, "backup", &game_id_emit, "content", "Backing up game content…", percent, completed, total, started);
         let (content_sha, _) = archive_component(
             &root,
             &package.join("content.tar"),
@@ -3723,15 +3752,12 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
             content_total,
             &mut written,
             overall_total,
-            &emit_app,
-            &game_id_emit,
-            "content",
-            "Backing up game content…",
+            &mut content_emit,
             &control,
-            started,
         )?;
         operation_check(&control)?;
         let (fixes_sha, _) = if fixes_total > 0 {
+            let mut fixes_emit = |percent, completed, total| emit_operation_stats(&emit_app, "backup", &game_id_emit, "fixes", "Backing up fixes…", percent, completed, total, started);
             archive_component(
                 fixes.as_ref().expect("fixes checked above"),
                 &package.join("fixes.tar"),
@@ -3741,12 +3767,8 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
                 fixes_total,
                 &mut written,
                 overall_total,
-                &emit_app,
-                &game_id_emit,
-                "fixes",
-                "Backing up fixes…",
+                &mut fixes_emit,
                 &control,
-                started,
             )?
         } else {
             ("".into(), 0)
@@ -5817,6 +5839,77 @@ mod artwork_title_tests {
 #[cfg(test)]
 mod backup_manifest_tests {
     use super::*;
+
+    #[test]
+    fn progress_reader_reports_incremental_chunks_and_honours_cancel() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("large.bin");
+        std::fs::write(&path, vec![7u8; 1024 * 1024]).unwrap();
+        let cancelled = std::sync::atomic::AtomicBool::new(false);
+        let mut counted = 0u64;
+        let mut calls = 0usize;
+        {
+            let mut reader = ProgressReader {
+                inner: std::fs::File::open(&path).unwrap(),
+                on_read: &mut |count| { counted += count; calls += 1; },
+                cancelled: &cancelled,
+            };
+            let mut sink = std::io::sink();
+            std::io::copy(&mut reader, &mut sink).unwrap();
+        }
+        assert_eq!(counted, 1024 * 1024);
+        assert!(calls > 1);
+
+        cancelled.store(true, Ordering::SeqCst);
+        let mut reader = ProgressReader {
+            inner: std::fs::File::open(&path).unwrap(),
+            on_read: &mut |_| {},
+            cancelled: &cancelled,
+        };
+        let mut buffer = [0u8; 16];
+        assert!(std::io::Read::read(&mut reader, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn archive_component_writes_the_whole_file_and_finishes_at_100_percent() {
+        use std::io::Read;
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        let data = vec![9u8; 1024 * 1024];
+        std::fs::write(source.join("large.bin"), &data).unwrap();
+        let tar_path = temp.path().join("content.tar");
+        let files = vec![(PathBuf::from("large.bin"), data.len() as u64)];
+        let control = OperationControl {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            pid: Arc::new(Mutex::new(None)),
+        };
+        let mut written = 0u64;
+        let mut percents = Vec::new();
+        archive_component(
+            &source,
+            &tar_path,
+            "common/Sample",
+            &[],
+            &files,
+            data.len() as u64,
+            &mut written,
+            data.len() as u64,
+            &mut |percent, _, _| percents.push(percent),
+            &control,
+        ).unwrap();
+        assert_eq!(written, data.len() as u64);
+        assert_eq!(percents.last().copied(), Some(100.0));
+        let mut archive = tar::Archive::new(std::fs::File::open(&tar_path).unwrap());
+        let mut restored = Vec::new();
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            if entry.path().unwrap().to_string_lossy().ends_with("large.bin") {
+                entry.read_to_end(&mut restored).unwrap();
+            }
+        }
+        assert_eq!(restored, data);
+    }
 
     #[test]
     fn backup_includes_lua_smd_lua_and_bundle_manifests() {
