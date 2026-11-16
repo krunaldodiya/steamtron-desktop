@@ -9,7 +9,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- In-app How to use guide and website first-run walkthrough.
+- How-to-use guide on the website and in the repository README.
 - Repository and website release changelogs.
 - Release workflow validation that every tag has a matching changelog entry.
 
