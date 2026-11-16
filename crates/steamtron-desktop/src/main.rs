@@ -3771,39 +3771,31 @@ struct BackupMetadata {
     game_id: String,
 }
 
-fn sha256_file_with_progress(
-    path: &Path,
-    app: &tauri::AppHandle,
-    operation: &str,
-    game_id: &str,
-    stage: &str,
-    message: &str,
-    control: &OperationControl,
-) -> Result<String, String> {
-    use sha2::Digest;
-    use std::io::Read;
-    let total = std::fs::metadata(path).map_err(|error| error.to_string())?.len();
-    let mut file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let mut hasher = sha2::Sha256::new();
-    // Keep the I/O buffer on the heap: tokio blocking threads do not have
-    // enough stack space for a multi-megabyte array.
-    let mut buffer = vec![0u8; 4 * 1024 * 1024];
-    let mut written = 0u64;
-    let started = std::time::Instant::now();
-    let mut last_emit = std::time::Instant::now();
-    loop {
-        operation_check(control)?;
-        let count = file.read(&mut buffer).map_err(|error| error.to_string())?;
-        if count == 0 { break; }
-        hasher.update(&buffer[..count]);
-        written = written.saturating_add(count as u64);
-        if last_emit.elapsed() >= std::time::Duration::from_millis(200) || written >= total {
-            let percent = if total > 0 { written as f64 / total as f64 * 100.0 } else { 100.0 };
-            emit_operation_stats(app, operation, game_id, stage, message, percent, written, total, started);
-            last_emit = std::time::Instant::now();
-        }
+struct HashingReader {
+    inner: std::fs::File,
+    hasher: sha2::Sha256,
+}
+
+impl std::io::Read for HashingReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use sha2::Digest;
+        let count = std::io::Read::read(&mut self.inner, buf)?;
+        self.hasher.update(&buf[..count]);
+        Ok(count)
     }
-    Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+impl HashingReader {
+    fn finish(mut self) -> Result<String, String> {
+        use sha2::Digest;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let count = std::io::Read::read(&mut self.inner, &mut buffer).map_err(|error| error.to_string())?;
+            if count == 0 { break; }
+            self.hasher.update(&buffer[..count]);
+        }
+        Ok(self.hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
+    }
 }
 
 fn extract_tar_component(
@@ -3821,10 +3813,12 @@ fn extract_tar_component(
     started: std::time::Instant,
     progress_base: f64,
     progress_span: f64,
-) -> Result<(), String> {
+) -> Result<String, String> {
     std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
     let file = std::fs::File::open(archive_path).map_err(|error| format!("{}: {error}", archive_path.display()))?;
-    let mut archive = tar::Archive::new(file);
+    use sha2::Digest;
+    let reader = HashingReader { inner: file, hasher: sha2::Sha256::new() };
+    let mut archive = tar::Archive::new(reader);
     let mut last_emit = std::time::Instant::now();
     let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 0.0 };
     emit_operation_stats(app, operation, game_id, stage, message, progress_base + fraction * progress_span, *written, overall_total, started);
@@ -3868,7 +3862,8 @@ fn extract_tar_component(
             last_emit = std::time::Instant::now();
         }
     }
-    Ok(())
+    let reader = archive.into_inner();
+    reader.finish()
 }
 
 #[tauri::command]
@@ -3911,17 +3906,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     if !content_tar.is_file() {
         return Err("Backup does not contain content.tar.".into());
     }
-    let checksum_control = register_operation("restore", "");
-    if let Some(expected) = manifest.get("content_archive").and_then(|value| value.get("sha256")).and_then(|value| value.as_str()) {
-        emit_operation_stats(&app, "restore", "", "verify", "Verifying backup checksum (1/2)…", 0.0, 0, std::fs::metadata(&content_tar).map(|metadata| metadata.len()).unwrap_or(0), std::time::Instant::now());
-        let actual = sha256_file_with_progress(&content_tar, &app, "restore", "", "verify", "Verifying backup checksum (1/2)…", &checksum_control)?;
-        if actual != expected {
-            unregister_operation("restore", "");
-            return Err("Backup content checksum does not match its manifest.".into());
-        }
-        emit_operation_at(&app, "restore", "", "extract", "running", "Extracting game files (2/2)…", 0.0);
-    }
-    unregister_operation("restore", "");
+    let expected_content_sha = manifest.get("content_archive").and_then(|value| value.get("sha256")).and_then(|value| value.as_str()).map(str::to_owned);
 
     let mut library = Library::load().map_err(|error| error.to_string())?;
     let existing = appid
@@ -3967,6 +3952,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let fixes_directory = manifest.get("fixes_directory").and_then(|value| value.as_str()).unwrap_or("").to_owned();
     let manifest_components = manifest.get("components").cloned().unwrap_or(serde_json::Value::Null);
     let manifest_worker = manifest.clone();
+    let expected_content_sha_worker = expected_content_sha.clone();
     let target_game_worker = target_game.clone();
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         // Use archive sizes as the progress denominator. Scanning every tar
@@ -3978,7 +3964,12 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
         let started = std::time::Instant::now();
-        extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", &emit_app, "restore", "", "extract", "Extracting game files…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+        let content_digest = extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", &emit_app, "restore", "", "extract", "Restoring game backup…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+        if let Some(expected) = expected_content_sha_worker.as_deref() {
+            if content_digest != expected {
+                return Err("Backup content checksum does not match its manifest.".into());
+            }
+        }
         let staged_content = staging.join("common").join(&content_folder_worker);
         if !staged_content.is_dir() {
             return Err("Backup did not restore the expected game content.".into());
@@ -3992,7 +3983,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         std::fs::rename(&staged_content, &target_root_worker).map_err(|error| error.to_string())?;
 
         if !fixes_directory.is_empty() {
-            extract_tar_component(&restore_folder.join("fixes.tar"), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join("fixes.tar"), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
             let staged_fixes = staging.join("fixes").join(&content_folder_worker);
             if staged_fixes.is_dir() {
                 if let Some(destination) = managed_fixes_dir(&target_game_worker) {
@@ -4008,7 +3999,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         }
 
         if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
-            extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
             let staged_manifests = staging.join("manifests").join(&content_folder_worker);
             if staged_manifests.is_dir() {
                 for entry in std::fs::read_dir(&staged_manifests).map_err(|error| error.to_string())?.flatten() {
