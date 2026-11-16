@@ -581,6 +581,58 @@ mod import_tests {
     }
 
     #[test]
+    fn repaired_manifest_tar_contains_lua_and_manifests() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut manifests = BTreeMap::new();
+        manifests.insert("42_1.manifest".to_owned(), vec![1, 2, 3]);
+        write_manifest_tar(temp.path(), "Sample", "42", "addappid(42)\nsetManifestid(42,\"1\")\n", &manifests).unwrap();
+        let (lua, restored) = read_manifest_tar(&temp.path().join("manifest-bundle.tar"));
+        assert!(lua.unwrap().contains("addappid(42)"));
+        assert_eq!(restored.get("42_1.manifest"), Some(&vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn repairs_a_missing_bundle_from_an_export_zip() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let temp = tempfile::tempdir().unwrap();
+        let backup = temp.path().join("backups/Game");
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(backup.join("content.tar"), b"content").unwrap();
+        let appmanifest = br#"{"steam_app_id":42,"title":"Game"}"#;
+        fs::write(backup.join("appmanifest_42.json"), appmanifest).unwrap();
+
+        let bundle_dir = temp.path().join("bundle");
+        fs::create_dir_all(&bundle_dir).unwrap();
+        let mut manifests = BTreeMap::new();
+        manifests.insert("42_1.manifest".to_owned(), vec![1, 2, 3]);
+        write_manifest_tar(&bundle_dir, "Game", "42", "addappid(42)\n", &manifests).unwrap();
+        let bundle = fs::read(bundle_dir.join("manifest-bundle.tar")).unwrap();
+
+        let zip_dir = temp.path().join("zips");
+        fs::create_dir_all(&zip_dir).unwrap();
+        let zip_file = fs::File::create(zip_dir.join("Game.zip")).unwrap();
+        let mut zip = zip::ZipWriter::new(zip_file);
+        let options = SimpleFileOptions::default();
+        zip.start_file("Game/appmanifest_42.json", options).unwrap();
+        zip.write_all(appmanifest).unwrap();
+        zip.start_file("Game/manifest-bundle.tar", options).unwrap();
+        zip.write_all(&bundle).unwrap();
+        zip.finish().unwrap();
+
+        let summary = repair_backup_manifests_with_zips(
+            temp.path().join("backups").as_path(),
+            Some(zip_dir.as_path()),
+            &mut |_, _, _| Ok(()),
+        ).unwrap();
+        assert_eq!(summary.repaired, 1);
+        let (lua, repaired) = read_manifest_tar(&backup.join("manifest-bundle.tar"));
+        assert!(lua.unwrap().contains("addappid(42)"));
+        assert!(repaired.contains_key("42_1.manifest"));
+    }
+
+    #[test]
     fn imports_an_exported_zip() {
         use std::io::Write;
         use zip::write::SimpleFileOptions;
@@ -607,4 +659,218 @@ mod import_tests {
         let game = library.game_by_app_id(43).expect("imported zip game");
         assert_eq!(game.title, "Sample Zip");
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct BackupRepairSummary {
+    pub scanned: usize,
+    pub repaired: usize,
+    pub complete: usize,
+    pub skipped: usize,
+    pub warnings: Vec<String>,
+}
+
+fn parse_manifest_tar_bytes(data: &[u8]) -> (Option<String>, BTreeMap<String, Vec<u8>>) {
+    let mut lua = None;
+    let mut manifests = BTreeMap::new();
+    let mut archive = tar::Archive::new(Cursor::new(data));
+    let Ok(entries) = archive.entries() else { return (lua, manifests) };
+    for entry in entries.flatten() {
+        let Ok(path) = entry.path() else { continue };
+        let Some(name) = path.file_name().and_then(|value| value.to_str()).map(str::to_owned) else { continue };
+        let mut entry = entry;
+        let mut data = Vec::new();
+        if entry.read_to_end(&mut data).is_err() { continue; }
+        if name.ends_with(".lua") && !name.ends_with(".smd.lua") {
+            lua = Some(String::from_utf8_lossy(&data).trim_start_matches('\u{feff}').to_owned());
+        } else if name.ends_with(".manifest") {
+            manifests.insert(name, data);
+        }
+    }
+    (lua, manifests)
+}
+
+fn read_manifest_tar(path: &Path) -> (Option<String>, BTreeMap<String, Vec<u8>>) {
+    let Ok(data) = fs::read(path) else { return (None, BTreeMap::new()) };
+    parse_manifest_tar_bytes(&data)
+}
+
+fn export_zip_index(directory: &Path) -> BTreeMap<String, PathBuf> {
+    let mut index = BTreeMap::new();
+    let Ok(entries) = fs::read_dir(directory) else { return index };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case("zip")) {
+            continue;
+        }
+        let Ok(archive) = ZipArchive::new(fs::File::open(&path).map_err(|error| LibraryError::io(&path, error)).unwrap_or_else(|_| panic!("unreachable"))) else { continue };
+        for name in archive.file_names() {
+            let base = name.rsplit('/').next().unwrap_or(name);
+            if let Some(rest) = base.strip_prefix("appmanifest_") {
+                if let Some(appid) = rest.strip_suffix(".json") {
+                    index.insert(appid.to_owned(), path.clone());
+                }
+            }
+        }
+    }
+    index
+}
+
+fn bundle_from_export_zip(path: &Path) -> Option<(String, BTreeMap<String, Vec<u8>>)> {
+    let mut archive = ZipArchive::new(fs::File::open(path).ok()?).ok()?;
+    let mut lua = None;
+    let mut manifests = BTreeMap::new();
+    for index in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(index) else { continue };
+        let name = entry.name().replace('\\', "/");
+        let base = name.rsplit('/').next().unwrap_or(&name).to_owned();
+        if base == "manifest-bundle.tar" {
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).ok()?;
+            let (lua, manifests) = parse_manifest_tar_bytes(&data);
+            return lua.map(|lua| (lua, manifests));
+        }
+        if base.ends_with(".lua") && !base.ends_with(".smd.lua") {
+            let mut data = String::new();
+            entry.read_to_string(&mut data).ok()?;
+            lua = Some(data.trim_start_matches('\u{feff}').to_owned());
+        } else if base.ends_with(".manifest") {
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).ok()?;
+            manifests.insert(base, data);
+        }
+    }
+    lua.map(|lua| (lua, manifests))
+}
+
+fn write_manifest_tar(
+    folder: &Path,
+    title: &str,
+    appid: &str,
+    lua: &str,
+    manifests: &BTreeMap<String, Vec<u8>>,
+) -> Result<(), LibraryError> {
+    let path = folder.join("manifest-bundle.tar");
+    let temporary = folder.join(format!(".manifest-bundle.tar.repair-{}", std::process::id()));
+    let file = fs::File::create(&temporary).map_err(|error| LibraryError::io(&temporary, error))?;
+    let mut archive = tar::Builder::new(file);
+    let top = format!("manifests/{title}");
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Directory);
+    header.set_size(0);
+    header.set_mode(0o755);
+    header.set_cksum();
+    archive.append_data(&mut header, &top, std::io::empty()).map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let mut append = |name: &str, data: &[u8]| -> Result<(), LibraryError> {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive.append_data(&mut header, format!("{top}/{name}"), data)
+            .map_err(|error| LibraryError::Archive(error.to_string()))
+    };
+    append(&format!("{appid}.lua"), lua.as_bytes())?;
+    if let Ok(id) = appid.parse::<u32>() {
+        append(&format!("{id}.smd.lua"), smd_lua_text(lua, id).as_bytes())?;
+    }
+    for (name, data) in manifests {
+        append(name, data)?;
+    }
+    let file = archive.into_inner().map_err(|error| LibraryError::Archive(error.to_string()))?;
+    file.sync_data().map_err(|error| LibraryError::io(&temporary, error))?;
+    fs::rename(&temporary, &path).map_err(|error| LibraryError::io(&path, error))
+}
+
+pub fn repair_backup_manifests(
+    root: &Path,
+    progress: &mut dyn FnMut(usize, usize, &str) -> Result<(), String>,
+) -> Result<BackupRepairSummary, LibraryError> {
+    repair_backup_manifests_with_zips(root, None, progress)
+}
+
+pub fn repair_backup_manifests_with_zips(
+    root: &Path,
+    export_zips: Option<&Path>,
+    progress: &mut dyn FnMut(usize, usize, &str) -> Result<(), String>,
+) -> Result<BackupRepairSummary, LibraryError> {
+    let mut folders = Vec::new();
+    if root.is_dir() {
+        for entry in fs::read_dir(root).map_err(|error| LibraryError::io(root, error))?.flatten() {
+            if entry.path().is_dir() && entry.path().join("content.tar").is_file() {
+                folders.push(entry.path());
+            }
+        }
+    }
+    if folders.is_empty() && root.join("content.tar").is_file() {
+        folders.push(root.to_path_buf());
+    }
+    if folders.is_empty() {
+        return Err(LibraryError::Archive("No SteamTron backup folders found.".into()));
+    }
+    let total = folders.len();
+    let zip_index = export_zips.map(export_zip_index).unwrap_or_default();
+    let mut repaired = 0;
+    let mut complete = 0;
+    let mut skipped = 0;
+    let mut warnings = Vec::new();
+    for (index, folder) in folders.iter().enumerate() {
+        let manifest_path = fs::read_dir(folder).ok().into_iter().flatten().flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("appmanifest_") && name.ends_with(".json")));
+        let Some(manifest_path) = manifest_path else {
+            skipped += 1;
+            warnings.push(format!("Skipped {}: no appmanifest.", folder.display()));
+            continue;
+        };
+        let manifest: Value = match fs::read(&manifest_path).ok().and_then(|data| serde_json::from_slice(&data).ok()) {
+            Some(value) => value,
+            None => {
+                skipped += 1;
+                warnings.push(format!("Skipped {}: invalid appmanifest.", folder.display()));
+                continue;
+            }
+        };
+        let appid = manifest.get("steam_app_id").and_then(|value| value.as_u64()).map(|value| value.to_string());
+        let Some(appid) = appid else {
+            skipped += 1;
+            warnings.push(format!("Skipped {}: no Steam App ID.", folder.display()));
+            continue;
+        };
+        let title = manifest.get("title").and_then(|value| value.as_str()).unwrap_or("Game");
+        let tar = folder.join("manifest-bundle.tar");
+        let (existing_lua, existing_manifests) = read_manifest_tar(&tar);
+        if existing_lua.is_some() && !existing_manifests.is_empty() {
+            complete += 1;
+            continue;
+        }
+        let from_zip = zip_index.get(&appid).and_then(|path| bundle_from_export_zip(path));
+        let source = if let Some((lua, manifests)) = from_zip {
+            Some((lua, manifests))
+        } else {
+            crate::persistent_bundle(&appid)
+                .or_else(|| crate::download_bundle(&appid).ok())
+                .or_else(|| crate::managed::download_steamml(&appid).ok())
+                .map(|bundle| (bundle.lua, bundle.manifests))
+        };
+        let Some((lua, bundle_manifests)) = source.filter(|(lua, _)| !lua.trim().is_empty()) else {
+            skipped += 1;
+            warnings.push(format!("Skipped {}: no Lua/manifest bundle available.", title));
+            continue;
+        };
+        let mut manifests = bundle_manifests;
+        for (name, data) in existing_manifests {
+            manifests.entry(name).or_insert(data);
+        }
+        progress(index, total, &format!("Repairing {} of {} · {}", index + 1, total, title))
+            .map_err(LibraryError::Archive)?;
+        match write_manifest_tar(folder, title, &appid, &lua, &manifests) {
+            Ok(()) => repaired += 1,
+            Err(error) => {
+                skipped += 1;
+                warnings.push(format!("Skipped {}: {error}", title));
+            }
+        }
+    }
+    progress(total, total, "Backup metadata repair complete").map_err(LibraryError::Archive)?;
+    Ok(BackupRepairSummary { scanned: total, repaired, complete, skipped, warnings })
 }

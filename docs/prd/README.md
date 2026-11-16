@@ -76,3 +76,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0049](0049-desktop-task-notifications.md) | Desktop notifications for long tasks | done | 2026-11-16 |
 | [0050](0050-backup-restore-activity-line.md) | Current-file activity for backup and restore | done | 2026-11-16 |
 | [0051](0051-backup-fdatasync.md) | Faster backup archives with fdatasync | done | 2026-11-16 |
+| [0052](0052-repair-backup-metadata.md) | Repair backup metadata without redoing content | done | 2026-11-16 |
