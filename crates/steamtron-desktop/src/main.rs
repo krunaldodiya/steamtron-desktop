@@ -14,7 +14,6 @@ mod proton_sources;
 
 use serde::Serialize;
 use tauri::Manager;
-#[cfg(target_os = "linux")]
 use tauri::Emitter;
 mod security;
 use steamtron_core::config::Config;
@@ -2670,7 +2669,7 @@ fn available_library_drives() -> Result<Vec<serde_json::Value>, String> {
     use steamtron_core::library::Library;
 
     let library = Library::load().map_err(|error| error.to_string())?;
-    let mut result = Vec::new();
+    let mut result: Vec<serde_json::Value> = Vec::new();
     #[cfg(target_os = "linux")]
     {
         let mounts = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
