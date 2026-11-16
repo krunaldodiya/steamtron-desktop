@@ -71,7 +71,7 @@ fn active_path(game_id: &str) -> PathBuf {
     steamtron_core::paths::layout().diagnostics_for(game_id).join(ACTIVE_FILE)
 }
 
-fn publish(app: &AppHandle, state: &DownloadState) {
+pub(crate) fn publish(app: &AppHandle, state: &DownloadState) {
     let _ = app.emit("download-progress", state.clone());
 }
 

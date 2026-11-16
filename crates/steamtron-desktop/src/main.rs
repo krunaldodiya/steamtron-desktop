@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod artwork;
+mod dlc;
 mod download;
 mod fix_tools;
 mod proton_sources;
@@ -3249,6 +3250,47 @@ fn store_cached_catalog(
 }
 
 #[tauri::command]
+fn managed_dlc_state(game_id: String) -> Result<serde_json::Value, String> {
+    let library = steamtron_core::library::Library::load().map_err(|error| error.to_string())?;
+    let game = library.game(&game_id).ok_or_else(|| format!("unknown game {game_id}"))?;
+    let state = dlc::load_state(&game.installation.root);
+    Ok(serde_json::json!({
+        "selected": state.selected,
+        "installed": state.installed.keys().collect::<Vec<_>>(),
+    }))
+}
+
+#[tauri::command]
+fn set_managed_dlc(game_id: String, app_id: u32, enabled: bool) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    if !enabled {
+        let library = steamtron_core::library::Library::load().map_err(|error| error.to_string())?;
+        let game = library.game(&game_id).ok_or_else(|| format!("unknown game {game_id}"))?;
+        if !game_process_pids(game).is_empty() {
+            return Err("Stop the game before removing DLC.".into());
+        }
+    }
+    let state = dlc::set_enabled(&game_id, app_id, enabled)?;
+    serde_json::to_value(state).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn start_managed_dlc_download(app: tauri::AppHandle, game_id: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    {
+        let library = steamtron_core::library::Library::load().map_err(|error| error.to_string())?;
+        let game = library.game(&game_id).ok_or_else(|| format!("unknown game {game_id}"))?;
+        if !game_process_pids(game).is_empty() {
+            return Err("Stop the game before downloading DLC.".into());
+        }
+    }
+    let state = tauri::async_runtime::spawn_blocking(move || dlc::start(app, game_id))
+        .await
+        .map_err(|error| format!("DLC download task failed: {error}"))??;
+    serde_json::to_value(state).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> {
     use steamtron_core::library::Library;
 
@@ -3268,7 +3310,9 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
                 .filter(|path| path.is_file())
         })
         .and_then(|path| std::fs::read_to_string(path).ok())
+        .or_else(|| app_id.to_string().parse::<u32>().ok().and_then(|id| steamtron_library::persistent_bundle(&id.to_string())).map(|bundle| bundle.lua))
         .unwrap_or_default();
+    let dlc_state = dlc::load_state(&game.installation.root);
     let response = store_client()
         .get("https://store.steampowered.com/api/appdetails")
         .query(&[("appids", app_id.to_string()), ("l", "english".into()), ("cc", "US".into())])
@@ -3318,7 +3362,8 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
             "name": if name.is_empty() { format!("DLC {id}") } else { name },
             "released": released,
             "available": marked,
-            "installed": false,
+            "selected": dlc_state.selected.contains(&id),
+            "installed": dlc_state.installed.contains_key(&id),
         }));
     }
     Ok(result)
@@ -5920,6 +5965,9 @@ fn main() {
             store_catalog,
             store_game,
             managed_dlc,
+            set_managed_dlc,
+            managed_dlc_state,
+            start_managed_dlc_download,
             app_details,
             app_version,
             update_library_settings,

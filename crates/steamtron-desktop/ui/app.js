@@ -810,6 +810,47 @@ document.addEventListener("click", (event) => {
   void copyToClipboard(chip.dataset.copy, chip.dataset.copyLabel || "Value");
 });
 
+async function updateManagedDlcAction(game) {
+  const button = detailEl.querySelector("#managed-play");
+  if (!button) return;
+  try {
+    const state = await invoke("managed_dlc_state", { gameId: game.id });
+    const installed = new Set(state.installed || []);
+    const pending = (state.selected || []).some((id) => !installed.has(id));
+    const current = detailEl.querySelector("#managed-play");
+    if (current) {
+      if (pending) {
+        current.textContent = "Update";
+        current.onclick = () => startManagedDlcUpdate(game);
+      } else {
+        current.textContent = "Play";
+        current.onclick = () => startManagedGame(game, current);
+      }
+    }
+  } catch (_error) { /* DLC state is optional */ }
+}
+
+async function startManagedDlcUpdate(game) {
+  managedDownloads.set(game.id, {
+    gameId: game.id,
+    status: "starting",
+    percent: 0,
+    completed: 0,
+    total: 0,
+    speed: 0,
+    message: "Downloading DLC…",
+  });
+  openDownloadManager(game);
+  try {
+    await invoke("start_managed_dlc_download", { gameId: game.id });
+    watchManagedDownload(game.id);
+  } catch (error) {
+    managedDownloads.delete(game.id);
+    if (appView === "game" && managedSelectedId === game.id) renderManagedMode();
+    showToast(String(error), true);
+  }
+}
+
 function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
@@ -899,6 +940,7 @@ function renderManagedPreview(game) {
   void hydrateGameDetail(game);
   const play = detailEl.querySelector("#managed-play");
   if (play && canPlay) play.onclick = () => startManagedGame(game, play);
+  if (installed) void updateManagedDlcAction(game);
   const stopButton = detailEl.querySelector("#managed-stop");
   if (stopButton) stopButton.onclick = () => stopManagedGame(game, stopButton);
 }
@@ -1977,15 +2019,30 @@ function openManagedGameOptions(game) {
         let entries = [];
         try { entries = await invoke("managed_dlc", { gameId: game.id }); } catch (_error) { entries = []; }
         const rows = entries.map((entry) => `<tr>
-          <td><input type="checkbox" disabled aria-label="Install ${escape(entry.name)}" title="DLC installation is not available for this manifest."></td>
-          <td>${escape(entry.name)}${entry.available ? "" : ' <span class="dlc-note">not in manifest</span>'}</td>
+          <td><input type="checkbox" data-dlc-id="${entry.app_id}"${entry.selected ? " checked" : ""}${entry.available ? "" : " disabled"} aria-label="Install ${escape(entry.name)}" title="${entry.available ? "Check to queue this DLC; uncheck to remove it." : "This DLC is not present in the game manifest."}"></td>
+          <td>${escape(entry.name)}${entry.installed ? ' <span class="dlc-note">installed</span>' : entry.available ? "" : ' <span class="dlc-note">not in manifest</span>'}</td>
           <td>${escape(entry.released || "—")}</td>
           <td>—</td>
         </tr>`).join("");
         pane.innerHTML = `<h3>Downloadable Content</h3>
-          <p class="pane-note">Add-ons reported by Steam and this game's manifest. DLC installation support depends on the manifest containing the DLC depot keys.</p>
+          <p class="pane-note">Check DLC to queue it. Unchecking removes its installed files immediately. When a download is queued, Play becomes Update.</p>
           <table class="dlc-table"><thead><tr><th>Install</th><th>Name</th><th>Released</th><th>Size</th></tr></thead>
           <tbody>${rows || '<tr><td colspan="4">No DLC entries were reported for this game.</td></tr>'}</tbody></table>`;
+        for (const input of pane.querySelectorAll("input[data-dlc-id]")) {
+          input.onchange = async () => {
+            input.disabled = true;
+            try {
+              await invoke("set_managed_dlc", { gameId: game.id, appId: Number(input.dataset.dlcId), enabled: input.checked });
+              await renderDlcTab();
+              await updateManagedDlcAction(game);
+              showToast(input.checked ? "DLC added to the update queue." : "DLC removed.");
+            } catch (error) {
+              input.checked = !input.checked;
+              input.disabled = false;
+              showToast(String(error), true);
+            }
+          };
+        }
       };
       void renderDlcTab();
       return;

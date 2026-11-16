@@ -79,3 +79,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0052](0052-repair-backup-metadata.md) | Repair backup metadata without redoing content | done | 2026-11-16 |
 | [0053](0053-repair-backup-fixes.md) | Repair backup fixes from installed fixes | done | 2026-11-16 |
 | [0054](0054-updates-from-bundle.md) | Updates tab reads the persistent bundle | done | 2026-11-16 |
+| [0055](0055-dlc-queue-and-install.md) | DLC selection, queue, install, and removal | active | 2026-11-16 |
