@@ -82,3 +82,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0055](0055-dlc-queue-and-install.md) | DLC selection, queue, install, and removal | active | 2026-11-16 |
 | [0056](0056-dlc-sizes.md) | DLC sizes | done | 2026-11-16 |
 | [0057](0057-dlc-ddm-direct.md) | Direct DepotDownloaderMod for DLC | active | 2026-11-16 |
+| [0058](0058-dlc-toggle-without-reload.md) | DLC toggle without reloading the tab | done | 2026-11-16 |

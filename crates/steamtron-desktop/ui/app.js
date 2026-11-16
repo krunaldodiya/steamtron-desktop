@@ -2020,7 +2020,7 @@ function openManagedGameOptions(game) {
         try { entries = await invoke("managed_dlc", { gameId: game.id }); } catch (_error) { entries = []; }
         const rows = entries.map((entry) => `<tr>
           <td><input type="checkbox" data-dlc-id="${entry.app_id}"${entry.selected ? " checked" : ""}${entry.available ? "" : " disabled"} aria-label="Install ${escape(entry.name)}" title="${entry.available ? "Check to queue this DLC; uncheck to remove it." : "This DLC is not present in the game manifest."}"></td>
-          <td>${escape(entry.name)}${entry.installed ? ' <span class="dlc-note">installed</span>' : entry.available ? "" : ' <span class="dlc-note">not in manifest</span>'}</td>
+          <td>${escape(entry.name)}<span class="dlc-note" data-dlc-installed="${entry.app_id}"${entry.installed ? "" : " hidden"}> installed</span>${entry.available ? "" : ' <span class="dlc-note">not in manifest</span>'}</td>
           <td>${escape(entry.released || "—")}</td>
           <td data-dlc-size="${entry.app_id}">—</td>
         </tr>`).join("");
@@ -2043,10 +2043,13 @@ function openManagedGameOptions(game) {
           input.onchange = async () => {
             input.disabled = true;
             try {
-              await invoke("set_managed_dlc", { gameId: game.id, appId: Number(input.dataset.dlcId), enabled: input.checked });
-              await renderDlcTab();
+              const appId = Number(input.dataset.dlcId);
+              await invoke("set_managed_dlc", { gameId: game.id, appId, enabled: input.checked });
+              const note = pane.querySelector(`[data-dlc-installed="${appId}"]`);
+              if (note) note.hidden = true;
               await updateManagedDlcAction(game);
               showToast(input.checked ? "DLC added to the update queue." : "DLC removed.");
+              input.disabled = false;
             } catch (error) {
               input.checked = !input.checked;
               input.disabled = false;
