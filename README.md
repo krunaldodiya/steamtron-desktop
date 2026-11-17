@@ -77,8 +77,8 @@ Before installing SteamTron, install these Windows prerequisites:
 
 1. **Microsoft Visual C++ 2015–2022 x64 Redistributable**
    — <https://aka.ms/vs/17/release/vc_redist.x64.exe>
-2. **Microsoft .NET 8 Runtime (x64)**
-   — <https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe>
+2. **Microsoft .NET 9 Runtime (x64)**
+   — <https://aka.ms/dotnet/9.0/dotnet-runtime-win-x64.exe>
 3. **WinFsp 2.1 x64** — <https://winfsp.dev/rel/>. In the WinFsp setup,
    select **Core** only.
 
@@ -128,7 +128,7 @@ then start **SteamTron**.
 | Dependency | Purpose | Link |
 |---|---|---|
 | Visual C++ 2015–2022 Redistributable (x64) | Required by SMD | <https://aka.ms/vs/17/release/vc_redist.x64.exe> |
-| .NET 8 Runtime (x64) | Required by the embedded DepotDownloaderMod engine | <https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe> |
+| .NET 9 Runtime (x64) | Required by the embedded DepotDownloaderMod engine | <https://aka.ms/dotnet/9.0/dotnet-runtime-win-x64.exe> |
 | WinFsp 2.1 (x64) | Signed Windows overlay driver; select **Core** | <https://winfsp.dev/rel/> |
 
 Install all three before launching a managed download. SteamTron currently
@@ -151,7 +151,7 @@ Open **Settings**.
 1. Run **Doctor** and resolve any Steam or backend warning.
 2. Open **Storage** and add the drive that should hold managed games.
 3. Linux users should keep Proton installed. Windows users need WinFsp, the
-   VC++ runtime, and the .NET 8 runtime before downloading managed games.
+   VC++ runtime, and the .NET 9 runtime before downloading managed games.
 
 ### 4. Add a game
 
@@ -209,7 +209,7 @@ SteamTron prompts before those operations.
   **Game Settings → General**.
 - Download stops with `VCRUNTIME140.dll was not found`: install the Microsoft
   Visual C++ x64 Redistributable and retry.
-- Download stops at `Fetching depot manifests…`: install the Microsoft .NET 8
+- Download stops at `Fetching depot manifests…`: install the Microsoft .NET 9
   Runtime (x64) and retry.
 - Windows drive picker is empty: install WinFsp, refresh drives, and use a
   writable non-system volume such as `D:`.

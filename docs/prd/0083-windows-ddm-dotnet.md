@@ -18,5 +18,5 @@ reason.
 
 ## Verification
 
-- Install VC++ x64 and .NET 8 x64 runtime in the Windows VM.
+- Install VC++ x64 and .NET 9 x64 runtime in the Windows VM.
 - Start a managed download; SMD emits depot progress rather than stalling.
