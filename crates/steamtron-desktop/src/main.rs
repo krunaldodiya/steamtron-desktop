@@ -299,44 +299,76 @@ async fn repair_steam_library() -> Result<String, String> {
         if steam::steam_root().is_err() {
             return Err("Steam is not installed. Install Steam and start it once, then retry. SteamTron does not install Steam.".into());
         }
-        let installed = || {
-            platform_backend()
-                .ok()
-                .and_then(|backend| backend.status().ok())
-                .map(|status| status.ready)
-                .unwrap_or(false)
-        };
         let marker = std::env::var_os("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join(".local/share/steamtron/installer.exit");
+        let log = marker.with_file_name("installer.log");
         let _ = std::fs::remove_file(&marker);
         require_steam_stopped()?;
         let repair_result = (|| -> Result<String, String> {
-            if !installed() {
-                launch_unlock_installer()?;
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-                loop {
-                    if installed() {
+            launch_unlock_installer()?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+            loop {
+                if let Ok(code) = std::fs::read_to_string(&marker) {
+                    let code = code.trim();
+                    if !code.is_empty() {
+                        if code != "0" {
+                            let tail = std::fs::read_to_string(&log)
+                                .ok()
+                                .and_then(|text| {
+                                    let mut lines: Vec<_> = text.lines().rev().take(12).collect();
+                                    lines.reverse();
+                                    Some(lines.join("\n"))
+                                })
+                                .filter(|text| !text.trim().is_empty());
+                            return Err(match tail {
+                                Some(tail) => format!(
+                                    "SLSsteam Moon repair failed with exit code {code}.\n{tail}"
+                                ),
+                                None => format!(
+                                    "SLSsteam Moon repair failed with exit code {code}. Check {}.",
+                                    log.display()
+                                ),
+                            });
+                        }
                         break;
                     }
-                    if let Ok(code) = std::fs::read_to_string(&marker) {
-                        let code = code.trim();
-                        if !code.is_empty() && code != "0" {
-                            return Err(format!(
-                                "SLSsteam installer failed with exit code {code}. Check ~/.local/share/steamtron/installer.log."
-                            ));
-                        }
-                    }
-                    if std::time::Instant::now() >= deadline {
-                        return Err("SLSsteam Moon was not installed within 60 seconds. Check ~/.local/share/steamtron/installer.log for the installer error.".into());
-                    }
-                    std::thread::sleep(std::time::Duration::from_secs(1));
                 }
+                if std::time::Instant::now() >= deadline {
+                    return Err(format!(
+                        "SLSsteam Moon repair did not finish within 10 minutes. Check {}.",
+                        log.display()
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
             }
+
+            let backend = platform_backend().map_err(|error| error.to_string())?;
+            let status = backend.status().map_err(|error| error.to_string())?;
+            if !status.ready {
+                return Err(format!(
+                    "SLSsteam Moon repair completed but the backend is still not ready: {}",
+                    status.details
+                ));
+            }
+            let registration = steamtron_library::managed::register_missing_managed_games(
+                &backend as &dyn RegistrationBackend,
+            )
+            .map_err(|error| error.to_string())?;
             let repaired = repair_missing_appmanifests().unwrap_or_default();
+            if !registration.failed.is_empty() {
+                return Err(format!(
+                    "SLSsteam Moon is installed, but {} managed game registration(s) failed: {}",
+                    registration.failed.len(),
+                    registration.failed.join("; ")
+                ));
+            }
             Ok(format!(
-                "SLSsteam Moon is installed. Recreated {} appmanifest{}. You can now start Steam manually.",
+                "SLSsteam Moon x86_64 is installed. Re-registered {} game{} with Steam ({} already registered). Recreated {} appmanifest{}. Start Steam manually.",
+                registration.registered,
+                if registration.registered == 1 { "" } else { "s" },
+                registration.already_registered,
                 repaired.len(),
                 if repaired.len() == 1 { "" } else { "s" }
             ))

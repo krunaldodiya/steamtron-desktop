@@ -7,6 +7,15 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ## [0.1.16] - 2026-11-17
 
+### Added
+
+- Linux Doctor detects a 32-bit SLSsteam Moon hook as incompatible with the
+  64-bit Steam client and repairs it by downloading the x86_64 runtime into
+  `~/.local/share/SLSsteam`. No SLSsteam, Lumen, or LuaTools files are bundled
+  in the application, and managed games missing from Steam are re-registered.
+- Doctor no longer offers to install SLSsteam Moon or BetterSteamTools when
+  Steam is missing, and disables the Repair action until Steam is found.
+
 ### Fixed
 
 - The Play button now changes to Stop while a managed Windows game is running.

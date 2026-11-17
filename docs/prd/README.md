@@ -109,3 +109,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0084](0084-store-warmup-flash.md) | Prevent Store flash on app launch | active | 2026-11-17 |
 | [0085](0085-windows-smoke-verification.md) | Windows smoke verification | done | 2026-11-17 |
 | [0086](0086-running-game-state.md) | Running game state on Windows | active | 2026-11-17 |
+| [0087](0087-linux-backend-repair.md) | Linux SLSsteam-only repair | done | 2026-11-17 |
+| [0088](0088-backend-install-without-steam.md) | Do not offer backend install without Steam | done | 2026-11-17 |

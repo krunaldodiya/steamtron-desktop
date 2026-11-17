@@ -559,6 +559,161 @@ pub fn reconcile_registrations_at(
     Ok(report)
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct RegistrationRepairReport {
+    pub checked: usize,
+    pub already_registered: usize,
+    pub registered: usize,
+    pub failed: Vec<String>,
+}
+
+/// Re-register managed games that are not currently registered with Steam.
+///
+/// This is the repair counterpart to adding a game while the unlock backend is
+/// unavailable: the game exists in the SteamTron library, and its Lua/manifest
+/// bundle is still in the persistent bundle store, so it can be added to Steam
+/// without downloading the game again.
+pub fn register_missing_managed_games(
+    backend: &dyn RegistrationBackend,
+) -> Result<RegistrationRepairReport, LibraryError> {
+    register_missing_managed_games_at(&Library::default_path(), backend)
+}
+
+pub fn register_missing_managed_games_at(
+    library_path: &Path,
+    backend: &dyn RegistrationBackend,
+) -> Result<RegistrationRepairReport, LibraryError> {
+    register_missing_managed_games_with(library_path, backend, |appid| {
+        crate::persistent_bundle(appid)
+    })
+}
+
+fn register_missing_managed_games_with<F>(
+    library_path: &Path,
+    backend: &dyn RegistrationBackend,
+    mut bundle_for: F,
+) -> Result<RegistrationRepairReport, LibraryError>
+where
+    F: FnMut(&str) -> Option<Bundle>,
+{
+    let mut library =
+        Library::open(library_path).map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let mut report = RegistrationRepairReport {
+        checked: 0,
+        already_registered: 0,
+        registered: 0,
+        failed: Vec::new(),
+    };
+    let mut changed = false;
+    for game in library.games().to_vec() {
+        let Some(appid) = game.metadata_app_id else {
+            continue;
+        };
+        report.checked += 1;
+        let appid_text = appid.to_string();
+
+        if backend
+            .verify(&appid_text)
+            .map(|state| state.registered)
+            .unwrap_or(false)
+        {
+            report.already_registered += 1;
+            if game
+                .steam
+                .as_ref()
+                .map(|registration| !registration.registered)
+                .unwrap_or(true)
+            {
+                let mut updated = game.clone();
+                if let Some(registration) = updated.steam.as_mut() {
+                    registration.registered = true;
+                    registration.state = RegistrationState::Registered;
+                } else {
+                    updated.steam = Some(SteamRegistration {
+                        app_id: appid,
+                        registered: true,
+                        backend: backend.id().to_owned(),
+                        state: RegistrationState::Registered,
+                        registered_at: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|elapsed| elapsed.as_secs())
+                            .unwrap_or(0),
+                        launch_mode: LaunchMode::Emulator,
+                    });
+                }
+                library
+                    .upsert_game(updated)
+                    .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+                changed = true;
+            }
+            continue;
+        }
+
+        let Some(bundle) = bundle_for(&appid_text) else {
+            report.failed.push(format!(
+                "{appid_text}: manifest bundle is missing; re-add the game to restore it"
+            ));
+            continue;
+        };
+        let lua = windows_only_lua(&appid_text, &bundle.lua)
+            .unwrap_or_else(|_| canonical_lua(&bundle.lua));
+        let request = RegistrationRequest {
+            app_id: &appid_text,
+            title: &game.title,
+            lua: &lua,
+            manifests: &bundle.manifests,
+        };
+        let registration = match backend.register(&request) {
+            Ok(registration) => registration,
+            Err(error) => {
+                report.failed.push(format!("{appid_text}: {error}"));
+                continue;
+            }
+        };
+        if !backend
+            .verify(&appid_text)
+            .map(|state| state.registered)
+            .unwrap_or(false)
+        {
+            report.failed.push(format!(
+                "{appid_text}: {} did not keep the registration",
+                backend.id()
+            ));
+            continue;
+        }
+
+        let launch_mode = game
+            .steam
+            .as_ref()
+            .map(|registration| registration.launch_mode.clone())
+            .unwrap_or(LaunchMode::Emulator);
+        let registered_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0);
+        let mut updated = game;
+        updated.steam = Some(SteamRegistration {
+            app_id: appid,
+            registered: true,
+            backend: registration.backend,
+            state: RegistrationState::PendingRestart,
+            registered_at,
+            launch_mode,
+        });
+        library
+            .upsert_game(updated)
+            .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+        report.registered += 1;
+        changed = true;
+    }
+    if changed {
+        library
+            .save()
+            .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    }
+    Ok(report)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct ManagedAddRequest {
     pub app_id: u32,
@@ -1280,6 +1435,55 @@ mod tests {
         assert!(super::managed_lua_path(&game).is_none_or(|path| !path.exists()));
         assert!(game.steam.is_none());
         assert_eq!(game.launch.prefix_mode, "umu");
+    }
+
+    #[test]
+    fn repair_registers_a_game_added_without_a_backend() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 4242,
+                title: "Repair Sample".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                provider: ManifestProvider::SteamMl,
+                proton: String::new(),
+            },
+            sample_bundle("4242"),
+            None,
+            &library_path,
+        )
+        .unwrap();
+        let before = Library::open(&library_path)
+            .unwrap()
+            .game("4242")
+            .unwrap()
+            .clone();
+        assert!(before.steam.is_none());
+        assert!(!backend.verify("4242").unwrap().registered);
+
+        let report = register_missing_managed_games_with(&library_path, &backend, |_| {
+            Some(sample_bundle("4242"))
+        })
+        .unwrap();
+
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.registered, 1);
+        assert!(report.failed.is_empty());
+        assert!(backend.verify("4242").unwrap().registered);
+        let after = Library::open(&library_path)
+            .unwrap()
+            .game("4242")
+            .unwrap()
+            .clone();
+        assert!(after
+            .steam
+            .as_ref()
+            .is_some_and(|registration| registration.registered));
     }
 
     #[test]

@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -37,6 +38,19 @@ impl RegistrationError {
             source,
         }
     }
+}
+
+/// True when `path` is an ELF image whose class is 64-bit.
+///
+/// Steam's Linux client is 64-bit, so a 32-bit `SLSsteam.so` is present but
+/// unusable: the loader rejects it with `ELFCLASS32`. This is a cheap header
+/// check, not a full ELF validation.
+pub fn is_elf64(path: &Path) -> bool {
+    let mut header = [0u8; 5];
+    fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .map(|_| &header[..4] == b"\x7fELF" && header[4] == 2)
+        .unwrap_or(false)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -80,7 +94,10 @@ pub trait RegistrationBackend {
     /// Stable identifier stored in `library.json` (`slssteam-moon`, ...).
     fn id(&self) -> &'static str;
     fn status(&self) -> Result<BackendStatus, RegistrationError>;
-    fn register(&self, request: &RegistrationRequest<'_>) -> Result<Registration, RegistrationError>;
+    fn register(
+        &self,
+        request: &RegistrationRequest<'_>,
+    ) -> Result<Registration, RegistrationError>;
     fn verify(&self, app_id: &str) -> Result<RegistrationState, RegistrationError>;
     fn unregister(&self, app_id: &str) -> Result<(), RegistrationError>;
 }
@@ -149,3 +166,25 @@ pub fn platform_backend() -> Result<BtsBackend, RegistrationError> {
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
 compile_error!("SteamTron Desktop supports Linux and Windows");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifies_elf_class_from_the_header() {
+        let temp = tempfile::tempdir().unwrap();
+        let elf64 = temp.path().join("elf64.so");
+        let elf32 = temp.path().join("elf32.so");
+        let text = temp.path().join("text");
+
+        fs::write(&elf64, b"\x7fELF\x02\x01\x01").unwrap();
+        fs::write(&elf32, b"\x7fELF\x01\x01\x01").unwrap();
+        fs::write(&text, b"not an elf").unwrap();
+
+        assert!(is_elf64(&elf64));
+        assert!(!is_elf64(&elf32));
+        assert!(!is_elf64(&text));
+        assert!(!is_elf64(&temp.path().join("missing")));
+    }
+}

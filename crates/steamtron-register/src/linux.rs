@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    validate_appid, write_atomic, write_manifests, BackendStatus, Registration, RegistrationBackend,
-    RegistrationError, RegistrationRequest, RegistrationState,
+    validate_appid, write_atomic, write_manifests, BackendStatus, Registration,
+    RegistrationBackend, RegistrationError, RegistrationRequest, RegistrationState,
 };
 
 #[derive(Clone, Debug)]
@@ -82,10 +82,24 @@ impl RegistrationBackend for SlsteamBackend {
     }
 
     fn status(&self) -> Result<BackendStatus, RegistrationError> {
+        use crate::is_elf64;
+
         let sls = self.sls_root().join("SLSsteam.so");
+        let wrapper = self.sls_root().join("path/steam");
         let lua_dir = self.lua_dir();
         let installed = sls.is_file();
-        let ready = installed && lua_dir.parent().is_some_and(Path::exists);
+        let architecture_ok = installed && is_elf64(&sls);
+        let wrapper_ok = wrapper.is_file();
+        let ready = architecture_ok && wrapper_ok && lua_dir.parent().is_some_and(Path::exists);
+        let details = if !installed {
+            "SLSsteam Moon is not installed; fixes will work, library unlocking will not.".into()
+        } else if !architecture_ok {
+            "SLSsteam Moon is 32-bit and cannot load in the 64-bit Steam client. Open Settings → Doctor to repair it.".into()
+        } else if !wrapper_ok {
+            "SLSsteam Moon has no launch wrapper. Open Settings → Doctor to repair it.".into()
+        } else {
+            "SLSsteam Moon hook detected (x86_64).".into()
+        };
         Ok(BackendStatus {
             platform: "linux",
             backend: self.id(),
@@ -93,15 +107,14 @@ impl RegistrationBackend for SlsteamBackend {
             ready,
             steam_root: self.steam_root.display().to_string(),
             lua_dir: lua_dir.display().to_string(),
-            details: if installed {
-                "SLSsteam Moon hook detected.".into()
-            } else {
-                "SLSsteam Moon is not installed; fixes will work, library unlocking will not.".into()
-            },
+            details,
         })
     }
 
-    fn register(&self, request: &RegistrationRequest<'_>) -> Result<Registration, RegistrationError> {
+    fn register(
+        &self,
+        request: &RegistrationRequest<'_>,
+    ) -> Result<Registration, RegistrationError> {
         validate_appid(request.app_id)?;
         if request.lua.trim().is_empty() {
             return Err(RegistrationError::NotInstalled("empty Lua manifest".into()));
@@ -183,13 +196,33 @@ mod tests {
         assert!(result.lua_path.is_file());
         assert!(backend.manifest_store().join("42_7.manifest").is_file());
         assert!(backend.depotcache().join("42_7.manifest").is_file());
-        assert_eq!(backend.manifest_store().join(".preferred_42").is_file(), true);
+        assert_eq!(
+            backend.manifest_store().join(".preferred_42").is_file(),
+            true
+        );
 
         let state = backend.verify("42").unwrap();
         assert!(state.registered);
 
         backend.unregister("42").unwrap();
         assert!(!backend.verify("42").unwrap().registered);
+    }
+
+    #[test]
+    fn marks_a_32_bit_hook_as_not_ready() {
+        let temp = tempfile::tempdir().unwrap();
+        let steam = temp.path().join("Steam");
+        let data = temp.path().join("data");
+        let sls = data.join("SLSsteam");
+        fs::create_dir_all(steam.join("config")).unwrap();
+        fs::create_dir_all(&sls).unwrap();
+        fs::write(sls.join("SLSsteam.so"), b"\x7fELF\x01\x01\x01").unwrap();
+        let backend = SlsteamBackend::with_paths(&steam, &data);
+
+        let status = backend.status().unwrap();
+        assert!(status.installed);
+        assert!(!status.ready);
+        assert!(status.details.contains("32-bit"));
     }
 
     #[test]
