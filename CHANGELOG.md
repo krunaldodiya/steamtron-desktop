@@ -5,7 +5,18 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.10] - 2026-11-17
+
+### Fixed
+
+- Windows downloads use SMD's embedded DepotDownloaderMod engine instead of
+  the native engine that stalls while fetching depot manifests.
+- Windows requires the VC++ x64 and .NET runtime prerequisites.
+- The background Store warm-up no longer paints the Store screen while the
+  active route is Home.
+
 ## [0.1.9] - 2026-11-17
+
 
 ### Fixed
 
@@ -109,6 +120,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.10]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.10
 [0.1.9]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.9
 [0.1.8]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.8
 [0.1.7]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.7

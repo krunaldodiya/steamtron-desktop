@@ -208,13 +208,9 @@ pub(crate) fn configure_smd(data_dir: &Path) -> Result<(), String> {
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
-    // The Linux build needs SMD's bundled DepotDownloaderMod engine because its
-    // native Rust engine can stall after the manifest-code fallback. Windows
-    // SMD uses its self-contained native engine; DepotDownloaderMod is not
-    // provisioned there.
-    #[cfg(target_os = "windows")]
-    settings.insert("use_native_downloader".into(), serde_json::Value::Bool(true));
-    #[cfg(not(target_os = "windows"))]
+    // The native Rust engine can stall while fetching anonymous depot
+    // manifests. SMD ships DepotDownloaderMod as the stable engine. Windows
+    // additionally needs the .NET runtime for it.
     settings.insert("use_native_downloader".into(), serde_json::Value::Bool(false));
     let payload = serde_json::to_vec_pretty(&settings).map_err(|error| error.to_string())?;
     let temporary = path.with_extension("json.steamtron.tmp");
