@@ -103,6 +103,11 @@ driver install do not produce additional UAC prompts.
 - R9: The wrapper shows inline per-step progress and a final success/failure
   result. Exact percentages are shown only where an installer exposes them;
   otherwise the active step uses an indeterminate indicator.
+- R9a: The active step shows an animation, elapsed time, a typical duration, and
+  periodic "still installing" reassurance. A details log is available inline.
+- R9b: The wrapper keeps the UI responsive while installers run by launching
+  them asynchronously and polling process state, rather than blocking the
+  progress page with `ExecWait`.
 - R10: Reboot-required installers are handled with `/norestart` and a clear
   restart prompt after the app installer finishes.
 
@@ -136,5 +141,9 @@ driver install do not produce additional UAC prompts.
   this feature.
 - The elevated wrapper is the only UAC prompt. Child installers inherit the
   elevated token and must be invoked with quiet/silent switches.
+- Silent installers do not expose reliable percentages. Do not fabricate a
+  percentage; use a step checklist, active-step spinner, elapsed time and a
+  log/details view. If exact progress is required later, replace the NSIS
+  progress page with a small bundled native bootstrap UI.
 - Bundled installers must be verified by signature/hash before execution; the
   app must not download arbitrary executables at install time.
