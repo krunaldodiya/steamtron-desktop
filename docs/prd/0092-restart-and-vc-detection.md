@@ -1,6 +1,6 @@
 # Restart guard and x64 prerequisite detection
 
-- Status: active
+- Status: done
 - Date: 2026-11-17
 - Areas: `crates/steamtron-desktop/ui/app.js`,
   `crates/steamtron-desktop/windows/bootstrapper.nsi`
@@ -48,9 +48,11 @@ Tauri's “Delete app data” section removes only `%APPDATA%\<bundle-id>` and
 
 - `node --check crates/steamtron-desktop/ui/app.js`
 - `cargo check -p steamtron-desktop`
-- Windows release workflow compiles the NSIS bootstrapper.
-- Windows VM interaction is required to confirm the disabled button and
-  prerequisite page.
+- 0.1.22 Windows and Linux release builds succeeded from commit `c2fd197`.
+- Windows installer SHA-256:
+  `02189fa9bf175bb7a52236e434f103f26f988aedc555f3f63c95548c4b16f183`.
+- Windows VM interaction is still required to confirm the disabled button and
+  prerequisite page visually.
 
 ## Decisions and risks
 
