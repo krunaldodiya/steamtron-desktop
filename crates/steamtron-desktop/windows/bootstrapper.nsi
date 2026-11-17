@@ -134,7 +134,6 @@ Section "Install"
 
   ${If} $VCStatus == "Missing"
     DetailPrint "Installing Visual C++ 2015-2022 x64..."
-    SetProgress 10
     ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
     ${If} $0 == 3010
     ${OrIf} $0 == 1641
@@ -147,7 +146,6 @@ Section "Install"
     DetailPrint "Visual C++ already installed; skipping."
   ${EndIf}
 
-  SetProgress 35
   ${If} $DotNetStatus == "Missing"
     DetailPrint "Installing .NET Desktop Runtime 9.0.x x64..."
     ExecWait '"$PLUGINSDIR\windowsdesktop-runtime-9.0-win-x64.exe" /install /quiet /norestart' $0
@@ -162,7 +160,6 @@ Section "Install"
     DetailPrint ".NET Desktop Runtime already installed; skipping."
   ${EndIf}
 
-  SetProgress 65
   ${If} $WinFspStatus == "Missing"
     DetailPrint "Installing WinFsp 2.1 x64..."
     ExecWait '"$SYSDIR\msiexec.exe" /i "$PLUGINSDIR\winfsp-2.1.25156.msi" /qn /norestart' $0
@@ -177,14 +174,12 @@ Section "Install"
     DetailPrint "WinFsp already installed; skipping."
   ${EndIf}
 
-  SetProgress 80
   DetailPrint "Installing SteamTron..."
   ExecWait '"$PLUGINSDIR\SteamTron-app-setup.exe" /S' $0
   ${If} $0 != 0
     MessageBox MB_ICONSTOP "SteamTron installation failed with exit code $0."
     Abort
   ${EndIf}
-  SetProgress 100
   DetailPrint "Installation complete."
   ${If} $RebootRequired == "1"
     MessageBox MB_ICONINFORMATION "A restart is required to finish installing the prerequisites."

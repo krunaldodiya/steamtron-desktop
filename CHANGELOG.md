@@ -5,7 +5,15 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.12] - 2026-11-17
+
+### Fixed
+
+- The Windows bootstrapper compiles without the unsupported `SetProgress`
+  instruction and is attached as the primary Windows release asset.
+
 ## [0.1.11] - 2026-11-17
+
 
 ### Added
 
@@ -130,6 +138,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.12]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.12
 [0.1.11]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.11
 [0.1.10]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.10
 [0.1.9]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.9
