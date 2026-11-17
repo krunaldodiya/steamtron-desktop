@@ -171,6 +171,45 @@ function restoreDialogFocus(entry) {
   focusControl(target);
 }
 
+function openDialogEntry() {
+  for (let index = dialogWindows.length - 1; index >= 0; index -= 1) {
+    const entry = dialogWindows[index];
+    if (document.body.contains(entry.backdrop)
+      && !entry.backdrop.classList.contains("hidden")) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function restoreDialogFocus(entry) {
+  let target = entry?.returnFocus;
+  if (!target) return;
+  if (!document.contains(target)) {
+    if (target.id) target = document.getElementById(target.id);
+    else if (target.dataset?.storeId) {
+      target = document.querySelector(`[data-store-id="${CSS.escape(target.dataset.storeId)}"]`);
+    } else {
+      target = null;
+    }
+  }
+  if (!target || !document.contains(target) || target.disabled) return;
+  const top = openDialogEntry();
+  if (top) {
+    if (top.backdrop.contains(target)) focusControl(target);
+    return;
+  }
+  if (!authGate.classList.contains("hidden")) return;
+  if (document.body.classList.contains("settings-open")) {
+    const page = settingsPage();
+    if (page && page.contains(target)) focusControl(target);
+    return;
+  }
+  if (appSections.some((node) => node?.contains(target) && node.inert)) return;
+  if (target.getClientRects && target.getClientRects().length === 0) return;
+  focusControl(target);
+}
+
 function dialogTop() {
   for (let index = dialogWindows.length - 1; index >= 0; index -= 1) {
     const entry = dialogWindows[index];
@@ -4514,6 +4553,12 @@ async function renderGeneralSettings(host) {
   });
   host.querySelector("#setting-gamemode")?.addEventListener("change", async (event) => {
     try {
+      await invoke("update_library_settings", { defaultPrefixMode: event.target.value });
+      showToast(`Default prefix source: ${event.target.value}`);
+    } catch (error) { showToast(String(error), true); }
+  });
+  host.querySelector("#setting-gamemode")?.addEventListener("change", async (event) => {
+    try {
       await invoke("update_library_settings", { gamemode: event.target.checked });
       showToast(event.target.checked ? "GameMode optimization enabled" : "GameMode optimization disabled");
     } catch (error) { showToast(String(error), true); }
@@ -5381,6 +5426,47 @@ function resetStorePaging() {
   storePage = 1;
   storeError = "";
   storeRefreshing = false;
+function storePageItems(page = storePage) {
+  return storePages.get(page) || [];
+}
+function storeLoadedItems() {
+  return [...storePages.values()].flat();
+}
+
+async function loadIgdbStatus() {
+    const status = await invoke("igdb_store_status");
+    storeConnection = status && typeof status === "object" ? status : null;
+    storeConnectionError = "";
+    return storeConnection;
+  } catch (error) {
+    // Keep a failed status probe distinct from a deliberately disconnected
+    // account so the Store does not open an empty connect URL.
+    storeConnection = { configured: null, connected: false, connect_url: "" };
+    storeConnectionError = String(error);
+    return null;
+function storeConnectMarkup() {
+  if (storeConnectionError) {
+    return `<div class="status error store-connect"><strong>Could not check IGDB</strong><p>${escape(storeConnectionError)}</p><button id="store-retry-connection">Retry</button></div>`;
+  }
+  if (storeConnection?.configured === false) {
+    return `<div class="status error store-connect"><strong>IGDB is not configured</strong><p>The SteamTron API has no Twitch credentials. Set them on the server, then retry.</p><button id="store-retry-connection">Retry</button></div>`;
+  }
+  if (!storeConnection) {
+    return '<div class="status">Loading the Store…</div>';
+  }
+  if (storeConnecting) {
+    return '<div class="status store-connect"><strong>Waiting for IGDB…</strong><p>Finish connecting in the browser, then return to SteamTron. The Store will load automatically.</p><button id="store-retry-connection">Check again</button></div>';
+  }
+  return `<div class="status store-connect"><strong>Connect IGDB to browse the Store</strong><p>IGDB is connected through the SteamTron API once, then the Store queries IGDB directly.</p><button id="store-connect-igdb" class="primary">Connect IGDB</button><button id="store-retry-connection">Retry</button></div>`;
+function wireStoreConnectionButtons() {
+  const connect = detailEl.querySelector("#store-connect-igdb");
+  if (connect) connect.onclick = () => { void connectIgdbStore(); };
+  const retryConnection = detailEl.querySelector("#store-retry-connection");
+  if (retryConnection) retryConnection.onclick = () => {
+    storeConnecting = false;
+    storeTried = false;
+    void ensureStorePage(1);
+  };
 }
 
 function storePageItems(page = storePage) {

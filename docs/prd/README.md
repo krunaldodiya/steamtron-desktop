@@ -105,3 +105,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0079](0079-windows-smd-native.md) | Windows SMD native downloader | active | 2026-11-17 |
 | [0081](0081-windows-vcredist.md) | Install Visual C++ runtime on Windows | active | 2026-11-17 |
 | [0082](0082-windows-drive-label.md) | Normalize Windows drive labels | active | 2026-11-17 |
+| [0083](0083-windows-ddm-dotnet.md) | Windows downloads use DepotDownloaderMod + .NET | active | 2026-11-17 |
+| [0084](0084-store-warmup-flash.md) | Prevent Store flash on app launch | active | 2026-11-17 |

@@ -73,9 +73,25 @@ AppImages need FUSE. If FUSE is unavailable, extract and run:
 
 ### Windows
 
-Run `SteamTron_*_x64-setup.exe`. The installer is per-user and does not require
-administrator access. Install WinFsp separately before using the Windows
-overlay.
+Before installing SteamTron, install these Windows prerequisites:
+
+1. **Microsoft Visual C++ 2015–2022 x64 Redistributable**
+   — <https://aka.ms/vs/17/release/vc_redist.x64.exe>
+2. **Microsoft .NET 8 Runtime (x64)**
+   — <https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe>
+3. **WinFsp 2.1 x64** — <https://winfsp.dev/rel/>. In the WinFsp setup,
+   select **Core** only.
+
+The managed downloader uses the VC++ and .NET runtimes. The Windows overlay
+needs WinFsp's signed kernel driver; the SteamTron installer copies the WinFsp
+DLL beside the app when WinFsp is already installed.
+
+Then run `SteamTron_*_x64-setup.exe`. The installer is system-wide, installs
+under `C:\Program Files (x86)\SteamTron`, and requests UAC elevation so it can
+copy the WinFsp DLL.
+
+Steam is required for Steam games. WebView2 is included with Windows 11 and
+installed by the SteamTron installer when needed.
 
 ### Linux runtime dependencies
 
@@ -104,8 +120,20 @@ Install the package for your platform from [GitHub Releases](https://github.com/
 then start **SteamTron**.
 
 - Linux: install the `.deb`/`.rpm`, or run the AppImage.
-- Windows: run the per-user NSIS installer and install
-  [WinFsp](https://winfsp.dev/rel/) before using the overlay.
+- Windows: install the three Windows prerequisites below, then run the
+  system-wide NSIS installer.
+
+#### Windows prerequisites
+
+| Dependency | Purpose | Link |
+|---|---|---|
+| Visual C++ 2015–2022 Redistributable (x64) | Required by SMD | <https://aka.ms/vs/17/release/vc_redist.x64.exe> |
+| .NET 8 Runtime (x64) | Required by the embedded DepotDownloaderMod engine | <https://aka.ms/dotnet/8.0/dotnet-runtime-win-x64.exe> |
+| WinFsp 2.1 (x64) | Signed Windows overlay driver; select **Core** | <https://winfsp.dev/rel/> |
+
+Install all three before launching a managed download. SteamTron currently
+requires these prerequisites separately; they are not yet bundled into the
+Windows installer.
 
 ### 2. Sign in
 
@@ -122,7 +150,8 @@ Open **Settings**.
 
 1. Run **Doctor** and resolve any Steam or backend warning.
 2. Open **Storage** and add the drive that should hold managed games.
-3. Linux users should keep Proton installed; Windows overlay users need WinFsp.
+3. Linux users should keep Proton installed. Windows users need WinFsp, the
+   VC++ runtime, and the .NET 8 runtime before downloading managed games.
 
 ### 4. Add a game
 
@@ -178,6 +207,12 @@ SteamTron prompts before those operations.
 
 - No **Play** button: the game has no launch target; set one under
   **Game Settings → General**.
+- Download stops with `VCRUNTIME140.dll was not found`: install the Microsoft
+  Visual C++ x64 Redistributable and retry.
+- Download stops at `Fetching depot manifests…`: install the Microsoft .NET 8
+  Runtime (x64) and retry.
+- Windows drive picker is empty: install WinFsp, refresh drives, and use a
+  writable non-system volume such as `D:`.
 - Download stops: reopen the operation from the download manager and use
   **Resume**.
 - Proton errors: install a runner under **Settings → Proton Manager**, then
