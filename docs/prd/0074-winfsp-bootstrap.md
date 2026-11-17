@@ -110,6 +110,8 @@ driver install do not produce additional UAC prompts.
   progress page with `ExecWait`.
 - R10: Reboot-required installers are handled with `/norestart` and a clear
   restart prompt after the app installer finishes.
+- R11: If a reboot is required, the Finish page must warn and must not launch
+  SteamTron before Windows restarts.
 
 ## Non-goals
 

@@ -27,9 +27,11 @@ BrandingText "SteamTron"
 !define MUI_WELCOMEPAGE_TITLE "Install SteamTron"
 !define MUI_WELCOMEPAGE_TEXT "This setup checks the Windows runtime prerequisites, installs only the missing components, then installs SteamTron."
 !define MUI_FINISHPAGE_TITLE "SteamTron is ready"
-!define MUI_FINISHPAGE_TEXT "SteamTron and its prerequisites are installed."
+!define MUI_FINISHPAGE_TEXT "SteamTron and its prerequisites are installed. If Windows asks for a restart, restart before launching SteamTron."
 !define MUI_FINISHPAGE_RUN "$PROGRAMFILES32\SteamTron\steamtron-desktop.exe"
+!define MUI_FINISHPAGE_RUN_FUNCTION RunAfterInstall
 !define MUI_FINISHPAGE_RUN_TEXT "Launch SteamTron"
+!define MUI_FINISHPAGE_RUN_NOTCHECKED
 !insertmacro MUI_PAGE_WELCOME
 Page custom PrereqPage PrereqPageLeave
 !insertmacro MUI_PAGE_INSTFILES
@@ -109,6 +111,14 @@ Function PrereqPage
   Pop $InstallButton
   ${NSD_OnClick} $InstallButton StartInstall
   nsDialogs::Show
+FunctionEnd
+
+Function RunAfterInstall
+  ${If} $RebootRequired == "1"
+    MessageBox MB_ICONINFORMATION "Windows must be restarted before SteamTron can use the newly installed runtimes and WinFsp driver. Restart Windows, then launch SteamTron."
+    Return
+  ${EndIf}
+  ExecShell "open" "$PROGRAMFILES32\SteamTron\steamtron-desktop.exe"
 FunctionEnd
 
 Function StartInstall
