@@ -4322,10 +4322,11 @@ async function refreshLibrary() {
 
 async function loadDoctor(target = null) {
   const host = target || detailEl;
-  host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam, SLSsteam Moon, and fixes requirements.</p></div><div class="update-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button></div></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
+  const backendName = IS_WINDOWS ? "BetterSteamTools" : "SLSsteam Moon";
+  host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and Steam library support.</p></div><div class="update-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button></div></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
   host.querySelector("#doctor-refresh").onclick = () => loadDoctor(host);
   host.querySelector("#doctor-repair").onclick = async () => {
-    if (!(await confirmDialog({ title: "Repair Steam integration", message: "Repair downloads the x86_64 SLSsteam Moon runtime and installs it into your existing Steam installation. It removes an old SLSsteam install, does not install Steam, Lumen, or LuaTools, and re-registers games missing from Steam. Start Steam manually afterward. Continue?", confirmLabel: "Repair" }))) return;
+    if (!(await confirmDialog({ title: "Repair Steam integration", message: `Repair downloads and installs ${backendName} into your existing Steam installation. It does not install Steam or LuaTools, and it re-registers games missing from Steam. Start Steam manually afterward. Continue?`, confirmLabel: "Repair" }))) return;
     const button = host.querySelector("#doctor-repair");
     const stop = busy(button, "Repairing…");
     try {
@@ -4611,7 +4612,7 @@ async function renderGeneralSettings(host) {
     backdrop.innerHTML = `<div class="modal doctor-modal">
       <div class="modal-head"><h2>Steam checks</h2><button class="modal-close" id="doctor-close" aria-label="Close">×</button></div>
       <p class="pane-note" id="doctor-status">Running checks…</p>
-      <div class="doctor-results" id="doctor-results"><div class="settings-row"><div class="row-text"><span>Checking Steam, Lua, fixes and SLSsteam Moon…</span></div></div></div>
+      <div class="doctor-results" id="doctor-results"><div class="settings-row"><div class="row-text"><span>Checking Steam and Steam library support…</span></div></div></div>
       <div class="modal-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button><button id="doctor-dismiss">Close</button></div>
     </div>`;
     document.body.appendChild(backdrop);
@@ -4621,13 +4622,9 @@ async function renderGeneralSettings(host) {
     backdrop.querySelector("#doctor-dismiss").onclick = close;
 
     const checkRepair = (check) => {
-      if (check.id === "managed-appmanifest") return { label: "Repair appmanifests", command: "repair_library_entries" };
-      if (check.id === "steam-process") return { label: "Start Steam", command: "restart_steam" };
       if (check.repair === "install-unlock-backend") {
         return { label: `Install ${check.title}`, command: "repair_steam_library", confirm: true };
       }
-      if (check.id === "steam-injection") return { label: "Start Steam", command: "restart_steam" };
-      if (check.id === "stplug-in") return { label: "Repair Steam library", command: "repair_steam_library", confirm: true };
       return null;
     };
 
@@ -4657,7 +4654,7 @@ async function renderGeneralSettings(host) {
       const status = backdrop.querySelector("#doctor-status");
       const results = backdrop.querySelector("#doctor-results");
       status.textContent = "Running checks…";
-      results.innerHTML = '<div class="settings-row"><div class="row-text"><span>Checking Steam, Lua, fixes and SLSsteam Moon…</span></div></div>';
+      results.innerHTML = '<div class="settings-row"><div class="row-text"><span>Checking Steam and Steam library support…</span></div></div>';
       try {
         const report = await invoke("doctor_report");
         const checks = report.checks || [];
@@ -4673,7 +4670,7 @@ async function renderGeneralSettings(host) {
         for (const button of results.querySelectorAll("[data-doctor-repair]")) {
           button.onclick = async () => {
             if (button.dataset.doctorConfirm
-              && !(await confirmDialog({ title: "Repair Steam components", message: "This repair downloads and installs the x86_64 SLSsteam Moon runtime inside your existing Steam installation. It does not install Steam, Lumen, or LuaTools, and it re-registers managed games missing from Steam. Continue?", confirmLabel: "Repair" }))) return;
+              && !(await confirmDialog({ title: "Repair Steam components", message: `This repair downloads and installs ${backendName} inside your existing Steam installation. It does not install Steam or LuaTools, and it re-registers managed games missing from Steam. Continue?`, confirmLabel: "Repair" }))) return;
             void runRepair(button, button.dataset.doctorRepair);
           };
         }
@@ -4691,7 +4688,7 @@ async function renderGeneralSettings(host) {
 
     backdrop.querySelector("#doctor-refresh").onclick = () => { void runChecks(); };
     backdrop.querySelector("#doctor-repair").onclick = async () => {
-      if (!(await confirmDialog({ title: "Repair SteamTron integration", message: "Repair SteamTron's Steam integration? This downloads and installs the x86_64 SLSsteam Moon runtime, removes an old SLSsteam install, does not install Steam, Lumen, or LuaTools, and re-registers games missing from Steam. Start Steam manually afterward.", confirmLabel: "Repair" }))) return;
+      if (!(await confirmDialog({ title: "Repair SteamTron integration", message: `Repair SteamTron's Steam integration? This downloads and installs ${backendName}, does not install Steam or LuaTools, and re-registers games missing from Steam. Start Steam manually afterward.`, confirmLabel: "Repair" }))) return;
       void runRepair(backdrop.querySelector("#doctor-repair"), "repair_steam_library");
     };
     await runChecks();

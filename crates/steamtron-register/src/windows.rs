@@ -39,12 +39,11 @@ impl BtsBackend {
         self.steam_root.join("steamapps/depotcache")
     }
 
-    fn backend_files(&self) -> [PathBuf; 4] {
+    fn backend_files(&self) -> [PathBuf; 3] {
         [
             self.steam_root.join("OpenSteamTool.dll"),
             self.steam_root.join("dwmapi.dll"),
             self.steam_root.join("xinput1_4.dll"),
-            self.steam_root.join("opensteamtool.toml"),
         ]
     }
 
@@ -60,7 +59,7 @@ impl RegistrationBackend for BtsBackend {
 
     fn status(&self) -> Result<BackendStatus, RegistrationError> {
         let files = self.backend_files();
-        let installed = files[0].exists() && files[1].exists() && files[3].exists();
+        let installed = files.iter().all(|file| file.exists());
         let lua_dir = self.lua_dir();
         Ok(BackendStatus {
             platform: "windows",

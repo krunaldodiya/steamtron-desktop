@@ -1,6 +1,4 @@
 use serde::Serialize;
-use std::collections::BTreeSet;
-#[cfg(target_os = "linux")]
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
@@ -57,6 +55,8 @@ const BACKEND_LABEL: &str = "Steam registration backend";
 
 #[cfg(target_os = "linux")]
 const LINUX_REPAIR_SCRIPT: &str = include_str!("../scripts/linux-repair-slsteam.sh");
+#[cfg(target_os = "windows")]
+const WINDOWS_REPAIR_SCRIPT: &str = include_str!("../scripts/windows-install-bettersteamtools.ps1");
 
 pub fn run() -> DoctorReport {
     let mut checks = Vec::new();
@@ -81,81 +81,16 @@ pub fn run() -> DoctorReport {
         }
     };
 
-    if let Some(root) = &steam_root {
-        let running = steam_running();
-        checks.push(check(
-            "steam-process",
-            "Steam process",
-            if running {
-                CheckStatus::Ok
-            } else {
-                CheckStatus::Warning
-            },
-            if running {
-                "Steam is running.".to_string()
-            } else {
-                "Steam is not running; start it manually after repairs.".to_string()
-            },
-        ));
-        #[cfg(target_os = "linux")]
-        {
-            let injected = running && steam_injected();
-            checks.push(check(
-                "steam-injection",
-                "SLSsteam injection",
-                if !running {
-                    CheckStatus::Warning
-                } else if injected {
-                    CheckStatus::Ok
-                } else {
-                    CheckStatus::Warning
-                },
-                if !running {
-                    "Steam is not running; start it through the SLSsteam wrapper.".to_string()
-                } else if injected {
-                    "Steam is running with SLSsteam LD_AUDIT injection.".to_string()
-                } else {
-                    "Steam is running without SLSsteam injection. Exit Steam and start it through the SLSsteam wrapper.".to_string()
-                },
-            ));
-        }
-        let lua_dir = if root.join("config/stplug-in").is_dir() {
-            root.join("config/stplug-in")
-        } else {
-            root.join("config/lua")
-        };
-        checks.push(check(
-            "stplug-in",
-            "Lua manifest directory",
-            if lua_dir.is_dir() {
-                CheckStatus::Ok
-            } else {
-                CheckStatus::Warning
-            },
-            lua_dir.display().to_string(),
-        ));
-    }
-
     let steam_available = steam_root.is_some();
-    // Windows BetterSteamTools installation is not implemented yet. Do not
-    // offer a repair action that cannot run. Linux repair also requires an
-    // existing Steam installation.
-    let backend_install_available = steam_available && cfg!(target_os = "linux");
-
+    let backend_install_available = steam_available;
     let backend = platform_backend().and_then(|backend| {
         let status = backend.status()?;
         Ok((backend, status))
     });
-    let mut backend_ready = false;
+
     match backend {
         Ok((_, status)) => {
-            backend_ready = status.ready;
-            let mut detail = format!("{}: {}", status.backend, status.details);
-            if !status.ready && !cfg!(target_os = "linux") {
-                detail.push_str(
-                    " Automatic BetterSteamTools installation is not available in this build.",
-                );
-            }
+            let detail = format!("{}: {}", status.backend, status.details);
             let mut item = check(
                 "unlock-backend",
                 BACKEND_LABEL,
@@ -174,48 +109,14 @@ pub fn run() -> DoctorReport {
         Err(error) => {
             let detail = if !steam_available {
                 format!("{error}. Install Steam first; SteamTron does not install Steam.")
-            } else if !cfg!(target_os = "linux") {
-                format!(
-                    "{error}. Automatic {BACKEND_LABEL} installation is not available in this build."
-                )
             } else {
-                error.to_string()
+                format!("{error}.")
             };
             let mut item = check("unlock-backend", BACKEND_LABEL, CheckStatus::Error, detail);
             if backend_install_available {
                 item.repair = Some("install-unlock-backend");
             }
             checks.push(item);
-        }
-    }
-
-    let managed = steam::managed_appids().unwrap_or_default();
-    let games = steam::games().unwrap_or_default();
-    let installed_appids: BTreeSet<&str> = games.iter().map(|game| game.appid.as_str()).collect();
-    if !managed.is_empty() && !backend_ready {
-        let mut item = check(
-            "managed-ownership",
-            "Managed game ownership",
-            CheckStatus::Error,
-            format!(
-                "{} managed Lua entries exist but {} is not active. Steam can show Purchase for installed games.",
-                managed.len(),
-                BACKEND_LABEL
-            ),
-        );
-        if backend_install_available {
-            item.repair = Some("install-unlock-backend");
-        }
-        checks.push(item);
-    }
-    for appid in &managed {
-        if !installed_appids.contains(appid.as_str()) {
-            checks.push(check(
-                "managed-appmanifest",
-                "Managed appmanifest",
-                CheckStatus::Warning,
-                format!("Lua entry {appid} has no installed appmanifest; the game may not appear as installed."),
-            ));
         }
     }
 
@@ -261,37 +162,8 @@ pub fn steam_injected() -> bool {
     false
 }
 
-#[cfg(target_os = "linux")]
-fn steam_running() -> bool {
-    let Ok(entries) = fs::read_dir("/proc") else {
-        return false;
-    };
-    for entry in entries.flatten() {
-        let Ok(cmdline) = fs::read(entry.path().join("cmdline")) else {
-            continue;
-        };
-        if cmdline
-            .split(|byte| *byte == 0)
-            .any(|arg| arg == b"steam" || arg.ends_with(b"/steam"))
-        {
-            return true;
-        }
-    }
-    false
-}
 
-#[cfg(target_os = "windows")]
-fn steam_running() -> bool {
-    hidden_command("tasklist")
-        .args(["/FI", "IMAGENAME eq steam.exe", "/NH"])
-        .output()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .to_ascii_lowercase()
-                .contains("steam.exe")
-        })
-        .unwrap_or(false)
-}
+
 
 #[cfg(target_os = "linux")]
 fn which(name: &str) -> Option<std::path::PathBuf> {
@@ -308,14 +180,17 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
 }
 
+#[cfg(target_os = "windows")]
+fn ps_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
 pub fn launch_unlock_installer() -> Result<String, String> {
+    let state_dir = steamtron_core::paths::layout().home();
+    fs::create_dir_all(&state_dir).map_err(|error| error.to_string())?;
+
     #[cfg(target_os = "linux")]
     {
-        let state_dir = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".local/share/steamtron");
-        fs::create_dir_all(&state_dir).map_err(|error| error.to_string())?;
         let script = state_dir.join("repair-slsteam.sh");
         fs::write(&script, LINUX_REPAIR_SCRIPT).map_err(|error| error.to_string())?;
         let mut permissions = fs::metadata(&script)
@@ -356,7 +231,34 @@ pub fn launch_unlock_installer() -> Result<String, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        Err("Windows helper installation is not implemented yet.".into())
+        let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
+        let script = state_dir.join("install-bettersteamtools.ps1");
+        fs::write(&script, WINDOWS_REPAIR_SCRIPT).map_err(|error| error.to_string())?;
+        let log = state_dir.join("installer.log");
+        let marker = state_dir.join("installer.exit");
+        let _ = fs::remove_file(&marker);
+        let args = format!(
+            "$ErrorActionPreference='Stop'; try {{ $argLine = '-NoProfile -ExecutionPolicy Bypass -File \"' + {script} + '\" -SteamRoot \"' + {root} + '\" -Log \"' + {log} + '\" -Marker \"' + {marker} + '\"'; $p = Start-Process -FilePath powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList $argLine; if ($p.ExitCode -ne 0) {{ Set-Content -LiteralPath {marker} -Value $p.ExitCode -NoNewline }} }} catch {{ Add-Content -LiteralPath {log} -Value $_.Exception.Message; Set-Content -LiteralPath {marker} -Value 1 -NoNewline }}",
+            script = ps_quote(&script.to_string_lossy()),
+            root = ps_quote(&steam_root.to_string_lossy()),
+            log = ps_quote(&log.to_string_lossy()),
+            marker = ps_quote(&marker.to_string_lossy()),
+        );
+        hidden_command("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &args,
+            ])
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        Ok("BetterSteamTools installer opened.".into())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        Err("Unlock backend installation is not supported on this platform.".into())
     }
 }
 
@@ -365,9 +267,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn doctor_returns_checks() {
+    fn doctor_returns_only_the_two_support_checks() {
         let report = run();
-        assert!(!report.checks.is_empty());
+        let ids: Vec<_> = report.checks.iter().map(|check| check.id).collect();
+        assert_eq!(ids, vec!["steam-root", "unlock-backend"]);
     }
 
     #[test]

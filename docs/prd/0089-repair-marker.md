@@ -1,6 +1,6 @@
 # Repair completion marker must not wait on background installers
 
-- Status: active
+- Status: done
 - Date: 2026-11-17
 - Areas: `crates/steamtron-doctor`
 
@@ -39,20 +39,19 @@ returns, regardless of background processes started by the installer.
 
 ## Acceptance criteria
 
-- [ ] A repair script that starts a background child holding stdout still
+- [x] A repair script that starts a background child holding stdout still
   produces `installer.exit`.
-- [ ] SteamTron leaves the “Repairing…” state after the installer finishes.
-- [ ] A nonzero installer exit is reported with log output.
+- [x] SteamTron leaves the “Repairing…” state after the installer finishes.
+- [x] A nonzero installer exit is reported with log output.
 
 ## Verification
 
-- Harness command with a background child and the new wrapper shape exits and
-  writes the marker.
-- `cargo test -p steamtron-doctor`
-- `cargo check -p steamtron-desktop`
-- Rebuilt 0.1.18 Linux binary installed.
-- Windows shares the Doctor command contract; Windows installer is rebuilt by
-  the release workflow.
+- Harness command with a background child exited and wrote `installer.exit=0`
+  while the child was still running.
+- `cargo test -p steamtron-doctor` — 2 passed.
+- `cargo check -p steamtron-desktop` — pass.
+- 0.1.18 Linux binary built, installed, and SHA-256 matched.
+- v0.1.18 release workflow succeeded for Linux and Windows.
 
 ## Decisions and risks
 

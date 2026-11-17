@@ -299,13 +299,16 @@ async fn repair_steam_library() -> Result<String, String> {
         if steam::steam_root().is_err() {
             return Err("Steam is not installed. Install Steam and start it once, then retry. SteamTron does not install Steam.".into());
         }
-        let marker = std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".local/share/steamtron/installer.exit");
+        let state_dir = steamtron_core::paths::layout().home();
+        let marker = state_dir.join("installer.exit");
         let log = marker.with_file_name("installer.log");
         let _ = std::fs::remove_file(&marker);
         require_steam_stopped()?;
+        let backend_name = if cfg!(target_os = "windows") {
+            "BetterSteamTools"
+        } else {
+            "SLSsteam Moon"
+        };
         let repair_result = (|| -> Result<String, String> {
             launch_unlock_installer()?;
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
@@ -324,10 +327,10 @@ async fn repair_steam_library() -> Result<String, String> {
                                 .filter(|text| !text.trim().is_empty());
                             return Err(match tail {
                                 Some(tail) => format!(
-                                    "SLSsteam Moon repair failed with exit code {code}.\n{tail}"
+                                    "{backend_name} repair failed with exit code {code}.\n{tail}"
                                 ),
                                 None => format!(
-                                    "SLSsteam Moon repair failed with exit code {code}. Check {}.",
+                                    "{backend_name} repair failed with exit code {code}. Check {}.",
                                     log.display()
                                 ),
                             });
@@ -337,7 +340,7 @@ async fn repair_steam_library() -> Result<String, String> {
                 }
                 if std::time::Instant::now() >= deadline {
                     return Err(format!(
-                        "SLSsteam Moon repair did not finish within 10 minutes. Check {}.",
+                        "{backend_name} repair did not finish within 10 minutes. Check {}.",
                         log.display()
                     ));
                 }
@@ -348,7 +351,7 @@ async fn repair_steam_library() -> Result<String, String> {
             let status = backend.status().map_err(|error| error.to_string())?;
             if !status.ready {
                 return Err(format!(
-                    "SLSsteam Moon repair completed but the backend is still not ready: {}",
+                    "{backend_name} repair completed but the backend is still not ready: {}",
                     status.details
                 ));
             }
@@ -365,7 +368,7 @@ async fn repair_steam_library() -> Result<String, String> {
                 ));
             }
             Ok(format!(
-                "SLSsteam Moon x86_64 is installed. Re-registered {} game{} with Steam ({} already registered). Recreated {} appmanifest{}. Start Steam manually.",
+                "{backend_name} is installed. Re-registered {} game{} with Steam ({} already registered). Recreated {} appmanifest{}. Start Steam manually.",
                 registration.registered,
                 if registration.registered == 1 { "" } else { "s" },
                 registration.already_registered,

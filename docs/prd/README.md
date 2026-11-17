@@ -111,4 +111,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0086](0086-running-game-state.md) | Running game state on Windows | active | 2026-11-17 |
 | [0087](0087-linux-backend-repair.md) | Linux SLSsteam-only repair | done | 2026-11-17 |
 | [0088](0088-backend-install-without-steam.md) | Do not offer backend install without Steam | done | 2026-11-17 |
-| [0089](0089-repair-marker.md) | Repair completion marker must not wait on background installers | active | 2026-11-17 |
+| [0089](0089-repair-marker.md) | Repair completion marker must not wait on background installers | done | 2026-11-17 |
+| [0090](0090-minimal-doctor.md) | Minimal Doctor and Windows backend install | done | 2026-11-17 |

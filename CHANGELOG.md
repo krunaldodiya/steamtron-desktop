@@ -5,6 +5,20 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.19] - 2026-11-17
+
+### Changed
+
+- Doctor now shows only the Steam installation check and the platform backend
+  check. Process, injection, Lua-directory, appmanifest, and managed-ownership
+  rows are removed.
+- The backend install action appears only when Steam is installed and the
+  backend is missing.
+- Linux repair installs only SLSsteam Moon; it does not install Lumen or
+  LuaTools.
+- Windows Doctor can install the BetterSteamTools/OpenSteamTool runtime from a
+  pinned, checksum-verified release using UAC elevation.
+
 ## [0.1.18] - 2026-11-17
 
 ### Fixed
@@ -192,6 +206,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.19]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.19
 [0.1.18]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.18
 [0.1.17]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.17
 [0.1.16]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.16
