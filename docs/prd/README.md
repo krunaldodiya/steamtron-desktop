@@ -103,3 +103,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0076](0076-windows-platform-ui.md) | Hide Linux-only Proton UI on Windows | active | 2026-11-17 |
 | [0077](0077-windows-native-launch.md) | Native Windows game launch | active | 2026-11-17 |
 | [0079](0079-windows-smd-native.md) | Windows SMD native downloader | active | 2026-11-17 |
+| [0081](0081-windows-vcredist.md) | Install Visual C++ runtime on Windows | active | 2026-11-17 |
+| [0082](0082-windows-drive-label.md) | Normalize Windows drive labels | active | 2026-11-17 |

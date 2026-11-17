@@ -2714,6 +2714,17 @@ fn path_writable(path: &std::path::Path) -> bool {
     }
 }
 
+fn display_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix("\\\\?\\") {
+            return std::path::PathBuf::from(rest);
+        }
+    }
+    path
+}
+
 #[tauri::command]
 fn available_library_drives() -> Result<Vec<serde_json::Value>, String> {
     use steamtron_core::library::Library;
@@ -2819,11 +2830,13 @@ fn available_library_drives() -> Result<Vec<serde_json::Value>, String> {
                 } else {
                     format!("Local Disk ({letter}:)")
                 };
-                let registered = library.drives().iter().any(|drive| drive.root == canonical);
-                let default = library
+                let registered = library
                     .drives()
                     .iter()
-                    .any(|drive| drive.root == canonical && drive.default);
+                    .any(|drive| drive.root == canonical || drive.root == path);
+                let default = library.drives().iter().any(|drive| {
+                    (drive.root == canonical || drive.root == path) && drive.default
+                });
                 result.push(serde_json::json!({
                     "path": root,
                     "label": label,
@@ -2858,7 +2871,7 @@ fn add_library_drive(path: String) -> Result<serde_json::Value, String> {
     if !root.is_absolute() || !root.is_dir() {
         return Err("Choose a mounted drive or folder.".into());
     }
-    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let root = display_path(root.canonicalize().map_err(|error| error.to_string())?);
     if !path_writable(&root) {
         return Err("This drive is not writable.".into());
     }
@@ -2871,7 +2884,10 @@ fn add_library_drive(path: String) -> Result<serde_json::Value, String> {
             .unwrap_or_else(|| {
                 #[cfg(target_os = "windows")]
                 {
-                    format!("System ({})", root.display())
+                    format!(
+                        "System ({})",
+                        root.display().to_string().trim_end_matches('\\')
+                    )
                 }
                 #[cfg(not(target_os = "windows"))]
                 {

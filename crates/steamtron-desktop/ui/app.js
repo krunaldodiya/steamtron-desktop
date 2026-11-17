@@ -30,6 +30,18 @@ function markRestartRequired() {
 
 function clearRestartRequired() {}
 
+function displayDriveRoot(root) {
+  return String(root || "").replace(/^\\\\\?\\/, "");
+}
+
+function displayDriveLabel(drive) {
+  const label = String(drive?.label || drive?.id || "");
+  const root = displayDriveRoot(drive?.root);
+  const letter = /^([A-Za-z]:)/.exec(root)?.[1] || "";
+  if (label.startsWith("System (") && letter) return `System (${letter})`;
+  return label;
+}
+
 function coverUrl(appid) {
   return `https://cdn.cloudflare.steamstatic.com/steam/apps/${encodeURIComponent(appid)}/library_600x900.jpg`;
 }
@@ -1050,7 +1062,7 @@ async function chooseDownloadDrive(game) {
     return root === drive.root || root.startsWith(`${drive.root.replace(/\/+$/, "")}/`);
   });
   select.innerHTML = drives.map((drive) => {
-    return `<option value="${escape(drive.id)}"${drive === (currentDrive || drives.find((entry) => entry.default) || drives[0]) ? " selected" : ""}>${escape(drive.label || drive.id)} · ${escape(drive.root)}</option>`;
+    return `<option value="${escape(drive.id)}"${drive === (currentDrive || drives.find((entry) => entry.default) || drives[0]) ? " selected" : ""}>${escape(displayDriveLabel(drive))} · ${escape(displayDriveRoot(drive.root))}</option>`;
   }).join("");
   startButton.disabled = false;
   meta.textContent = "Checking download size…";
@@ -1067,7 +1079,7 @@ async function chooseDownloadDrive(game) {
       const drive = drives.find((entry) => entry.id === option.value);
       const disk = drive ? freeByPath.get(drive.root) : null;
       if (!drive || !disk) continue;
-      option.textContent = `${drive.label || drive.id} · ${drive.root} · ${formatBytes(disk.free)} free`;
+      option.textContent = `${displayDriveLabel(drive)} · ${displayDriveRoot(drive.root)} · ${formatBytes(disk.free)} free`;
     }
   });
   startButton.onclick = async () => {
@@ -2200,7 +2212,7 @@ function openManagedGameOptions(game) {
           if (!drives.length) { showToast("No other drives are registered.", true); return; }
           const backdrop = document.createElement("div");
           backdrop.className = "modal-backdrop";
-          backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Move install folder</h2><button class="modal-close" id="move-close">×</button></div><p class="pane-note">Choose a registered drive. Existing files are moved; no copy is left behind.</p><div class="drive-choices">${drives.map((drive) => `<label class="drive-choice"><input type="radio" name="move-drive" value="${escape(drive.id)}"><span class="drive-choice-copy"><strong>${escape(drive.label || drive.id)}</strong><small>${escape(drive.root)}</small></span></label>`).join("")}</div><div class="modal-actions"><button id="move-cancel">Cancel</button><button class="primary" id="move-confirm" disabled>Move</button></div></div>`;
+          backdrop.innerHTML = `<div class="modal"><div class="modal-head"><h2>Move install folder</h2><button class="modal-close" id="move-close">×</button></div><p class="pane-note">Choose a registered drive. Existing files are moved; no copy is left behind.</p><div class="drive-choices">${drives.map((drive) => `<label class="drive-choice"><input type="radio" name="move-drive" value="${escape(drive.id)}"><span class="drive-choice-copy"><strong>${escape(displayDriveLabel(drive))}</strong><small>${escape(displayDriveRoot(drive.root))}</small></span></label>`).join("")}</div><div class="modal-actions"><button id="move-cancel">Cancel</button><button class="primary" id="move-confirm" disabled>Move</button></div></div>`;
           document.body.appendChild(backdrop);
           registerDialog(backdrop);
           const confirm = backdrop.querySelector("#move-confirm");
@@ -4716,7 +4728,7 @@ async function showAddDriveDialog() {
           : `${formatBytes(drive.free)} available of ${formatBytes(drive.total)} · Writable`;
       return `<label class="drive-choice${blocked ? " disabled" : ""}">
         <input type="radio" name="library-drive" value="${escape(drive.path)}"${blocked ? " disabled" : ""}>
-        <span class="drive-choice-copy"><strong>${escape(drive.label)}</strong><small>${escape(drive.path)}</small><small>${escape(reason)}</small></span>
+        <span class="drive-choice-copy"><strong>${escape(drive.label)}</strong><small>${escape(displayDriveRoot(drive.path))}</small><small>${escape(reason)}</small></span>
       </label>`;
     }).join("");
     for (const radio of choices.querySelectorAll("input[name=library-drive]")) {
@@ -4766,7 +4778,7 @@ async function renderStorageSettings(host) {
       ? `<div class="drive-usage"><span style="width:${used}%"></span></div><span>${formatBytes(disk.free)} available of ${formatBytes(disk.total)}</span>`
       : "";
     return `<div class="settings-row drive-row">
-      <div class="row-text"><strong>${escape(drive.label || drive.id)}${drive.default ? " · Default" : ""}</strong><span>${escape(drive.root)} · ${gamesOn(drive)} game${gamesOn(drive) === 1 ? "" : "s"}</span>${usage}</div>
+      <div class="row-text"><strong>${escape(displayDriveLabel(drive))}${drive.default ? " · Default" : ""}</strong><span>${escape(displayDriveRoot(drive.root))} · ${gamesOn(drive)} game${gamesOn(drive) === 1 ? "" : "s"}</span>${usage}</div>
       <div class="row-control">${drive.default ? "" : `<button data-default-drive="${escape(drive.id)}">Make default</button>`}<button data-open-drive="${escape(drive.root)}">Open</button><button class="danger" data-remove-drive="${escape(drive.id)}">Remove</button></div>
     </div>`;
   }).join("");
