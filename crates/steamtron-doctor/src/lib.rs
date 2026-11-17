@@ -337,7 +337,7 @@ pub fn launch_unlock_installer() -> Result<String, String> {
             let marker = state_dir.join("installer.exit");
             let _ = fs::remove_file(&marker);
             let command = format!(
-                "bash {} 2>&1 | tee {}; status=${{PIPESTATUS[0]}}; echo \"installer exit: $status\" >> {}; echo $status > {}; exit $status",
+                "bash {} > {} 2>&1; status=$?; echo \"installer exit: $status\" >> {}; echo $status > {}; exit $status",
                 shell_quote(&script),
                 shell_quote(&log),
                 shell_quote(&log),

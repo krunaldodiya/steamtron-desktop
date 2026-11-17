@@ -5,6 +5,13 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.18] - 2026-11-17
+
+### Fixed
+
+- Linux Doctor leaves “Repairing…” after the installer finishes instead of
+  waiting for background installer processes to release the terminal log pipe.
+
 ## [0.1.17] - 2026-11-17
 
 ### Added
@@ -185,6 +192,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.18]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.18
 [0.1.17]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.17
 [0.1.16]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.16
 [0.1.15]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.15
