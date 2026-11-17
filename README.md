@@ -73,22 +73,18 @@ AppImages need FUSE. If FUSE is unavailable, extract and run:
 
 ### Windows
 
-Before installing SteamTron, install these Windows prerequisites:
+Run `SteamTron_*_x64-setup.exe`. The Windows release is a **bootstrapper**:
 
-1. **Microsoft Visual C++ 2015–2022 Redistributable (x64)** — latest 14.x
-   — <https://aka.ms/vs/17/release/vc_redist.x64.exe>
-2. **Microsoft .NET 9 Desktop Runtime (x64)** — 9.0.16 or newer 9.0.x
-   — <https://aka.ms/dotnet/9.0/windowsdesktop-runtime-win-x64.exe>
-3. **WinFsp 2.1 x64** — tested with 2.1.25156
-   — <https://winfsp.dev/rel/>. In the WinFsp setup, select **Core** only.
+1. It checks Visual C++ x64, .NET 9 Desktop Runtime x64, and WinFsp 2.1.
+2. It shows a checklist with Installed/Missing status.
+3. Missing components install silently after one UAC approval.
+4. It then installs SteamTron under `C:\Program Files (x86)\SteamTron`.
 
-The managed downloader uses the VC++ and .NET runtimes. The Windows overlay
-needs WinFsp's signed kernel driver; the SteamTron installer copies the WinFsp
-DLL beside the app when WinFsp is already installed.
+No separate prerequisite downloads are required for the normal Windows
+installation; the bootstrapper bundles them.
 
-Then run `SteamTron_*_x64-setup.exe`. The installer is system-wide, installs
-under `C:\Program Files (x86)\SteamTron`, and requests UAC elevation so it can
-copy the WinFsp DLL.
+The managed downloader uses VC++ and .NET Desktop 9; the overlay needs WinFsp's
+signed kernel driver. The bootstrapper copies the WinFsp DLL next to the app.
 
 Steam is required for Steam games. WebView2 is included with Windows 11 and
 installed by the SteamTron installer when needed.
@@ -120,8 +116,8 @@ Install the package for your platform from [GitHub Releases](https://github.com/
 then start **SteamTron**.
 
 - Linux: install the `.deb`/`.rpm`, or run the AppImage.
-- Windows: install the three Windows prerequisites below, then run the
-  system-wide NSIS installer.
+- Windows: run the bootstrapper once. It checks and installs the prerequisites
+  below automatically.
 
 #### Windows prerequisites
 
@@ -136,9 +132,9 @@ then start **SteamTron**.
 | WinFsp | 2.1.25156 x64, **Core** feature | Overlay driver and DLL |
 | WebView2 | Included with Windows 11 | UI runtime |
 
-Install all three before launching a managed download. SteamTron currently
-requires these prerequisites separately; they are not yet bundled into the
-Windows installer.
+The bootstrapper assembles these automatically and installs only the missing
+ones. The manual table remains available for troubleshooting and scripted
+installs.
 
 ### 2. Sign in
 
