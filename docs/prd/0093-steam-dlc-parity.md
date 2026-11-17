@@ -48,7 +48,9 @@ Use Steam PICS depot metadata for the visible DLC list:
 
 - `cargo test -p steamtron-desktop dlc::tests` — 4 passed.
 - `cargo check -p steamtron-desktop`.
-- Release build and installer workflow.
+- 0.1.23 Windows/Linux release builds succeeded.
+- Cached DLC is returned immediately; the Store cache refresh runs on the Tauri
+  async runtime and emits `dlc-catalogue-updated` for the open tab.
 
 ## Decisions and risks
 

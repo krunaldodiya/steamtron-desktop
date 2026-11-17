@@ -49,9 +49,10 @@ Tauri's “Delete app data” section removes only `%APPDATA%\<bundle-id>` and
 
 - `node --check crates/steamtron-desktop/ui/app.js`
 - `cargo check -p steamtron-desktop`
-- 0.1.22 Windows and Linux release builds succeeded from commit `c2fd197`.
+- 0.1.22 and 0.1.24 Windows/Linux release builds succeeded.
+- 0.1.24 fixes WOW64 filesystem redirection via `Sysnative`.
 - Windows installer SHA-256:
-  `02189fa9bf175bb7a52236e434f103f26f988aedc555f3f63c95548c4b16f183`.
+  `9c438fc1f4dfe6ddc29933545b36376c5ef5cbc9cc4cb8cb923c75f49c01fe12`.
 - Windows VM interaction is still required to confirm the disabled button and
   prerequisite page visually.
 
