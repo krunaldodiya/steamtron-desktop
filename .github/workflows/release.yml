@@ -72,7 +72,9 @@ jobs:
           Copy-Item $inner.FullName "$assets\SteamTron-app-setup.exe"
           $version = (Get-Content "crates/steamtron-desktop/tauri.conf.json" -Raw | ConvertFrom-Json).version
           $out = "target/release/bundle/nsis/SteamTron_${version}_x64-setup.exe"
-          makensis `
+          $makensis = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) { throw "makensis not found at $makensis" }
+          & $makensis `
             /DINNER_INSTALLER="$assets\SteamTron-app-setup.exe" `
             /DVC_INSTALLER="$assets\vc_redist.x64.exe" `
             /DDOTNET_INSTALLER="$assets\windowsdesktop-runtime-9.0-win-x64.exe" `
