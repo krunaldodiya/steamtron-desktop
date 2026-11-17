@@ -5,7 +5,7 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
-## [0.1.16] - 2026-11-17
+## [0.1.17] - 2026-11-17
 
 ### Added
 
@@ -17,6 +17,8 @@ and releases use [Semantic Versioning](https://semver.org/).
   Steam is missing, and disables the Repair action until Steam is found.
 - `scripts/uninstall-linux-integration.sh` removes SLSsteam Moon, Lumen, and
   the LuaTools integration while preserving Steam and game Lua scripts.
+
+## [0.1.16] - 2026-11-17
 
 ### Fixed
 
@@ -183,6 +185,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.17]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.17
 [0.1.16]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.16
 [0.1.15]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.15
 [0.1.14]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.14
