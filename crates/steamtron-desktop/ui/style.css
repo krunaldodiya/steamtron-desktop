@@ -628,7 +628,7 @@ button.game-chip:hover, button.game-chip.nav-focus { border-color:var(--accent);
 .dlc-table th, .dlc-table td { padding:9px 10px; border-bottom:1px solid var(--border); text-align:left; }
 .dlc-table th { color:var(--muted); font-weight:500; background:var(--surface); }
 .dlc-table td:first-child, .dlc-table th:first-child { width:54px; text-align:center; }
-.dlc-table td:last-child, .dlc-table th:last-child { width:80px; text-align:right; }
+.dlc-table td:last-child, .dlc-table th:last-child { width:104px; min-width:104px; text-align:right; white-space:nowrap; }
 .dlc-note { color:var(--muted); font-size:11px; }
 
 /* Installed Files: wide and paired actions. */
