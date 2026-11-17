@@ -8,6 +8,8 @@ Unicode true
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
+!include "StrFunc.nsh"
+${Using:StrFunc} StrStr
 
 !ifndef VERSION
   !define VERSION "0.0.0"
@@ -52,32 +54,38 @@ Function .onInit
 FunctionEnd
 
 Function CheckPrerequisites
-  ; Visual C++ 2015-2022 x64
+  ; Visual C++ 2015-2022 x64: require the runtime DLLs as well as the
+  ; registry marker, which can be left behind by a partial uninstall.
+  StrCpy $VCStatus "Missing"
   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
   ${If} $0 == "1"
+    IfFileExists "$SYSDIR\vcruntime140.dll" 0 vc_missing
+    IfFileExists "$SYSDIR\msvcp140.dll" 0 vc_missing
     StrCpy $VCStatus "Installed"
-  ${Else}
-    StrCpy $VCStatus "Missing"
+  ${EndIf}
+  vc_missing:
+
+  ; .NET Desktop 9 x64: directory presence is not enough. Verify the
+  ; registered shared framework through the official dotnet host.
+  StrCpy $DotNetStatus "Missing"
+  nsExec::ExecToStack '"$SYSDIR\cmd.exe" /C dotnet --list-runtimes'
+  Pop $0
+  Pop $2
+  ${If} $0 == 0
+    ${StrStr} $3 $2 "Microsoft.WindowsDesktop.App 9."
+    ${If} $3 != ""
+      StrCpy $DotNetStatus "Installed"
+    ${EndIf}
   ${EndIf}
 
-  ; .NET Desktop 9 x64
-  FindFirst $1 $2 "$PROGRAMFILES64\dotnet\shared\Microsoft.WindowsDesktop.App\9.*"
-  ${If} $1 != 0
-    FindClose $1
-    StrCpy $DotNetStatus "Installed"
-  ${Else}
-    StrCpy $DotNetStatus "Missing"
-  ${EndIf}
-
-  ; WinFsp 2.1 x64
-  ReadRegStr $0 HKLM "SOFTWARE\WOW6432Node\WinFsp" "InstallDir"
-  ${If} $0 == ""
-    ReadRegStr $0 HKLM "SOFTWARE\WinFsp" "InstallDir"
-  ${EndIf}
-  ${If} $0 != ""
+  ; WinFsp 2.1 x64: the registry can survive a partial uninstall. Require
+  ; the installed service, not just an InstallDir value.
+  StrCpy $WinFspStatus "Missing"
+  nsExec::ExecToStack '"$SYSDIR\sc.exe" query WinFsp.Launcher'
+  Pop $0
+  Pop $2
+  ${If} $0 == 0
     StrCpy $WinFspStatus "Installed"
-  ${Else}
-    StrCpy $WinFspStatus "Missing"
   ${EndIf}
 FunctionEnd
 

@@ -73,10 +73,11 @@ download-on-demand variant can be considered later.
 ## Detection
 
 - VC++: `HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64` `Installed`.
-- .NET: `HKLM\SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App`
-  version 9.0.x, or `dotnet --list-runtimes`.
-- WinFsp: `WinFsp.Launcher` service / `WinFsp+*` driver service, or the WinFsp
-  registry key.
+- .NET: run `dotnet --list-runtimes` and require
+  `Microsoft.WindowsDesktop.App 9.` — directory presence alone is not enough.
+- VC++: require the registry marker and `vcruntime140.dll`/`msvcp140.dll`.
+- WinFsp: require the `WinFsp.Launcher` service; a stale InstallDir registry
+  value alone is not enough.
 
 ## Install commands
 

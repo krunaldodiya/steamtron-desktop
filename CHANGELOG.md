@@ -5,7 +5,17 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.15] - 2026-11-17
+
+### Fixed
+
+- The Windows bootstrapper verifies real .NET Desktop 9, VC++ runtime files, and
+  the WinFsp service instead of trusting stale registry/directory entries.
+- Missing prerequisites after installation now abort with a clear error unless a
+  reboot is required.
+
 ## [0.1.14] - 2026-11-17
+
 
 ### Fixed
 
@@ -154,6 +164,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.15]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.15
 [0.1.14]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.14
 [0.1.13]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.13
 [0.1.12]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.12
