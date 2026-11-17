@@ -108,3 +108,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0083](0083-windows-ddm-dotnet.md) | Windows downloads use DepotDownloaderMod + .NET | done | 2026-11-17 |
 | [0084](0084-store-warmup-flash.md) | Prevent Store flash on app launch | active | 2026-11-17 |
 | [0085](0085-windows-smoke-verification.md) | Windows smoke verification | done | 2026-11-17 |
+| [0086](0086-running-game-state.md) | Running game state on Windows | active | 2026-11-17 |

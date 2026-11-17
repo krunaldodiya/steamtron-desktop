@@ -2103,12 +2103,15 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         if alive {
             let _ = steamtron_core::play_history::record(&tracked, observed_at);
         }
+        // Keep the run marker while the launched game process is alive. The
+        // UI polls this map to switch Play to Stop; removing it before the
+        // process exits made Windows games look stopped after two seconds.
+        let _ = child.wait();
         if let Ok(mut runs) = managed_runs().lock() {
             if runs.get(&tracked) == Some(&pid) {
                 runs.remove(&tracked);
             }
         }
-        let _ = child.wait();
     });
     Ok(serde_json::json!({
         "pid": pid,
