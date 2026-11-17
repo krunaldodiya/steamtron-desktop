@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-auth"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "base64 0.22.1",
  "rand",
@@ -4132,7 +4132,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "libc",
  "regex",
@@ -4146,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-desktop"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4181,7 +4181,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-doctor"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde",
  "steamtron-core",
@@ -4191,7 +4191,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-library"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "chrono",
  "regex",
@@ -4210,7 +4210,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-overlay"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "sha2",
  "tempfile",
@@ -4221,7 +4221,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-overlay-cli"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap",
@@ -4236,7 +4236,7 @@ dependencies = [
 
 [[package]]
 name = "steamtron-register"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde",
  "steamtron-core",

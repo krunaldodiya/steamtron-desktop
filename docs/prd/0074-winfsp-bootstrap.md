@@ -1,6 +1,6 @@
 # Windows prerequisite bootstrap
 
-- Status: draft
+- Status: active
 - Date: 2026-11-17
 - Areas: Windows packaging, NSIS bootstrap, first-run prerequisites
 
