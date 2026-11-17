@@ -99,6 +99,12 @@ driver install do not produce additional UAC prompts.
 - R5: WinFsp license and notices are included.
 - R6: Normal Tauri installer remains available for scripted installs.
 - R7: The wrapper is code-signed before public release.
+- R8: Prerequisite installers run silently; no separate installer UI is shown.
+- R9: The wrapper shows inline per-step progress and a final success/failure
+  result. Exact percentages are shown only where an installer exposes them;
+  otherwise the active step uses an indeterminate indicator.
+- R10: Reboot-required installers are handled with `/norestart` and a clear
+  restart prompt after the app installer finishes.
 
 ## Non-goals
 
@@ -128,3 +134,7 @@ driver install do not produce additional UAC prompts.
   review and notices.
 - Code signing is required to remove SmartScreen warnings; it is separate from
   this feature.
+- The elevated wrapper is the only UAC prompt. Child installers inherit the
+  elevated token and must be invoked with quiet/silent switches.
+- Bundled installers must be verified by signature/hash before execution; the
+  app must not download arbitrary executables at install time.
