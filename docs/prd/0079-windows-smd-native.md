@@ -1,6 +1,7 @@
 # Windows SMD native downloader
 
-- Status: active
+- Status: superseded
+- Superseded by: `0083-windows-ddm-dotnet.md`
 - Date: 2026-11-17
 - Areas: `crates/steamtron-desktop/src/download.rs`
 

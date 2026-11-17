@@ -1,6 +1,6 @@
 # Windows library drive discovery
 
-- Status: active
+- Status: done
 - Date: 2026-11-16
 - Areas: `crates/steamtron-desktop/src/main.rs`, Windows build
 

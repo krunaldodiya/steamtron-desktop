@@ -229,7 +229,7 @@ not passed the WinFsp filesystem test suite.
 | Steam launch-option setup | Implemented through `localconfig.vdf` and the dual-mode overlay wrapper |
 | Managed library removal | Implemented with appmanifest/Lua/manifest/symlink cleanup |
 | Linux deb/AppImage packaging | Implemented; deb and AppImage built |
-| Windows WinFsp overlay | Prototype implemented; WinFsp test suite pending |
+| Windows WinFsp overlay | Verified in Windows 11 QEMU: managed download, fixes import, and game launch |
 | Windows Security exceptions | Implemented per game, opt-in, before fixes |
 | Plugin retirement | Pending |
 

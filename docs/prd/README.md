@@ -96,14 +96,15 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0069](0069-direct-igdb-store.md) | Direct IGDB Store with per-user backend token | done | 2026-11-16 |
 | [0070](0070-open-source-release.md) | Open-source ready distribution and contributor docs | done | 2026-11-16 |
 | [0071](0071-signin-progress.md) | Visible sign-in progress | done | 2026-11-16 |
-| [0072](0072-windows-drive-discovery.md) | Windows library drive discovery | active | 2026-11-16 |
+| [0072](0072-windows-drive-discovery.md) | Windows library drive discovery | done | 2026-11-17 |
 | [0073](0073-hidden-console.md) | Hide helper console windows on Windows | active | 2026-11-16 |
 | [0074](0074-winfsp-bootstrap.md) | Built-in WinFsp bootstrap on Windows | draft | 2026-11-16 |
 | [0075](0075-program-files-install.md) | Install Windows build under Program Files (x86) | active | 2026-11-16 |
 | [0076](0076-windows-platform-ui.md) | Hide Linux-only Proton UI on Windows | active | 2026-11-17 |
-| [0077](0077-windows-native-launch.md) | Native Windows game launch | active | 2026-11-17 |
-| [0079](0079-windows-smd-native.md) | Windows SMD native downloader | active | 2026-11-17 |
-| [0081](0081-windows-vcredist.md) | Install Visual C++ runtime on Windows | active | 2026-11-17 |
+| [0077](0077-windows-native-launch.md) | Native Windows game launch | done | 2026-11-17 |
+| [0079](0079-windows-smd-native.md) | Windows SMD native downloader | superseded | 2026-11-17 |
+| [0081](0081-windows-vcredist.md) | Install Visual C++ runtime on Windows | done | 2026-11-17 |
 | [0082](0082-windows-drive-label.md) | Normalize Windows drive labels | active | 2026-11-17 |
-| [0083](0083-windows-ddm-dotnet.md) | Windows downloads use DepotDownloaderMod + .NET | active | 2026-11-17 |
+| [0083](0083-windows-ddm-dotnet.md) | Windows downloads use DepotDownloaderMod + .NET | done | 2026-11-17 |
 | [0084](0084-store-warmup-flash.md) | Prevent Store flash on app launch | active | 2026-11-17 |
+| [0085](0085-windows-smoke-verification.md) | Windows smoke verification | done | 2026-11-17 |

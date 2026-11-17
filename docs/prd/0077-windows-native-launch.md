@@ -1,6 +1,6 @@
 # Native Windows game launch
 
-- Status: active
+- Status: done
 - Date: 2026-11-17
 - Areas: `crates/steamtron-core/src/runtime.rs`, `crates/steamtron-desktop/src/main.rs`
 

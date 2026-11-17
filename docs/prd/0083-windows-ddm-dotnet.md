@@ -1,6 +1,6 @@
 # Windows downloads use DepotDownloaderMod + .NET
 
-- Status: active
+- Status: done
 - Date: 2026-11-17
 - Areas: `crates/steamtron-desktop/src/download.rs`, Windows runtime prerequisites
 

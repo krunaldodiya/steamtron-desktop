@@ -1,6 +1,6 @@
 # Install Visual C++ runtime on Windows
 
-- Status: active
+- Status: done
 - Date: 2026-11-17
 - Areas: Windows packaging, SMD bootstrap
 
