@@ -75,12 +75,12 @@ AppImages need FUSE. If FUSE is unavailable, extract and run:
 
 Before installing SteamTron, install these Windows prerequisites:
 
-1. **Microsoft Visual C++ 2015–2022 x64 Redistributable**
+1. **Microsoft Visual C++ 2015–2022 Redistributable (x64)** — latest 14.x
    — <https://aka.ms/vs/17/release/vc_redist.x64.exe>
-2. **Microsoft .NET 9 Runtime (x64)**
-   — <https://aka.ms/dotnet/9.0/dotnet-runtime-win-x64.exe>
-3. **WinFsp 2.1 x64** — <https://winfsp.dev/rel/>. In the WinFsp setup,
-   select **Core** only.
+2. **Microsoft .NET 9 Desktop Runtime (x64)** — 9.0.16 or newer 9.0.x
+   — <https://aka.ms/dotnet/9.0/windowsdesktop-runtime-win-x64.exe>
+3. **WinFsp 2.1 x64** — tested with 2.1.25156
+   — <https://winfsp.dev/rel/>. In the WinFsp setup, select **Core** only.
 
 The managed downloader uses the VC++ and .NET runtimes. The Windows overlay
 needs WinFsp's signed kernel driver; the SteamTron installer copies the WinFsp
@@ -125,11 +125,16 @@ then start **SteamTron**.
 
 #### Windows prerequisites
 
-| Dependency | Purpose | Link |
+| Dependency | Exact compatible version | Purpose |
 |---|---|---|
-| Visual C++ 2015–2022 Redistributable (x64) | Required by SMD | <https://aka.ms/vs/17/release/vc_redist.x64.exe> |
-| .NET 9 Runtime (x64) | Required by the embedded DepotDownloaderMod engine | <https://aka.ms/dotnet/9.0/dotnet-runtime-win-x64.exe> |
-| WinFsp 2.1 (x64) | Signed Windows overlay driver; select **Core** | <https://winfsp.dev/rel/> |
+| Windows | Windows 10/11 x64; tested on 25H2 build 26300 | Host OS |
+| SteamTron Desktop | 0.1.10 or newer | Application |
+| SMD | 1.5.0 (downloaded by SteamTron) | Depot downloader |
+| DepotDownloaderMod | 3.4.0 (embedded in SMD) | Windows download engine |
+| Visual C++ 2015–2022 Redistributable | x64, 14.x current | SMD native executable |
+| Microsoft .NET Desktop Runtime | **9.0.16 or newer 9.0.x, x64** | DepotDownloaderMod 3.4.0 |
+| WinFsp | 2.1.25156 x64, **Core** feature | Overlay driver and DLL |
+| WebView2 | Included with Windows 11 | UI runtime |
 
 Install all three before launching a managed download. SteamTron currently
 requires these prerequisites separately; they are not yet bundled into the
