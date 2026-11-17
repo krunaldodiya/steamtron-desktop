@@ -1,6 +1,6 @@
 # Sync SteamTron library to Steam
 
-- Status: active
+- Status: done
 - Date: 2026-11-17
 - Areas: `crates/steamtron-desktop`, `crates/steamtron-library`
 
@@ -48,7 +48,11 @@ when the Steam installation and platform backend checks are both healthy.
   registration path.
 - `cargo check -p steamtron-desktop`
 - `node --check crates/steamtron-desktop/ui/app.js`
-- Release build and Windows/Linux installer workflow.
+- 0.1.21 release workflow succeeded for Linux and Windows from commit
+  `2ce5018`.
+- Windows installer SHA-256:
+  `0476005af25262f11135e4ff62065bb94969c7bca748ce045b666404c82dbd4d`.
+- Linux assets were published with matching `SHA256SUMS.txt`.
 
 ## Decisions and risks
 
