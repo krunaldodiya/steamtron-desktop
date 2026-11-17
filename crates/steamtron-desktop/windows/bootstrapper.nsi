@@ -145,12 +145,21 @@ FunctionEnd
 Section "Install"
   SetDetailsPrint both
   SetOutPath "$PLUGINSDIR"
-  File /oname=vc_redist.x64.exe "${VC_INSTALLER}"
-  File /oname=windowsdesktop-runtime-9.0-win-x64.exe "${DOTNET_INSTALLER}"
-  File /oname=winfsp-2.1.25156.msi "${WINFSP_INSTALLER}"
-  File /oname=SteamTron-app-setup.exe "${INNER_INSTALLER}"
 
+  ; Check before extracting: an installed prerequisite must not be unpacked
+  ; into $PLUGINSDIR just to be skipped immediately afterward.
   Call CheckPrerequisites
+
+  ${If} $VCStatus == "Missing"
+    File /oname=vc_redist.x64.exe "${VC_INSTALLER}"
+  ${EndIf}
+  ${If} $DotNetStatus == "Missing"
+    File /oname=windowsdesktop-runtime-9.0-win-x64.exe "${DOTNET_INSTALLER}"
+  ${EndIf}
+  ${If} $WinFspStatus == "Missing"
+    File /oname=winfsp-2.1.25156.msi "${WINFSP_INSTALLER}"
+  ${EndIf}
+  File /oname=SteamTron-app-setup.exe "${INNER_INSTALLER}"
 
   ${If} $VCStatus == "Missing"
     DetailPrint "Installing Visual C++ 2015-2022 x64..."

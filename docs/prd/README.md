@@ -117,3 +117,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0092](0092-restart-and-vc-detection.md) | Restart guard and x64 prerequisite detection | done | 2026-11-17 |
 | [0093](0093-steam-dlc-parity.md) | Match Steam DLC list and sizes | active | 2026-11-17 |
 | [0094](0094-dlc-size-column.md) | Keep the DLC size column on one line | done | 2026-11-17 |
+| [0095](0095-skip-installed-prereq-extraction.md) | Skip extracting installed prerequisites | done | 2026-11-17 |

@@ -10,6 +10,8 @@ and releases use [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - The DLC size column no longer wraps `984.3 MiB` onto a second line.
+- The Windows bootstrapper no longer extracts already-installed prerequisites
+  before skipping them.
 
 ## [0.1.24] - 2026-11-17
 
