@@ -5,6 +5,14 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.23] - 2026-11-17
+
+### Fixed
+
+- The DLC tab now uses Steam PICS depot metadata instead of only the Store DLC
+  list. DLC without a depot manifest size is hidden, and names/sizes match
+  Steam's visible DLC entries.
+
 ## [0.1.22] - 2026-11-17
 
 ### Fixed
@@ -231,6 +239,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.23]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.23
 [0.1.22]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.22
 [0.1.21]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.21
 [0.1.20]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.20

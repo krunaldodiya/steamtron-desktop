@@ -1602,6 +1602,9 @@ function applyDownloadEvent(state) {
 
 
 if (window.__TAURI__?.event?.listen) {
+  window.__TAURI__.event.listen("dlc-catalogue-updated", (event) => {
+    window.dispatchEvent(new CustomEvent("steamtron-dlc-updated", { detail: event.payload || {} }));
+  });
   window.__TAURI__.event.listen("fix-progress", (event) => {
     const button = document.querySelector(".game-settings-pane button.loading");
     if (button) button.textContent = String(event.payload || "Working…");
@@ -2092,6 +2095,14 @@ function openManagedGameOptions(game) {
           };
         }
       };
+      const onDlcUpdated = (event) => {
+        if (!pane.isConnected) {
+          window.removeEventListener("steamtron-dlc-updated", onDlcUpdated);
+          return;
+        }
+        if (event.detail?.gameId === game.id) void renderDlcTab();
+      };
+      window.addEventListener("steamtron-dlc-updated", onDlcUpdated);
       void renderDlcTab();
       return;
     }

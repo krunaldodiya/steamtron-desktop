@@ -323,9 +323,10 @@ fn find_block<'a>(text: &'a str, key: &str) -> Option<&'a str> {
 }
 
 #[derive(Default)]
-struct PicsDlc {
-    sizes: BTreeMap<u32, u64>,
-    depots: BTreeMap<u32, Vec<String>>,
+pub struct PicsDlc {
+    pub sizes: BTreeMap<u32, u64>,
+    pub depots: BTreeMap<u32, Vec<String>>,
+    pub names: BTreeMap<u32, String>,
 }
 
 fn parse_pics_dlc(text: &str) -> PicsDlc {
@@ -358,13 +359,82 @@ fn parse_pics_dlc(text: &str) -> PicsDlc {
                     .captures_iter(block)
                     .filter_map(|captures| captures[1].parse::<u64>().ok())
                     .sum::<u64>();
-                *result.sizes.entry(dlc).or_insert(0) += total;
-                result.depots.entry(dlc).or_default().push(key.to_owned());
+                if total > 0 {
+                    *result.sizes.entry(dlc).or_insert(0) += total;
+                    result.depots.entry(dlc).or_default().push(key.to_owned());
+                }
             }
         }
         index = close + 1;
     }
     result
+}
+
+#[cfg(target_os = "linux")]
+fn slssteam_cache_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .map(|config| config.join("SLSsteam/cache"))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_dlc_names(text: &str) -> BTreeMap<u32, String> {
+    use base64::Engine as _;
+
+    let mut names = BTreeMap::new();
+    let mut current = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(value) = line.strip_prefix("- appid:") {
+            current = value.trim().parse::<u32>().ok();
+        } else if let Some(value) = line.strip_prefix("wire_b64:") {
+            let Some(appid) = current else { continue };
+            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(value.trim()) else {
+                continue;
+            };
+            let wire = String::from_utf8_lossy(&bytes);
+            if let Some(captures) = regex::Regex::new(r#""name"\s+"([^"]+)""#)
+                .unwrap()
+                .captures(&wire)
+            {
+                names.insert(appid, captures[1].to_owned());
+            }
+        }
+    }
+    names
+}
+
+/// DLC entries from the local Steam PICS cache written by SLSsteam Moon.
+///
+/// Steam itself only shows DLC that has a depot with a manifest size. Using the
+/// `depots` block therefore matches Steam's visible DLC list and avoids
+/// size-less preorder entries.
+#[cfg(target_os = "linux")]
+pub fn local_pics_dlc(base_appid: u32) -> PicsDlc {
+    let Some(cache) = slssteam_cache_dir() else {
+        return PicsDlc::default();
+    };
+    let pics = std::fs::read_to_string(cache.join(format!("picsbuffer_{base_appid}.bin")))
+        .ok()
+        .map(|text| parse_pics_dlc(&text))
+        .unwrap_or_default();
+    let names = std::fs::read_to_string(cache.join(format!("dlcmetadata_{base_appid}.yaml")))
+        .ok()
+        .map(|text| parse_dlc_names(&text))
+        .unwrap_or_default();
+    PicsDlc {
+        names: names
+            .into_iter()
+            .filter(|(appid, _)| pics.sizes.contains_key(appid))
+            .collect(),
+        ..pics
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn local_pics_dlc(_base_appid: u32) -> PicsDlc {
+    PicsDlc::default()
 }
 
 fn steamcmd_dlc(base_appid: u32) -> PicsDlc {
@@ -406,7 +476,26 @@ pub fn dlc_sizes(game_id: &str, app_ids: &[u32]) -> BTreeMap<u32, u64> {
     }
     let missing = app_ids.iter().any(|id| !result.contains_key(id));
     let base_appid = game.as_ref().and_then(|game| game.metadata_app_id);
-    let pics = if missing { base_appid.map(steamcmd_dlc).map(|pics| pics.sizes).unwrap_or_default() } else { BTreeMap::new() };
+    let local_pics = if missing {
+        base_appid.map(local_pics_dlc).map(|pics| pics.sizes).unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
+    for app_id in app_ids {
+        if result.contains_key(app_id) {
+            continue;
+        }
+        if let Some(size) = local_pics.get(app_id).copied() {
+            cache.insert(app_id.to_string(), size);
+            result.insert(*app_id, size);
+            changed = true;
+        }
+    }
+    let pics = if result.len() < app_ids.len() && base_appid.is_some() {
+        base_appid.map(steamcmd_dlc).map(|pics| pics.sizes).unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
     let smd = if missing { download::resolve_smd().ok() } else { None };
     for app_id in app_ids {
         if result.contains_key(app_id) { continue; }
@@ -625,6 +714,39 @@ mod tests {
         remove_installed(&root, 42, &mut state);
         assert_eq!(fs::read(root.join("shared.dll")).unwrap(), b"base");
         assert!(!state.installed.contains_key(&42));
+    }
+
+    #[test]
+    fn only_dlc_with_a_manifest_size_is_listed() {
+        let text = r#"
+"depots"
+{
+    "100"
+    {
+        "dlcappid" "10"
+        "manifests" { "public" { "size" "1000" } }
+    }
+    "101"
+    {
+        "dlcappid" "11"
+        "manifests" { "public" { "size" "0" } }
+    }
+}
+"#;
+        let pics = parse_pics_dlc(text);
+        assert_eq!(pics.sizes.get(&10), Some(&1000));
+        assert!(!pics.sizes.contains_key(&11));
+    }
+
+    #[test]
+    fn parses_names_from_dlcmetadata_wire_blocks() {
+        let text = r#"
+apps:
+  - appid: 1413420
+    wire_b64: IkFwcEluZm8iCnsKCSJhcHBpZCIJCSIxNDEzNDIwIgoJImNvbW1vbiIKCXsKCQkibmFtZSIJCSJMaXR0bGUgTmlnaHRtYXJlcyBJSSBFbmhhbmNlZCBFZGl0aW9uIgoJfQp9Cg==
+"#;
+        let names = parse_dlc_names(text);
+        assert_eq!(names.get(&1413420).map(String::as_str), Some("Little Nightmares II Enhanced Edition"));
     }
 
     #[test]

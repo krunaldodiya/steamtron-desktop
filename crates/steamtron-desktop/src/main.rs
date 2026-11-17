@@ -3488,8 +3488,89 @@ async fn start_managed_dlc_download(app: tauri::AppHandle, game_id: String) -> R
     serde_json::to_value(state).map_err(|error| error.to_string())
 }
 
+async fn fetch_store_dlc(app_id: u32) -> Result<Vec<(u32, String, String)>, String> {
+    let response = store_client()
+        .get("https://store.steampowered.com/api/appdetails")
+        .query(&[("appids", app_id.to_string()), ("l", "english".into()), ("cc", "US".into())])
+        .header("Accept", "application/json")
+        .header("User-Agent", "steamtron-desktop")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let data = payload
+        .get(app_id.to_string())
+        .and_then(|entry| entry.get("data"));
+    let ids: Vec<u32> = data
+        .and_then(|data| data.get("dlc"))
+        .and_then(|dlc| dlc.as_array())
+        .map(|items| items.iter().filter_map(|id| id.as_u64().map(|id| id as u32)).collect())
+        .unwrap_or_default();
+    let mut entries = Vec::new();
+    for id in ids {
+        let detail = match store_client()
+            .get("https://store.steampowered.com/api/appdetails")
+            .query(&[("appids", id.to_string()), ("l", "english".into()), ("cc", "US".into())])
+            .header("Accept", "application/json")
+            .header("User-Agent", "steamtron-desktop")
+            .send()
+            .await
+        {
+            Ok(response) => response.json::<serde_json::Value>().await.ok(),
+            Err(_) => None,
+        };
+        let entry = detail.as_ref().and_then(|value| value.get(id.to_string())).and_then(|entry| entry.get("data"));
+        let name = entry.and_then(|data| data.get("name")).and_then(|value| value.as_str()).unwrap_or("");
+        let released = entry.and_then(|data| data.get("release_date")).and_then(|value| value.get("date")).and_then(|value| value.as_str()).unwrap_or("");
+        entries.push((id, name.to_owned(), released.to_owned()));
+    }
+    Ok(entries)
+}
+
+fn write_store_dlc_cache(app_id: u32, entries: &[(u32, String, String)]) {
+    let cache_path = steamtron_core::paths::layout().cache_dir().join("dlc-catalog.json");
+    let mut cache: serde_json::Value = std::fs::read(&cache_path)
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
+    cache[app_id.to_string()] = serde_json::json!({
+        "fetched_at": now,
+        "entries": entries.iter().map(|(id, name, released)| serde_json::json!({
+            "app_id": id, "name": name, "released": released
+        })).collect::<Vec<_>>(),
+    });
+    if let Some(parent) = cache_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&cache_path, serde_json::to_vec_pretty(&cache).unwrap_or_default());
+}
+
+fn spawn_dlc_refresh(app: tauri::AppHandle, app_id: u32, game_id: String) {
+    use std::time::{Duration, Instant};
+
+    static LAST_REFRESH: OnceLock<Mutex<HashMap<u32, Instant>>> = OnceLock::new();
+    let now = Instant::now();
+    {
+        let mut refreshes = LAST_REFRESH.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+        if refreshes.get(&app_id).is_some_and(|last| now.duration_since(*last) < Duration::from_secs(300)) {
+            return;
+        }
+        refreshes.insert(app_id, now);
+    }
+    tauri::async_runtime::spawn(async move {
+        if let Ok(entries) = fetch_store_dlc(app_id).await {
+            write_store_dlc_cache(app_id, &entries);
+            let _ = app.emit(
+                "dlc-catalogue-updated",
+                serde_json::json!({"gameId": game_id, "appId": app_id}),
+            );
+        }
+    });
+}
+
 #[tauri::command]
-async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> {
+async fn managed_dlc(app: tauri::AppHandle, game_id: String) -> Result<Vec<serde_json::Value>, String> {
     use steamtron_core::library::Library;
 
     let library = Library::load().map_err(|error| error.to_string())?;
@@ -3513,19 +3594,15 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
     let dlc_state = dlc::load_state(&game.installation.root);
     let mut sidecar = steamtron_library::cache::load_for_game(game);
     let cache_path = steamtron_core::paths::layout().cache_dir().join("dlc-catalog.json");
-    let mut cache: serde_json::Value = std::fs::read(&cache_path)
+    let cache: serde_json::Value = std::fs::read(&cache_path)
         .ok()
         .and_then(|data| serde_json::from_slice(&data).ok())
         .unwrap_or_else(|| serde_json::json!({}));
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
-    let fresh = |entry: &serde_json::Value| {
-        let fetched = entry.get("fetched_at").and_then(|value| value.as_u64()).unwrap_or(0);
-        now.saturating_sub(fetched) < 30 * 24 * 60 * 60
-    };
-    let cache_entry = cache.get(app_id.to_string()).cloned().filter(fresh)
-        .or_else(|| sidecar.dlc.clone().filter(fresh));
+    let cache_entry = cache.get(app_id.to_string()).cloned().or_else(|| sidecar.dlc.clone());
     let cached_at = cache_entry.as_ref().and_then(|entry| entry.get("fetched_at")).and_then(|value| value.as_u64()).unwrap_or(now);
     let entries: Vec<(u32, String, String)> = if let Some(entry) = cache_entry.as_ref() {
+        spawn_dlc_refresh(app, app_id, game_id.clone());
         entry.get("entries").and_then(|value| value.as_array()).map(|items| {
             items.iter().filter_map(|item| {
                 Some((
@@ -3536,53 +3613,35 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
             }).collect()
         }).unwrap_or_default()
     } else {
-        let response = store_client()
-            .get("https://store.steampowered.com/api/appdetails")
-            .query(&[("appids", app_id.to_string()), ("l", "english".into()), ("cc", "US".into())])
-            .header("Accept", "application/json")
-            .header("User-Agent", "steamtron-desktop")
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
-        let payload: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
-        let data = payload
-            .get(app_id.to_string())
-            .and_then(|entry| entry.get("data"));
-        let ids: Vec<u32> = data
-            .and_then(|data| data.get("dlc"))
-            .and_then(|dlc| dlc.as_array())
-            .map(|items| items.iter().filter_map(|id| id.as_u64().map(|id| id as u32)).collect())
-            .unwrap_or_default();
-        let mut fetched_entries = Vec::new();
-        for id in ids {
-            let detail = match store_client()
-                .get("https://store.steampowered.com/api/appdetails")
-                .query(&[("appids", id.to_string()), ("l", "english".into()), ("cc", "US".into())])
-                .header("Accept", "application/json")
-                .header("User-Agent", "steamtron-desktop")
-                .send()
-                .await
-            {
-                Ok(response) => response.json::<serde_json::Value>().await.ok(),
-                Err(_) => None,
-            };
-            let entry = detail.as_ref().and_then(|value| value.get(id.to_string())).and_then(|entry| entry.get("data"));
-            let name = entry.and_then(|data| data.get("name")).and_then(|value| value.as_str()).unwrap_or("");
-            let released = entry.and_then(|data| data.get("release_date")).and_then(|value| value.get("date")).and_then(|value| value.as_str()).unwrap_or("");
-            fetched_entries.push((id, name.to_owned(), released.to_owned()));
-        }
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs()).unwrap_or(0);
-        cache[app_id.to_string()] = serde_json::json!({
-            "fetched_at": now,
-            "entries": fetched_entries.iter().map(|(id, name, released)| serde_json::json!({
-                "app_id": id, "name": name, "released": released
-            })).collect::<Vec<_>>(),
-        });
-        if let Some(parent) = cache_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(&cache_path, serde_json::to_vec_pretty(&cache).unwrap_or_default());
+        let fetched_entries = fetch_store_dlc(app_id).await?;
+        write_store_dlc_cache(app_id, &fetched_entries);
         fetched_entries
+    };
+    let local_dlc = dlc::local_pics_dlc(app_id);
+    let entries: Vec<(u32, String, String)> = if local_dlc.sizes.is_empty() {
+        entries
+    } else {
+        let stored: std::collections::BTreeMap<u32, (String, String)> = entries
+            .into_iter()
+            .map(|(id, name, released)| (id, (name, released)))
+            .collect();
+        local_dlc
+            .sizes
+            .keys()
+            .map(|id| {
+                let (name, released) = stored.get(id).cloned().unwrap_or_else(|| {
+                    (
+                        local_dlc
+                            .names
+                            .get(id)
+                            .cloned()
+                            .unwrap_or_else(|| format!("DLC {id}")),
+                        String::new(),
+                    )
+                });
+                (*id, name, released)
+            })
+            .collect()
     };
     let previous_sizes: std::collections::BTreeMap<u32, u64> = sidecar.dlc.as_ref()
         .and_then(|value| value.get("entries"))
@@ -3612,7 +3671,6 @@ async fn managed_dlc(game_id: String) -> Result<Vec<serde_json::Value>, String> 
         }));
     }
     Ok(result)
-
 }
 
 #[tauri::command]
