@@ -25,7 +25,7 @@ SteamTron inner installer are unpacked.
 ## Verification
 
 - NSIS source wraps each prerequisite `File` command in its status check.
-- Windows release workflow compiles the bootstrapper.
+- 0.1.25 Windows release workflow compiled the bootstrapper successfully.
 - Windows VM not exercised here.
 
 ## Decisions and risks

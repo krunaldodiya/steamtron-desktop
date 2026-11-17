@@ -22,7 +22,7 @@ The size column stays on one line and is wide enough for both MiB and GiB values
 ## Verification
 
 - CSS rule updated to `width:104px; min-width:104px; white-space:nowrap`.
-- 0.1.25 release build.
+- 0.1.25 Linux and Windows release builds succeeded.
 
 ## Decisions and risks
 
