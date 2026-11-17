@@ -4356,6 +4356,7 @@ async function loadDoctor(target = null) {
     if (repairButton) {
       const steamFound = report.checks.some((check) => check.id === "steam-root" && check.status === "ok");
       repairButton.disabled = !steamFound;
+      repairButton.hidden = report.healthy;
       repairButton.title = steamFound ? "" : "Install Steam first; SteamTron does not install Steam.";
     }
   } catch (error) {
@@ -4678,6 +4679,7 @@ async function renderGeneralSettings(host) {
         if (repairButton) {
           const steamFound = checks.some((check) => check.id === "steam-root" && check.status === "ok");
           repairButton.disabled = !steamFound;
+          repairButton.hidden = report.healthy;
           repairButton.title = steamFound ? "" : "Install Steam first; SteamTron does not install Steam.";
         }
       } catch (reportError) {
