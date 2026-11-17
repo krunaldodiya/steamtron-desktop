@@ -4499,12 +4499,14 @@ async function renderSettingsPage() {
 }
 
 async function renderGeneralSettings(host) {
-  const [snapshot, diagnostics, profile, version] = await Promise.all([
+  const [snapshot, diagnostics, profile, version, doctor] = await Promise.all([
     invoke("library_snapshot").catch(() => null),
     invoke("diagnostics_summary").catch(() => null),
     invoke("profile_status").catch(() => null),
     invoke("app_version").catch(() => ""),
+    invoke("doctor_report").catch(() => null),
   ]);
+  const steamFound = Boolean(doctor?.checks?.some((check) => check.id === "steam-root" && check.status === "ok"));
   settingsLibrary = snapshot;
   const settings = snapshot?.settings || {};
   const mode = settings.default_display_mode || "desktop";
@@ -4526,10 +4528,10 @@ async function renderGeneralSettings(host) {
     <section class="settings-section"><h2>Maintenance</h2><p>Library backup, restore and desktop integration.</p><div class="settings-card">
       <div class="settings-row"><div class="row-text"><strong>Game metadata backups</strong><span>Exports one ZIP per game with the exact appmanifest and manifest bundle. Game content and fixes are not included.</span></div><div class="row-control settings-inline"><button id="setting-export-games" data-operation-button="library-export">Export</button><button id="setting-import-games">Import ZIPs…</button><button id="setting-import-folder">Import folder…</button></div></div>
       ${settingsRow("Desktop shortcut", "Add SteamTron to the application menu.", '<button id="setting-shortcut">Install</button>')}
-      ${settingsRow("Steam client", "Restart Steam to apply library changes.", '<button id="setting-restart">Restart Steam</button>')}
+      ${settingsRow("Steam client", steamFound ? "Restart Steam to apply library changes." : "Steam is not installed.", `<button id="setting-restart"${steamFound ? "" : ' disabled title="Steam is not installed."'}>Restart Steam</button>`)}
     </div></section>
-    <section class="settings-section"><h2>Steam diagnostics</h2><p>Validate Steam, fixes and the unlock backend.</p><div class="settings-card">
-      ${settingsRow("Doctor", "Checks Steam, the Lua folder, fixes and the platform unlock backend.", '<button id="setting-doctor-run">Run checks</button>')}
+    <section class="settings-section"><h2>Steam diagnostics</h2><p>Check Steam and the platform unlock backend.</p><div class="settings-card">
+      ${settingsRow("Doctor", "Checks Steam and the platform unlock backend.", '<button id="setting-doctor-run">Run checks</button>')}
     </div></section>
     <section class="settings-section"><h2>Diagnostic logs</h2><p>One local folder per game. Completed logs: 8 MiB per file, 100 MiB total, 14-day retention. Cleanup runs before and after launches; active logs are never cleared.</p><div class="settings-card">
       ${settingsRow("Activity", activity, '<button id="setting-open-logs">Open logs folder</button>')}

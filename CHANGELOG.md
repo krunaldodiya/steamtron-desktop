@@ -5,6 +5,16 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.22] - 2026-11-17
+
+### Fixed
+
+- Settings disables Restart Steam when Steam is not installed instead of
+  attempting a restart.
+- The Windows bootstrapper reads the native x64 VC++ registry view and checks
+  System32, so an installed x64 runtime is no longer reported missing after an
+  uninstall.
+
 ## [0.1.21] - 2026-11-17
 
 ### Added
@@ -221,6 +231,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.22]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.22
 [0.1.21]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.21
 [0.1.20]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.20
 [0.1.19]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.19

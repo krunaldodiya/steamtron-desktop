@@ -54,13 +54,14 @@ Function .onInit
 FunctionEnd
 
 Function CheckPrerequisites
-  ; Visual C++ 2015-2022 x64: require the runtime DLLs as well as the
-  ; registry marker, which can be left behind by a partial uninstall.
+  ; This is a 32-bit NSIS process. Read the native 64-bit registry view and
+  ; check System32 for the x64 runtime; $SYSDIR redirects to SysWOW64.
+  SetRegView 64
   StrCpy $VCStatus "Missing"
   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
   ${If} $0 == "1"
-    IfFileExists "$SYSDIR\vcruntime140.dll" 0 vc_missing
-    IfFileExists "$SYSDIR\msvcp140.dll" 0 vc_missing
+    IfFileExists "$WINDIR\System32\vcruntime140.dll" 0 vc_missing
+    IfFileExists "$WINDIR\System32\msvcp140.dll" 0 vc_missing
     StrCpy $VCStatus "Installed"
   ${EndIf}
   vc_missing:
