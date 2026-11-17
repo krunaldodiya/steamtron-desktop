@@ -15,6 +15,8 @@ and releases use [Semantic Versioning](https://semver.org/).
   in the application, and managed games missing from Steam are re-registered.
 - Doctor no longer offers to install SLSsteam Moon or BetterSteamTools when
   Steam is missing, and disables the Repair action until Steam is found.
+- `scripts/uninstall-linux-integration.sh` removes SLSsteam Moon, Lumen, and
+  the LuaTools integration while preserving Steam and game Lua scripts.
 
 ### Fixed
 

@@ -124,3 +124,4 @@ registered in Steam when Steam is installed.
 - `crates/steamtron-doctor/src/lib.rs`
 - `crates/steamtron-register/src/linux.rs`
 - `crates/steamtron-library/src/managed.rs`
+- `scripts/uninstall-linux-integration.sh`
