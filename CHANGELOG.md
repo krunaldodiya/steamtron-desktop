@@ -5,6 +5,14 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.21] - 2026-11-17
+
+### Added
+
+- Doctor has a Sync Steam library action that registers SteamTron games added
+  before Steam or the unlock backend was available. It is enabled only when
+  both Doctor checks are healthy and leaves game content untouched.
+
 ## [0.1.20] - 2026-11-17
 
 ### Changed
@@ -213,6 +221,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.21]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.21
 [0.1.20]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.20
 [0.1.19]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.19
 [0.1.18]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.18

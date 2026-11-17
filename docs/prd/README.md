@@ -113,3 +113,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0088](0088-backend-install-without-steam.md) | Do not offer backend install without Steam | done | 2026-11-17 |
 | [0089](0089-repair-marker.md) | Repair completion marker must not wait on background installers | done | 2026-11-17 |
 | [0090](0090-minimal-doctor.md) | Minimal Doctor and Windows backend install | done | 2026-11-17 |
+| [0091](0091-library-sync.md) | Sync SteamTron library to Steam | active | 2026-11-17 |

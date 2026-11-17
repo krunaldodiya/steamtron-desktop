@@ -382,6 +382,52 @@ async fn repair_steam_library() -> Result<String, String> {
     .map_err(|error| format!("Repair task failed: {error}"))?
 }
 
+#[tauri::command]
+async fn sync_steam_library() -> Result<String, String> {
+    require_auth()?;
+    tauri::async_runtime::spawn_blocking(|| {
+        if steam::steam_root().is_err() {
+            return Err("Steam is not installed. Install Steam and start it once, then retry.".into());
+        }
+        let backend = platform_backend().map_err(|error| error.to_string())?;
+        let status = backend.status().map_err(|error| error.to_string())?;
+        if !status.ready {
+            return Err(format!(
+                "Steam library support is not ready: {}",
+                status.details
+            ));
+        }
+        let report = steamtron_library::managed::register_missing_managed_games(
+            &backend as &dyn RegistrationBackend,
+        )
+        .map_err(|error| error.to_string())?;
+        let repaired = repair_missing_appmanifests().unwrap_or_default();
+        if !report.failed.is_empty() {
+            return Err(format!(
+                "Synced {} game(s), but {} registration(s) failed: {}",
+                report.registered,
+                report.failed.len(),
+                report.failed.join("; ")
+            ));
+        }
+        let backend_name = if cfg!(target_os = "windows") {
+            "BetterSteamTools"
+        } else {
+            "SLSsteam Moon"
+        };
+        Ok(format!(
+            "Synced {} game{} to Steam through {backend_name}. {} already registered; recreated {} appmanifest{}. Start Steam manually.",
+            report.registered,
+            if report.registered == 1 { "" } else { "s" },
+            report.already_registered,
+            repaired.len(),
+            if repaired.len() == 1 { "" } else { "s" }
+        ))
+    })
+    .await
+    .map_err(|error| format!("Sync task failed: {error}"))?
+}
+
 fn unlock_backend() -> Result<impl RegistrationBackend, String> {
     let backend = platform_backend().map_err(|error| error.to_string())?;
     let status = backend.status().map_err(|error| error.to_string())?;
@@ -6105,6 +6151,7 @@ fn main() {
             profile_logout,
             doctor_report,
             repair_steam_library,
+            sync_steam_library,
             list_games,
             list_fixes,
             auto_launch_targets,

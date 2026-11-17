@@ -4320,6 +4320,24 @@ async function refreshLibrary() {
   else showToast("Refresh failed. Check Settings → Doctor.", true);
 }
 
+function doctorSyncRow(report, onRun) {
+  const row = document.createElement("div");
+  row.className = "settings-row";
+  const text = document.createElement("div");
+  text.className = "row-text";
+  text.innerHTML = "<strong>Steam library sync</strong><span>Adds SteamTron library games that are missing from Steam.</span>";
+  const control = document.createElement("div");
+  control.className = "row-control";
+  const button = document.createElement("button");
+  button.textContent = "Sync Steam library";
+  button.disabled = !report.healthy;
+  button.title = report.healthy ? "" : "Steam and the platform backend must be healthy first.";
+  button.onclick = () => onRun(button);
+  control.appendChild(button);
+  row.append(text, control);
+  return row;
+}
+
 async function loadDoctor(target = null) {
   const host = target || detailEl;
   const backendName = IS_WINDOWS ? "BetterSteamTools" : "SLSsteam Moon";
@@ -4359,6 +4377,17 @@ async function loadDoctor(target = null) {
       repairButton.hidden = report.healthy;
       repairButton.title = steamFound ? "" : "Install Steam first; SteamTron does not install Steam.";
     }
+    list.appendChild(doctorSyncRow(report, async (button) => {
+      const stop = busy(button, "Syncing…");
+      try {
+        const message = await invoke("sync_steam_library");
+        markRestartRequired("Steam library synced. Start Steam manually.");
+        stop();
+        renderSettingsMessage(message);
+        await loadBackend();
+        await loadDoctor(host);
+      } catch (error) { stop(); renderSettingsMessage(String(error), true); }
+    }));
   } catch (error) {
     host.innerHTML = `<div class="status error">${escape(error)}</div>`;
   }
@@ -4682,6 +4711,9 @@ async function renderGeneralSettings(host) {
           repairButton.hidden = report.healthy;
           repairButton.title = steamFound ? "" : "Install Steam first; SteamTron does not install Steam.";
         }
+        results.appendChild(doctorSyncRow(report, (button) => {
+          void runRepair(button, "sync_steam_library");
+        }));
       } catch (reportError) {
         status.textContent = "Checks could not run.";
         results.innerHTML = `<div class="settings-row"><div class="row-text"><span class="status error">${escape(String(reportError))}</span></div></div>`;
