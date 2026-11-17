@@ -55,13 +55,14 @@ FunctionEnd
 
 Function CheckPrerequisites
   ; This is a 32-bit NSIS process. Read the native 64-bit registry view and
-  ; check System32 for the x64 runtime; $SYSDIR redirects to SysWOW64.
+  ; check the native x64 view; Sysnative avoids WOW64 filesystem redirection.
   SetRegView 64
   StrCpy $VCStatus "Missing"
   ReadRegStr $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
   ${If} $0 == "1"
-    IfFileExists "$WINDIR\System32\vcruntime140.dll" 0 vc_missing
-    IfFileExists "$WINDIR\System32\msvcp140.dll" 0 vc_missing
+    ; Sysnative is the 64-bit System32 view for this 32-bit NSIS process.
+    IfFileExists "$WINDIR\Sysnative\vcruntime140.dll" 0 vc_missing
+    IfFileExists "$WINDIR\Sysnative\msvcp140.dll" 0 vc_missing
     StrCpy $VCStatus "Installed"
   ${EndIf}
   vc_missing:

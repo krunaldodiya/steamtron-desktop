@@ -33,7 +33,7 @@ Tauri's “Delete app data” section removes only `%APPDATA%\<bundle-id>` and
   is missing.
 - R2: The disabled button explains that Steam is not installed.
 - R3: Bootstrapper VC++ detection uses `SetRegView 64`.
-- R4: VC++ DLL checks use `$WINDIR\System32`.
+- R4: VC++ DLL checks use `$WINDIR\Sysnative` from the 32-bit bootstrapper.
 - R5: No prerequisite is removed by SteamTron's uninstaller.
 
 ## Acceptance criteria
@@ -41,6 +41,7 @@ Tauri's “Delete app data” section removes only `%APPDATA%\<bundle-id>` and
 - [x] Restart Steam is disabled without Steam.
 - [x] VC++ x64 detection no longer uses the 32-bit registry view.
 - [x] VC++ x64 detection no longer checks SysWOW64.
+- [x] VC++ x64 detection uses Sysnative, not redirected System32.
 - [x] .NET and WinFsp detection remain unchanged.
 - [x] Uninstaller behavior is unchanged for prerequisites.
 
