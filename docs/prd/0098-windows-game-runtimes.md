@@ -89,6 +89,9 @@ installer by hand.
   exercised: the 100,275,120-byte DirectX package downloaded with a `Valid`
   Microsoft Authenticode signature, and `directx_Jun2010_redist.exe /Q /T:…`
   extracted 157 files including `DXSETUP.exe` with exit code 0.
+- Installed build `237a05904c1bddd7f358e8d0bff77caf06a111198c96b1e56eb3f006b1ad0daf`
+  at 17:43. A wrapper smoke run after the install produced the expected
+  `start`, `merged=S:\`, `cwd`, `exec`, and `exit=0` lines.
 
 ## Decisions and risks
 
