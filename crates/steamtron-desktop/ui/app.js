@@ -4491,6 +4491,18 @@ async function refreshSettingsLibrary() {
   return settingsLibrary;
 }
 
+/// Resolve with `fallback` when `promise` does not settle in time. A settings
+/// tab must never sit on "Loading…" because one IPC call stalled.
+function settleWithin(promise, milliseconds, fallback) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), milliseconds);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      () => { clearTimeout(timer); resolve(fallback); },
+    );
+  });
+}
+
 async function renderSettingsPage() {
   stopProtonInstallPolling();
   const page = settingsPage();
@@ -4817,12 +4829,16 @@ async function showAddDriveDialog() {
 }
 
 async function renderStorageSettings(host) {
-  const snapshot = await refreshSettingsLibrary();
+  const snapshot = await settleWithin(refreshSettingsLibrary(), 4000, null);
   const drives = snapshot?.drives || [];
   const games = snapshot?.games || [];
   const libraryPath = snapshot?.path || "";
   const dataDir = libraryPath.replace(/\/[^/]+$/, "");
-  const available = await invoke("available_library_drives").catch(() => []);
+  const available = await settleWithin(
+    invoke("available_library_drives").catch(() => []),
+    4000,
+    [],
+  );
   const availableByPath = new Map(available.map((drive) => [drive.path, drive]));
   const gamesOn = (drive) => games.filter((game) => {
     const root = game.installation?.root || "";
@@ -5694,14 +5710,6 @@ function renderStorePage() {
   const previousStoreId = previousInDetail ? previousActive.dataset?.storeId || "" : "";
   const previousPage = previousInDetail ? previousActive.dataset?.storePage || "" : "";
   const previousScroll = detailEl.querySelector(".store-content")?.scrollTop || 0;
-  if (!storeConnection && !storeLoadedItems().length) {
-    detailEl.innerHTML = `<div class="page store-page">
-      <header class="page-head"><h1>Discover your next game</h1><p>PC titles only. Game data by IGDB.</p></header>
-      <div class="store-connect-page"><div class="status">Loading the Store…</div></div>
-    </div>`;
-    applyPendingRouteFocus("store");
-    return;
-  }
   const disconnected = Boolean(storeConnection && storeConnection.connected !== true);
   if (disconnected) {
     detailEl.innerHTML = `<div class="page store-page">

@@ -121,3 +121,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0096](0096-windows-union-overlay.md) | Layer fixes over Windows games with a WinFsp union | done | 2026-11-18 |
 | [0097](0097-windows-launch-log.md) | Windows launch diagnostic log | done | 2026-11-18 |
 | [0098](0098-windows-game-runtimes.md) | Windows game runtime provisioning | active | 2026-11-18 |
+| [0099](0099-store-settings-loading.md) | Keep Settings and Store shells during loading | done | 2026-11-18 |

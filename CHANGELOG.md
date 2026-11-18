@@ -21,6 +21,14 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Searching the Store no longer replaces the whole page with "Loading the
+  Store…". A new query empties the page cache, and the empty state used to win
+  before the IGDB status was known; the sidebar, filters, and results container
+  now stay mounted and only the results area shows progress.
+- Settings → Storage can no longer sit on "Loading…" forever. The tab bounds
+  both IPC calls and renders with fallbacks if a snapshot or drive enumeration
+  stalls.
+
 - Windows Play writes the overlay wrapper's start, mount point, working
   directory, launch command, and exit code to the game's diagnostic log.
   Windows games are GUI binaries, so nothing reached stdout/stderr and Game
