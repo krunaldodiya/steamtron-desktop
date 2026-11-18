@@ -7,6 +7,18 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Windows Play checks the launch target's imports and installs the Microsoft
+  runtimes the game needs before starting it: DirectX End-User Runtime (June
+  2010) for `XINPUT1_3`, `X3DAudio1_7`, `XAPOFX1_5`, `d3dx9/10/11` and
+  `d3dcompiler_43`, plus Visual C++ 2010, 2012, 2013, and 2015-2022 for the
+  matching architecture. Installers are downloaded once into
+  `%LOCALAPPDATA%\steamtron\runtimes`, checked for a valid Microsoft
+  Authenticode signature, and run silently behind one elevation prompt. This is
+  the Windows counterpart of Proton's per-game prefix and Steam's install
+  script, which managed depot downloads previously skipped.
+
 ### Fixed
 
 - Windows Play writes the overlay wrapper's start, mount point, working

@@ -11,6 +11,8 @@ mod download;
 mod fix_tools;
 mod igdb;
 mod proton_sources;
+#[cfg(target_os = "windows")]
+mod runtimes;
 
 use serde::Serialize;
 use tauri::Manager;
@@ -2168,6 +2170,18 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         fixes,
     )
     };
+
+    // Steam runs each app's install script before the first launch; managed
+    // downloads never do. Detect the target's DirectX/VC++ imports and add
+    // the matching Microsoft redistributables, so games do not fail on a
+    // missing XINPUT1_3.dll or VCRUNTIME140.dll.
+    #[cfg(target_os = "windows")]
+    runtimes::ensure_for_game(
+        std::path::Path::new(&program),
+        &game.installation.root,
+        fixes.as_deref(),
+        &stdout,
+    )?;
 
     if managed_runs()
         .lock()
