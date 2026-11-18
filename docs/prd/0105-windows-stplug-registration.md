@@ -1,6 +1,6 @@
 # Windows registration writes stplug-in
 
-- Status: active
+- Status: done
 - Date: 2026-11-18
 - Areas: `crates/steamtron-register/src/windows.rs`
 
@@ -30,7 +30,7 @@ creating the directory when missing.
 ## Acceptance criteria
 
 - [x] A unit test registers into `config/stplug-in/42.lua`.
-- [ ] A sync from the rebuilt app updates the stplug-in files.
+- [x] A sync from the rebuilt app updates the stplug-in files.
 
 ## Verification
 
@@ -40,7 +40,11 @@ creating the directory when missing.
   Steam changed the library from `All Games (0)` to `All Games (4)`
   (Cricket 26, Little Nightmares Enhanced/II/III), with no Millennium or
   LuaTools plugin installed.
-- Post-install sync check recorded below.
+- Rebuilt 0.1.28 binary, CDP `invoke('sync_steam_library')` after deleting
+  `stplug-in/3468650.lua`: result
+  `"Synced 1 game … 3 already registered; recreated 4 appmanifests."`; the file
+  was recreated at 21:16 with identical content, and `config/lua` mtimes stayed
+  20:16.
 
 ## Decisions and risks
 
