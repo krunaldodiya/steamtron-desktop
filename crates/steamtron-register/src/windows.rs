@@ -27,12 +27,10 @@ impl BtsBackend {
     }
 
     fn lua_dir(&self) -> PathBuf {
-        let stplug = self.steam_root.join("config/stplug-in");
-        if stplug.exists() {
-            stplug
-        } else {
-            self.steam_root.join("config/lua")
-        }
+        // BetterSteamTools watches `config/stplug-in` for hot reloads. The
+        // older fallback to `config/lua` wrote manifests Steam never applied,
+        // so Steam showed an empty library even though registration passed.
+        self.steam_root.join("config/stplug-in")
     }
 
     fn depotcache(&self) -> PathBuf {
@@ -131,6 +129,7 @@ mod tests {
             manifests: &manifests,
         };
         backend.register(&request).unwrap();
+        assert!(temp.path().join("config/stplug-in/42.lua").is_file());
         assert!(backend.verify("42").unwrap().registered);
         backend.unregister("42").unwrap();
         assert!(!backend.verify("42").unwrap().registered);

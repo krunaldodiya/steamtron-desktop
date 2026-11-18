@@ -5,10 +5,14 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.28] - 2026-11-18
 
 ### Fixed
 
+- Windows registration now writes Lua manifests to `Steam/config/stplug-in`,
+  the directory BetterSteamTools watches, instead of falling back to
+  `config/lua` where Steam never applied them. Synced games now appear in the
+  Steam library without Millennium or the LuaTools plugin.
 - The Windows backend installer now uses BetterSteamTools v1.0.9 (maintained
   OpenSteamTool fork, 2026-11-13) instead of the June 1.4.8 build, and pins its
   SHA-256. The DLL initializes against the current Steam client; showing
@@ -333,6 +337,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.28]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.28
 [0.1.27]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.27
 [0.1.26]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.26
 [0.1.25]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.25

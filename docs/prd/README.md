@@ -126,4 +126,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0101](0101-remove-steam-toggle.md) | Remove the per-game Steam-running toggle | done | 2026-11-18 |
 | [0102](0102-doctor-backend-name.md) | Fix Doctor install action reference | done | 2026-11-18 |
 | [0103](0103-windows-artwork-scope.md) | Windows artwork asset scope | done | 2026-11-18 |
-| [0104](0104-bettersteamtools-1-0-9.md) | Install maintained BetterSteamTools | active | 2026-11-18 |
+| [0104](0104-bettersteamtools-1-0-9.md) | Install maintained BetterSteamTools | done | 2026-11-18 |
+| [0105](0105-windows-stplug-registration.md) | Windows registration writes stplug-in | active | 2026-11-18 |
