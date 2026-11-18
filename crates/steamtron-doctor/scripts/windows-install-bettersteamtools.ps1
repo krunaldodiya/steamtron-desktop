@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$archiveUrl = "https://github.com/OpenSteam001/OpenSteamTool/releases/download/1.4.8/OpenSteamTool-1.4.8-Release.zip"
-$expectedSha256 = "966654604d258d5d5383e72fec616df7957bf86f760c67eeb3d0e18cd882c710"
+$archiveUrl = "https://github.com/madoiscool/BetterSteamTools/releases/download/v1.0.9/OpenSteamTool-v1.0.9-Release.zip"
+$expectedSha256 = "af1affe62d2bd4359c086de983d12a5877fe5b026a2526343d53578dce2d366f"
 $temp = Join-Path $env:TEMP ("steamtron-opensteamtool-" + [guid]::NewGuid().ToString("N"))
 $exitCode = 1
 
@@ -25,7 +25,7 @@ try {
 
     New-Item -ItemType Directory -Path $temp -Force | Out-Null
     $zip = Join-Path $temp "OpenSteamTool.zip"
-    Write-Log "Downloading OpenSteamTool 1.4.8"
+    Write-Log "Downloading BetterSteamTools 1.0.9 (OpenSteamTool fork)"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -Uri $archiveUrl -OutFile $zip -UseBasicParsing
     $actualSha256 = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -44,7 +44,7 @@ try {
     }
     New-Item -ItemType Directory -Path (Join-Path $steamRootFull "config\lua") -Force | Out-Null
     $exitCode = 0
-    Write-Log "OpenSteamTool installed."
+    Write-Log "BetterSteamTools 1.0.9 installed."
 } catch {
     Write-Log ("error: " + $_.Exception.Message)
     $exitCode = 1

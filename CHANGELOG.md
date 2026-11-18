@@ -5,6 +5,15 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The Windows backend installer now uses BetterSteamTools v1.0.9 (maintained
+  OpenSteamTool fork, 2026-11-13) instead of the June 1.4.8 build, and pins its
+  SHA-256. The DLL initializes against the current Steam client; showing
+  unlocked games in Steam's library still needs the LuaTools/Millennium plugin.
+
 ## [0.1.27] - 2026-11-18
 
 ### Fixed
