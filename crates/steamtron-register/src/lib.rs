@@ -100,6 +100,10 @@ pub trait RegistrationBackend {
     ) -> Result<Registration, RegistrationError>;
     fn verify(&self, app_id: &str) -> Result<RegistrationState, RegistrationError>;
     fn unregister(&self, app_id: &str) -> Result<(), RegistrationError>;
+
+    /// Ask the platform client not to download content SteamTron manages.
+    /// Backends without that problem keep the no-op default.
+    fn suppress_client_downloads(&self, _app_id: &str) {}
 }
 
 fn validate_appid(appid: &str) -> Result<(), RegistrationError> {
@@ -126,6 +130,7 @@ fn write_atomic(path: &Path, bytes: &[u8], mode: u32) -> Result<(), Registration
     fs::rename(&temporary, path).map_err(|error| RegistrationError::io(path, error))
 }
 
+#[cfg(not(target_os = "windows"))]
 fn write_manifests(
     target_dir: &Path,
     manifests: &BTreeMap<String, Vec<u8>>,

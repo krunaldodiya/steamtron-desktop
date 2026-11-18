@@ -611,6 +611,7 @@ where
         };
         report.checked += 1;
         let appid_text = appid.to_string();
+        backend.suppress_client_downloads(&appid_text);
 
         if backend
             .verify(&appid_text)

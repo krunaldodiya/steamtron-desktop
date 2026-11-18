@@ -35,11 +35,16 @@ downloads start.
   already-registered games are cleaned on the next sync.
 - R3: The returned `Registration.manifests` is empty on Windows.
 - R4: Lua/stplug-in registration and verification behavior is unchanged.
+- R5: After registration, remove the game's `appmanifest_<id>.acf` and
+  `downloading/<id>` for 10 s, because Steam creates them on license hot reload
+  and queues an update for the game. The license stays valid.
 
 ## Acceptance criteria
 
 - [x] Unit test: a pre-existing `42_1.manifest` is removed and no new depot
   manifest is written.
+- [x] A sync while Steam is online removes the game ACFs within 10 s and only
+  the Steamworks redistributable updates.
 - [x] After a sync from the rebuilt app, `steamapps/depotcache` stays empty of
   SteamTron manifests and Steam queues no update.
 

@@ -5,7 +5,7 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
-## [0.1.30] - 2026-11-18
+## [0.1.31] - 2026-11-18
 
 ### Fixed
 
@@ -13,6 +13,11 @@ and releases use [Semantic Versioning](https://semver.org/).
   the directory BetterSteamTools watches, instead of falling back to
   `config/lua` where Steam never applied them. Synced games now appear in the
   Steam library without Millennium or the LuaTools plugin.
+- Windows registration now also removes the per-game `appmanifest_<id>.acf`
+  and `downloading/<id>` for ten seconds after writing the Lua license. Steam
+  creates those on hot reload and immediately queues a full game download;
+  removing them keeps ownership and the library entry while only the
+  Steamworks redistributable may update.
 - Windows registration no longer writes depot manifests into Steam's
   `steamapps/depotcache`. Steam treated those as installed depots and queued
   automatic updates (including the ~500 MB Steamworks common redistributables)
@@ -346,6 +351,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.31]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.31
 [0.1.30]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.30
 [0.1.29]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.29
 [0.1.28]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.28

@@ -48,6 +48,26 @@ impl BtsBackend {
     fn lua_path(&self, appid: &str) -> PathBuf {
         self.lua_dir().join(format!("{appid}.lua"))
     }
+
+    /// Steam creates an appmanifest for a newly licensed AppID and immediately
+    /// schedules an update for it. The license does not need that manifest:
+    /// removing it keeps the game in the library as owned while preventing a
+    /// download of content SteamTron already manages.
+    fn schedule_update_cleanup(&self, appid: &str) {
+        let root = self.steam_root.clone();
+        let appid = appid.to_owned();
+        std::thread::spawn(move || {
+            let appmanifest = root
+                .join("steamapps")
+                .join(format!("appmanifest_{appid}.acf"));
+            let downloading = root.join("steamapps").join("downloading").join(&appid);
+            for _ in 0..20 {
+                let _ = fs::remove_file(&appmanifest);
+                let _ = fs::remove_dir_all(&downloading);
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        });
+    }
 }
 
 impl RegistrationBackend for BtsBackend {
@@ -91,6 +111,7 @@ impl RegistrationBackend for BtsBackend {
             }
         }
         let manifests = Vec::new();
+        self.schedule_update_cleanup(&request.app_id);
         Ok(Registration {
             app_id: request.app_id.to_owned(),
             title: request.title.to_owned(),
@@ -118,6 +139,10 @@ impl RegistrationBackend for BtsBackend {
             fs::remove_file(&lua).map_err(|error| RegistrationError::io(&lua, error))?;
         }
         Ok(())
+    }
+
+    fn suppress_client_downloads(&self, app_id: &str) {
+        self.schedule_update_cleanup(app_id);
     }
 }
 
