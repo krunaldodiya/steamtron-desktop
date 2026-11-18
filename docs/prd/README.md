@@ -129,3 +129,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0104](0104-bettersteamtools-1-0-9.md) | Install maintained BetterSteamTools | done | 2026-11-18 |
 | [0105](0105-windows-stplug-registration.md) | Windows registration writes stplug-in | done | 2026-11-18 |
 | [0106](0106-antivirus-exclusions.md) | Antivirus exclusions cover the unlock backend | done | 2026-11-18 |
+| [0108](0108-windows-no-depot-manifests.md) | Windows must not publish depot manifests to Steam | done | 2026-11-18 |

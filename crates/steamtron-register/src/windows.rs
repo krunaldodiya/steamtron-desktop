@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::{
-    validate_appid, write_atomic, write_manifests, BackendStatus, Registration, RegistrationBackend,
+    validate_appid, write_atomic, BackendStatus, Registration, RegistrationBackend,
     RegistrationError, RegistrationRequest, RegistrationState,
 };
 
@@ -81,7 +81,16 @@ impl RegistrationBackend for BtsBackend {
         }
         let lua_path = self.lua_path(request.app_id);
         write_atomic(&lua_path, request.lua.as_bytes(), 0o600)?;
-        let manifests = write_manifests(&self.depotcache(), request.manifests)?;
+        // Steam treats manifests in `steamapps/depotcache` as installed depots
+        // and schedules automatic updates (including the Steamworks common
+        // redistributables). SteamTron downloads with DepotDownloaderMod, so
+        // Windows must never publish depot manifests to Steam.
+        for name in request.manifests.keys() {
+            if name.ends_with(".manifest") && !name.contains('/') && !name.contains('\\') {
+                let _ = fs::remove_file(self.depotcache().join(name));
+            }
+        }
+        let manifests = Vec::new();
         Ok(Registration {
             app_id: request.app_id.to_owned(),
             title: request.title.to_owned(),
@@ -121,14 +130,20 @@ mod tests {
     fn registers_verifies_and_removes_one_app() {
         let temp = tempfile::tempdir().unwrap();
         let backend = BtsBackend::with_steam_root(temp.path());
-        let manifests = BTreeMap::new();
+        let depotcache = temp.path().join("steamapps/depotcache");
+        fs::create_dir_all(&depotcache).unwrap();
+        fs::write(depotcache.join("42_1.manifest"), b"stale").unwrap();
+        let mut manifests = BTreeMap::new();
+        manifests.insert("42_1.manifest".to_string(), b"data".to_vec());
         let request = RegistrationRequest {
             app_id: "42",
             title: "Sample",
             lua: "addappid(42)\n",
             manifests: &manifests,
         };
-        backend.register(&request).unwrap();
+        let registration = backend.register(&request).unwrap();
+        assert!(registration.manifests.is_empty());
+        assert!(!depotcache.join("42_1.manifest").exists());
         assert!(temp.path().join("config/stplug-in/42.lua").is_file());
         assert!(backend.verify("42").unwrap().registered);
         backend.unregister("42").unwrap();
