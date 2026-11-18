@@ -1788,6 +1788,15 @@ fn proton_launcher(appid: &str) -> Option<(std::path::PathBuf, std::path::PathBu
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+fn overlay_log(message: impl AsRef<str>) {
+    // Play redirects this process's stderr to the per-game diagnostic log, so
+    // wrapper progress is visible in Game Settings -> Debug. Windows games are
+    // GUI binaries and produce no stdout of their own, which left the log
+    // empty even though the launch succeeded.
+    eprintln!("SteamTron overlay: {}", message.as_ref());
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn try_overlay_wrapper() -> Option<i32> {
     use steamtron_overlay::{OverlayGame, PlatformOverlay};
 
@@ -1826,6 +1835,7 @@ fn try_overlay_wrapper() -> Option<i32> {
         let appid = appid.ok_or("missing --appid")?;
         let common = common.ok_or("missing --common")?;
         let fixes = fixes.ok_or("missing --fixes")?;
+        overlay_log(format!("start appid={appid} common={common} fixes={fixes}"));
         if command.is_empty() {
             return Err("missing game command after --".into());
         }
@@ -1833,6 +1843,7 @@ fn try_overlay_wrapper() -> Option<i32> {
             .map_err(|error| error.to_string())?;
         let mut overlay = PlatformOverlay::new(game);
         let merged = overlay.mount().map_err(|error| error.to_string())?.to_path_buf();
+        overlay_log(format!("merged={}", merged.display()));
         // Only PlayTron launches pass --target-id. Steam launches must keep
         // using the command Steam prepared; otherwise a configured launcher
         // target silently overrides %command% for Steam Play.
@@ -1923,11 +1934,13 @@ fn try_overlay_wrapper() -> Option<i32> {
                 .and_then(|path| std::path::Path::new(&path).parent().map(std::path::Path::to_path_buf))
                 .unwrap_or_else(|| merged.clone())
         };
+        overlay_log(format!("cwd={}", workdir.display()));
         process.args(&rewritten[1..]).current_dir(workdir);
         if let Some(appid) = overlay.game().appid() {
             process.env("SteamAppId", appid);
             process.env("SteamGameId", appid);
         }
+        overlay_log(format!("exec={}", rewritten.join(" ")));
         // A fix that ships a launcher loader DLL must win over Wine's
         // builtin/prefix copy. This is required for Uplay/Ubisoft Connect
         // fixes, which otherwise start the real Ubisoft launcher.
@@ -1949,6 +1962,7 @@ fn try_overlay_wrapper() -> Option<i32> {
             process.env("WINEDLLOVERRIDES", overrides.join(";"));
         }
         let status = process.status().map_err(|error| format!("could not launch game: {error}"))?;
+        overlay_log(format!("exit={}", status.code().unwrap_or(1)));
         overlay.unmount().map_err(|error| error.to_string())?;
         Ok(status.code().unwrap_or(1))
     })();

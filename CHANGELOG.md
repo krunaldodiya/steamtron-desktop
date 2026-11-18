@@ -9,6 +9,12 @@ and releases use [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Windows Play writes the overlay wrapper's start, mount point, working
+  directory, launch command, and exit code to the game's diagnostic log.
+  Windows games are GUI binaries, so nothing reached stdout/stderr and Game
+  Settings → Debug showed "No log yet. Launch the game to create one." even
+  though the launch had succeeded.
+
 - Windows Play now layers fixes over the untouched game install with the WinFsp
   union, the same way Linux uses fuse-overlayfs. The union mounts on the first
   free drive from `S:` to `Z:`; directory mount points failed on some hosts with

@@ -119,3 +119,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0094](0094-dlc-size-column.md) | Keep the DLC size column on one line | done | 2026-11-17 |
 | [0095](0095-skip-installed-prereq-extraction.md) | Skip extracting installed prerequisites | done | 2026-11-17 |
 | [0096](0096-windows-union-overlay.md) | Layer fixes over Windows games with a WinFsp union | done | 2026-11-18 |
+| [0097](0097-windows-launch-log.md) | Windows launch diagnostic log | done | 2026-11-18 |
