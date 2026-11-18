@@ -122,3 +122,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0097](0097-windows-launch-log.md) | Windows launch diagnostic log | done | 2026-11-18 |
 | [0098](0098-windows-game-runtimes.md) | Windows game runtime provisioning | active | 2026-11-18 |
 | [0099](0099-store-settings-loading.md) | Keep Settings and Store shells during loading | done | 2026-11-18 |
+| [0100](0100-restored-artwork.md) | Restored game keeps its artwork | done | 2026-11-18 |
+| [0101](0101-remove-steam-toggle.md) | Remove the per-game Steam-running toggle | done | 2026-11-18 |

@@ -19,6 +19,13 @@ and releases use [Semantic Versioning](https://semver.org/).
   the Windows counterpart of Proton's per-game prefix and Steam's install
   script, which managed depot downloads previously skipped.
 
+### Changed
+
+- The per-game "Require Steam to be running" switch is removed from Game
+  Settings on Linux and Windows, along with its save button and the
+  write-only launch-settings parameter. Libraries that already stored the flag
+  keep their existing launch behavior.
+
 ### Fixed
 
 - Searching the Store no longer replaces the whole page with "Loading the
@@ -28,6 +35,9 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Settings → Storage can no longer sit on "Loading…" forever. The tab bounds
   both IPC calls and renders with fallbacks if a snapshot or drive enumeration
   stalls.
+- A game restored from a backup shows its cover and hero without restarting
+  SteamTron. The artwork lookup cached the empty result from before the restore
+  wrote the image files.
 
 - Windows Play writes the overlay wrapper's start, mount point, working
   directory, launch command, and exit code to the game's diagnostic log.

@@ -5793,7 +5793,6 @@ fn update_managed_launch_settings(
     arguments: Option<Vec<String>>,
     environment: Option<std::collections::BTreeMap<String, String>>,
     prefix_mode: Option<String>,
-    requires_steam: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
@@ -5843,35 +5842,6 @@ fn update_managed_launch_settings(
             game.installation.prefix = prefix;
         }
         game.launch.prefix_mode = mode;
-    }
-    if let Some(requires_steam) = requires_steam {
-        game.launch.requires_steam = requires_steam;
-        if requires_steam {
-            game.launch.environment.remove("PROTON_DISABLE_LSTEAMCLIENT");
-            if let Some(overrides) = game.launch.environment.get_mut("WINEDLLOVERRIDES") {
-                let kept: Vec<&str> = overrides
-                    .split(';')
-                    .filter(|part| !part.split('=').next().is_some_and(|name| name.trim().eq_ignore_ascii_case("lsteamclient")))
-                    .filter(|part| !part.is_empty())
-                    .collect();
-                if kept.is_empty() {
-                    game.launch.environment.remove("WINEDLLOVERRIDES");
-                } else {
-                    *overrides = kept.join(";");
-                }
-            }
-            if game.launch.prefix_mode != "steam" {
-                if let Some(app_id) = game.metadata_app_id {
-                    let steam_root = steam::steam_root().map_err(|error| error.to_string())?;
-                    game.installation.prefix = steam_root
-                        .join("steamapps")
-                        .join("compatdata")
-                        .join(app_id.to_string())
-                        .join("pfx");
-                    game.launch.prefix_mode = "steam".into();
-                }
-            }
-        }
     }
     library
         .upsert_game(game.clone())

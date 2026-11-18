@@ -450,7 +450,9 @@ async function artworkFor(gameId) {
   let artwork = null;
   try { artwork = await invoke("managed_artwork", { gameId }); }
   catch (_error) { artwork = null; }
-  artworkCache.set(gameId, artwork);
+  // A restore writes the artwork files after the first lookup. Caching the
+  // empty result left a restored game with "No cover art" until restart.
+  if (artwork) artworkCache.set(gameId, artwork);
   return artwork;
 }
 
@@ -878,7 +880,6 @@ function renderManagedPreview(game) {
   const appId = game.metadata_app_id;
   const target = game.launch_targets?.find((item) => item.primary) || game.launch_targets?.[0];
   const canPlay = managedReady(game) && Boolean(target);
-  const requiresSteam = Boolean(game.launch?.requires_steam);
   const running = runningManaged.has(game.id);
   const seed = gameDetailSeed;
   const provisionalHero = seed?.images?.hero || seed?.images?.portrait || (appId ? heroUrl(appId) : "");
@@ -909,7 +910,7 @@ function renderManagedPreview(game) {
           <p class="game-description${seed?.description ? "" : " hidden"}" id="game-description">${seed?.description ? escape(seed.description) : ""}</p>
           <p class="game-credits" id="game-credits">${escape(provisionalCredits)}</p>
           <div class="game-actions">${action}<button id="managed-remove" class="danger">Remove from library</button><button id="managed-options" class="game-icon-button" title="${document.body.classList.contains("fullscreen-mode") ? "Game settings are available in desktop mode" : "Game options"}" aria-label="Game options"${document.body.classList.contains("fullscreen-mode") ? " disabled" : ""}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.23.63.83 1.03 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1.03z"></path></svg></button><span class="game-size" id="game-size">Size: …</span></div>
-          ${downloading ? '<p class="muted game-note">Downloading game files…</p>' : (!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : requiresSteam ? '<p class="muted game-note">Steam must be running in the background for Steamworks. The game still launches directly through Proton.</p>' : ""))}
+          ${downloading ? '<p class="muted game-note">Downloading game files…</p>' : (!installed ? '<p class="muted game-note">Game files are not downloaded yet.</p>' : (!target ? '<p class="muted game-note">Choose the game executable in Game options to enable Play.</p>' : ""))}
           <div class="download-inline hidden" id="managed-download-inline">
             <div class="download-inline-track"><span></span></div>
             <div class="download-inline-meta"><span class="download-inline-meta-text"></span></div>
@@ -1740,7 +1741,6 @@ async function renderCompatibilityTab(pane, game, latestGame, refreshGame, rende
   }).join("");
   const prefix = latestGame.installation?.prefix || "";
   const prefixMode = latestGame.launch?.prefix_mode === "steam" ? "steam" : "umu";
-  const requiresSteam = Boolean(latestGame.launch?.requires_steam);
   pane.innerHTML = `<h3>Compatibility</h3>
     <label for="gs-proton-select">Proton</label>
     <select id="gs-proton-select">${options || '<option value="">No Proton runners installed</option>'}</select>
@@ -1757,9 +1757,7 @@ async function renderCompatibilityTab(pane, game, latestGame, refreshGame, rende
       <option value="umu"${prefixMode === "umu" ? " selected" : ""}>SteamTron prefix</option>
     </select>
     <button class="primary pane-save" id="gs-prefix-save">Save prefix source</button>
-    <h3>Steam client</h3>
-    <div class="game-options-toggle"><div><strong>Require Steam to be running</strong><p class="pane-note">Off by default. When enabled, Play requires the Steam client to be installed and running. If it is not running, Play stops with an error.</p></div><label class="switch"><input type="checkbox" id="gs-steam-required"${requiresSteam ? " checked" : ""}><span></span></label></div>
-    <button class="primary pane-save" id="gs-steam-save">Save Steam requirement</button>`;
+`;
 
   pane.querySelector("#gs-proton-save").onclick = async (event) => {
     const stop = busy(event.target, "Saving…");
@@ -1778,16 +1776,6 @@ async function renderCompatibilityTab(pane, game, latestGame, refreshGame, rende
       await refreshGame();
       stop();
       showToast("Prefix source saved");
-      renderTab("compatibility");
-    } catch (error) { stop(); showToast(String(error), true); }
-  };
-  pane.querySelector("#gs-steam-save").onclick = async (event) => {
-    const stop = busy(event.target, "Saving…");
-    try {
-      await invoke("update_managed_launch_settings", { gameId: game.id, requiresSteam: pane.querySelector("#gs-steam-required").checked });
-      await refreshGame();
-      stop();
-      showToast("Steam requirement saved");
       renderTab("compatibility");
     } catch (error) { stop(); showToast(String(error), true); }
   };
@@ -1813,7 +1801,6 @@ async function renderCompatibilityTab(pane, game, refreshGame, renderTab) {
   }
   const prefixMode = game.launch?.prefix_mode === "steam" ? "steam" : "umu";
   const prefix = game.installation?.prefix || "";
-  const requiresSteam = Boolean(game.launch?.requires_steam);
   pane.innerHTML = `<h3>Compatibility</h3>
     <select id="gs-proton-select" aria-label="Proton runner">${options.join("")}</select>
     <button class="primary pane-save" id="gs-proton-save">Save Proton</button>
@@ -1827,9 +1814,7 @@ async function renderCompatibilityTab(pane, game, refreshGame, renderTab) {
       <option value="umu"${prefixMode === "umu" ? " selected" : ""}>SteamTron prefix</option>
     </select>
     <button class="primary pane-save" id="gs-prefix-save">Save prefix source</button>
-    <h3>Steam client</h3>
-    <div class="settings-row"><div class="row-text"><strong>Require Steam to be running</strong><span>Off by default. When enabled, Play requires the Steam client and uses Steam compatdata.</span></div><label class="switch"><input type="checkbox" id="gs-steam-required"${requiresSteam ? " checked" : ""}><span></span></label></div>
-    <button class="primary pane-save" id="gs-steam-save">Save Steam requirement</button>`;
+`;
 
   pane.querySelector("#gs-proton-save").onclick = async (event) => {
     const stop = busy(event.target, "Saving…");
@@ -1854,19 +1839,6 @@ async function renderCompatibilityTab(pane, game, refreshGame, renderTab) {
       await refreshGame();
       stop();
       showToast("Prefix source saved");
-      renderTab("compatibility");
-    } catch (error) { stop(); showToast(String(error), true); }
-  };
-  pane.querySelector("#gs-steam-save").onclick = async (event) => {
-    const stop = busy(event.target, "Saving…");
-    try {
-      await invoke("update_managed_launch_settings", {
-        gameId: game.id,
-        requiresSteam: pane.querySelector("#gs-steam-required").checked,
-      });
-      await refreshGame();
-      stop();
-      showToast("Steam requirement saved");
       renderTab("compatibility");
     } catch (error) { stop(); showToast(String(error), true); }
   };
@@ -4912,6 +4884,7 @@ async function renderStorageSettings(host) {
       finishOperation("restore", "", `Restored ${result.title || "game"}`);
       operation.complete(`Restored ${result.title || "game"} to ${result.root}`);
       managedLibrary = result.library;
+      artworkCache.clear();
       await load();
       await renderSettingsPage();
       showToast(`Restored ${result.title || "game"} to ${result.root}`);
