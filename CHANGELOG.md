@@ -13,6 +13,11 @@ and releases use [Semantic Versioning](https://semver.org/).
   the directory BetterSteamTools watches, instead of falling back to
   `config/lua` where Steam never applied them. Synced games now appear in the
   Steam library without Millennium or the LuaTools plugin.
+- The BetterSteamTools installer now adds scoped Microsoft Defender
+  exclusions before downloading, covering its staging folder, three DLLs, and
+  the `opensteamtool`/`config/stplug-in` folders. A quarantine during a real
+  install previously required restoring the DLL by hand. Game fixes keep their
+  existing per-game exclusion flow.
 - The Windows backend installer now uses BetterSteamTools v1.0.9 (maintained
   OpenSteamTool fork, 2026-11-13) instead of the June 1.4.8 build, and pins its
   SHA-256. The DLL initializes against the current Steam client; showing
