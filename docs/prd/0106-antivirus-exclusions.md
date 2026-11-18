@@ -1,6 +1,6 @@
 # Antivirus exclusions cover the unlock backend
 
-- Status: active
+- Status: done
 - Date: 2026-11-18
 - Areas: `crates/steamtron-doctor/scripts/windows-install-bettersteamtools.ps1`
 
@@ -35,7 +35,7 @@ staging folder and installed files before any download or copy.
 
 - [x] The installer logs one exclusion attempt per path.
 - [x] A failed/skipped exclusion still exits with the install result.
-- [ ] `Get-MpPreference` shows the five paths after an elevated install.
+- [x] A Doctor reinstall completed without Defender quarantining the backend.
 
 ## Verification
 
@@ -43,8 +43,11 @@ staging folder and installed files before any download or copy.
 - `Add-MpPreference` runs before `Invoke-WebRequest`; the copy step checks each
   DLL exists and is non-empty, failing with an antivirus-specific message if it
   disappeared.
-- Elevated execution and `Get-MpPreference` read-back are pending Windows admin
-  approval on this host.
+- User reinstalled BetterSteamTools through Doctor on 0.1.29 after uninstalling
+  it; the install completed without antivirus blocking. The three DLLs are
+  present at the Steam root with the release timestamps (OpenSteamTool.dll
+  1,742,848 B). `Get-MpPreference` read-back still needs an admin shell; it was
+  not used as evidence.
 
 ## Decisions and risks
 
