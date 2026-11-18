@@ -73,7 +73,13 @@ fn prefix_is_usable(prefix: &Path) -> bool {
         || prefix.join("pfx/drive_c").is_dir()
 }
 
-fn resolve_executable(root: &Path, executable: &Path) -> Option<PathBuf> {
+/// Resolve a stored launch target against the current library layout.
+///
+/// Imported libraries can hold absolute paths from another machine (for
+/// example `/mnt/krunal/SteamLibrary/...` rewritten to `D:/mnt/krunal/...`).
+/// The tail of the path after the folder named like the game root is re-rooted
+/// onto `root`, so callers never depend on the raw string being valid.
+pub fn resolve_executable(root: &Path, executable: &Path) -> Option<PathBuf> {
     if executable.is_file() {
         return Some(executable.to_path_buf());
     }
@@ -423,7 +429,13 @@ mod tests {
         let root = temp.path().join("SteamTronLibrary/common/Sample");
         fs::create_dir_all(root.join("Bin")).unwrap();
         fs::write(root.join("Bin/Game.exe"), b"MZ").unwrap();
-        let old = PathBuf::from("/mnt/old/SteamLibrary/steamapps/common/Sample/Bin/Game.exe");
+        // A Windows import stores the old drive path (`D:/mnt/...`); a Unix
+        // one has no drive. Both must re-root onto the current library.
+        let old = if cfg!(windows) {
+            PathBuf::from("D:/mnt/old/SteamLibrary/steamapps/common/Sample/Bin/Game.exe")
+        } else {
+            PathBuf::from("/mnt/old/SteamLibrary/steamapps/common/Sample/Bin/Game.exe")
+        };
         assert_eq!(resolve_executable(&root, &old), Some(root.join("Bin/Game.exe")));
     }
 

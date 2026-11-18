@@ -2100,9 +2100,9 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     let plan = managed_launch_plan(&game, &target, &client_root)
         .map_err(|error| error.to_string())?;
     let fixes = managed_fixes_dir(&game);
-    #[cfg(target_os = "windows")]
-    let use_overlay = false;
-    #[cfg(not(target_os = "windows"))]
+    // Both platforms layer fixes over the untouched install: Linux with
+    // fuse-overlayfs, Windows with a WinFsp union mounted on a free drive.
+    // The game content is never modified.
     let use_overlay =
         fixes.as_ref().is_some_and(|path| dir_has_entries(path));
     let command = if use_overlay {
@@ -2111,29 +2111,36 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .metadata_app_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| game.id.clone());
+        let common = game.installation.root.display().to_string();
+        let fixes_display = fixes_path.display().to_string();
+        let steam_root_display = client_root.display().to_string();
         let exe = steamtron_executable()?;
         let mut command = hidden_command(&exe);
         command
             .arg("--steamtron-overlay")
-            .args([
-                "--appid",
-                &appid,
-                "--common",
-                &game.installation.root.display().to_string(),
-                "--fixes",
-                &fixes_path.display().to_string(),
-                "--proton-path",
-                &plan.program.display().to_string(),
-                "--compat",
-                &game.installation.prefix.display().to_string(),
-                "--cwd",
-                &game.installation.root.display().to_string(),
-                "--steam-root",
-                &client_root.display().to_string(),
-                "--",
-                &plan.arguments[1],
-            ])
-            .args(&target.arguments);
+            .arg("--appid")
+            .arg(&appid)
+            .arg("--common")
+            .arg(&common)
+            .arg("--fixes")
+            .arg(&fixes_display)
+            .arg("--cwd")
+            .arg(&common)
+            .arg("--steam-root")
+            .arg(&steam_root_display);
+        // Linux hands the merged executable to Proton; Windows runs the
+        // merged executable directly, so it must not pass --proton-path.
+        #[cfg(not(target_os = "windows"))]
+        command
+            .arg("--proton-path")
+            .arg(&plan.program)
+            .arg("--compat")
+            .arg(&game.installation.prefix);
+        #[cfg(target_os = "windows")]
+        command.arg("--").arg(&plan.program);
+        #[cfg(not(target_os = "windows"))]
+        command.arg("--").arg(&plan.arguments[1]);
+        command.args(&target.arguments);
         command
     } else {
         plan.command()

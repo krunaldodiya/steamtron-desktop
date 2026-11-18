@@ -738,6 +738,7 @@ mod tests {
         assert!(!pics.sizes.contains_key(&11));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn parses_names_from_dlcmetadata_wire_blocks() {
         let text = r#"

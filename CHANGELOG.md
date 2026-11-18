@@ -5,6 +5,29 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Windows Play now layers fixes over the untouched game install with the WinFsp
+  union, the same way Linux uses fuse-overlayfs. The union mounts on the first
+  free drive from `S:` to `Z:`; directory mount points failed on some hosts with
+  `STATUS_OBJECT_NAME_COLLISION` (`0xD0000035`). Managed games no longer need
+  the fix DLL copied into the content tree.
+- Removing GoldBerg now works when the fixes pack was imported without a
+  GoldBerg manifest. The fixes scan stopped six levels deep, so UE4 layouts
+  (`Engine/Binaries/ThirdParty/Steamworks/Steamv132/Win64/steam_settings/…`)
+  looked applied to the UI but yielded nothing to delete.
+- Applying GoldBerg no longer rewrites `steam_settings/steam_interfaces.txt`
+  with the emulator's exported symbol names. That list must hold interface
+  versions (`SteamUtils007`); overwriting it made GSE report "Missing interface"
+  and the game exited after the splash. An existing list is preserved and none
+  is written when the fixes pack ships none.
+- Steamless and GoldBerg resolve registered launch targets through
+  `resolve_executable`, so a library restored from another machine (for example
+  `/mnt/krunal/...` stored as `D:/mnt/krunal/...`) no longer fails with
+  "No launcher was found inside this game's folder".
+
 ## [0.1.25] - 2026-11-17
 
 ### Fixed

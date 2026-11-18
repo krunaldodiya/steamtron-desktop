@@ -562,6 +562,17 @@ fn windows_time(value: u64) -> std::time::SystemTime {
     std::time::UNIX_EPOCH + std::time::Duration::from_nanos((value - WINDOWS_EPOCH) * 100)
 }
 
+fn next_free_drive() -> Option<(String, PathBuf)> {
+    for letter in b'S'..=b'Z' {
+        let name = format!("{}:", letter as char);
+        let root = PathBuf::from(format!("{name}\\"));
+        if !root.exists() {
+            return Some((name, root));
+        }
+    }
+    None
+}
+
 pub struct WindowsOverlay {
     game: OverlayGame,
     layout: OverlayLayout,
@@ -616,11 +627,17 @@ impl WindowsOverlay {
             params.filesystem_name("SteamTron");
             params
         };
-        fs::create_dir_all(&self.mount_point)
-            .map_err(|error| OverlayError::io(&self.mount_point, error))?;
+        // WinFsp directory mounts fail on some hosts with
+        // STATUS_OBJECT_NAME_COLLISION (0xD0000035). Mounting on a free drive
+        // letter between S: and Z: is both the documented layout and the path
+        // WinFsp exercises most; the game then runs from the merged drive.
+        let (drive, root) = next_free_drive().ok_or_else(|| {
+            OverlayError::MountFailed("no free drive letter between S: and Z:".into())
+        })?;
+        self.mount_point = root;
         let mut host = FileSystemHost::<UnionFs, CoarseGuard>::new(params, fs)
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
-        host.mount(&self.mount_point)
+        host.mount(drive.as_str())
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
         host.start()
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
@@ -635,7 +652,9 @@ impl WindowsOverlay {
             host.unmount();
         }
         self.init = None;
-        let _ = fs::remove_dir(&self.mount_point);
+        if !self.mount_point.as_os_str().is_empty() {
+            let _ = fs::remove_dir(&self.mount_point);
+        }
         if self.layout.runtime.exists() {
             let _ = fs::remove_dir_all(&self.layout.runtime);
         }

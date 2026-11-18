@@ -110,8 +110,14 @@ fn ensure_goldberg_assets(progress: &dyn Fn(&str)) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+/// Deepest directory level scanned inside a fixes folder. UE4 titles keep the
+/// emulator at `Engine/Binaries/ThirdParty/Steamworks/Steamv132/Win64/`, whose
+/// `steam_settings` files sit eight levels down; a shallower limit made GoldBerg
+/// look applied while removal found nothing to delete.
+const MAX_FIXES_DEPTH: usize = 16;
+
 fn walk(root: &Path, depth: usize) -> Result<Vec<PathBuf>, String> {
-    if depth > 6 {
+    if depth > MAX_FIXES_DEPTH {
         return Ok(Vec::new());
     }
     let mut result = Vec::new();
@@ -139,75 +145,7 @@ fn pe_machine(path: &Path) -> Option<u16> {
     Some(u16::from_le_bytes(bytes.get(offset + 4..offset + 6)?.try_into().ok()?))
 }
 
-fn pe_exports(path: &Path) -> Vec<String> {
-    let Ok(bytes) = fs::read(path) else { return Vec::new() };
-    let Some(names) = (|| -> Option<Vec<String>> {
-        if bytes.get(0..2)? != b"MZ" { return None; }
-        let pe = u32::from_le_bytes(bytes.get(0x3c..0x40)?.try_into().ok()?) as usize;
-        if bytes.get(pe..pe + 4)? != b"PE\0\0" { return None; }
-        let coff = pe + 4;
-        let sections = u16::from_le_bytes(bytes.get(coff + 2..coff + 4)?.try_into().ok()?) as usize;
-        let optional_size = u16::from_le_bytes(bytes.get(coff + 16..coff + 18)?.try_into().ok()?) as usize;
-        let optional = coff + 20;
-        let magic = u16::from_le_bytes(bytes.get(optional..optional + 2)?.try_into().ok()?);
-        let directories = optional + if magic == 0x20b { 112 } else { 96 };
-        let export_rva = u32::from_le_bytes(bytes.get(directories..directories + 4)?.try_into().ok()?) as usize;
-        if export_rva == 0 { return Some(Vec::new()); }
-        let section_table = optional + optional_size;
-        let mut export_file = None;
-        for index in 0..sections {
-            let section = section_table + index * 40;
-            let virtual_size = u32::from_le_bytes(bytes.get(section + 8..section + 12)?.try_into().ok()?) as usize;
-            let virtual_address = u32::from_le_bytes(bytes.get(section + 12..section + 16)?.try_into().ok()?) as usize;
-            let raw_size = u32::from_le_bytes(bytes.get(section + 16..section + 20)?.try_into().ok()?) as usize;
-            let raw_pointer = u32::from_le_bytes(bytes.get(section + 20..section + 24)?.try_into().ok()?) as usize;
-            if export_rva >= virtual_address && export_rva < virtual_address + virtual_size.max(raw_size) {
-                export_file = Some(raw_pointer + export_rva - virtual_address);
-                break;
-            }
-        }
-        let export = export_file?;
-        let name_count = u32::from_le_bytes(bytes.get(export + 24..export + 28)?.try_into().ok()?) as usize;
-        let names_rva = u32::from_le_bytes(bytes.get(export + 32..export + 36)?.try_into().ok()?) as usize;
-        let mut names_file = None;
-        for index in 0..sections {
-            let section = section_table + index * 40;
-            let virtual_address = u32::from_le_bytes(bytes.get(section + 12..section + 16)?.try_into().ok()?) as usize;
-            let raw_size = u32::from_le_bytes(bytes.get(section + 16..section + 20)?.try_into().ok()?) as usize;
-            let raw_pointer = u32::from_le_bytes(bytes.get(section + 20..section + 24)?.try_into().ok()?) as usize;
-            if names_rva >= virtual_address && names_rva < virtual_address + raw_size {
-                names_file = Some(raw_pointer + names_rva - virtual_address);
-                break;
-            }
-        }
-        let names_file = names_file?;
-        let mut result = Vec::new();
-        for index in 0..name_count.min(4096) {
-            let pointer = u32::from_le_bytes(bytes.get(names_file + index * 4..names_file + index * 4 + 4)?.try_into().ok()?) as usize;
-            let mut string_file = None;
-            for section_index in 0..sections {
-                let section = section_table + section_index * 40;
-                let virtual_address = u32::from_le_bytes(bytes.get(section + 12..section + 16)?.try_into().ok()?) as usize;
-                let raw_size = u32::from_le_bytes(bytes.get(section + 16..section + 20)?.try_into().ok()?) as usize;
-                let raw_pointer = u32::from_le_bytes(bytes.get(section + 20..section + 24)?.try_into().ok()?) as usize;
-                if pointer >= virtual_address && pointer < virtual_address + raw_size {
-                    string_file = Some(raw_pointer + pointer - virtual_address);
-                    break;
-                }
-            }
-            let Some(start) = string_file else { continue };
-            let Some(end) = bytes[start..].iter().position(|byte| *byte == 0).map(|length| start + length) else { continue };
-            let Ok(name) = std::str::from_utf8(&bytes[start..end]) else { continue };
-            if name.starts_with("Steam") && name.len() < 128 {
-                result.push(name.to_owned());
-            }
-        }
-        result.sort();
-        result.dedup();
-        Some(result)
-    })() else { return Vec::new() };
-    names
-}
+
 
 #[derive(Serialize, Deserialize)]
 struct Manifest { files: Vec<String> }
@@ -237,7 +175,8 @@ fn find_steam_api(game: &Game) -> Result<(PathBuf, u16), String> {
         }
     }
     if let Some(target) = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first()) {
-        if let Some(parent) = target.executable.parent() {
+        let resolved = steamtron_core::runtime::resolve_executable(&game.installation.root, &target.executable);
+        if let Some(parent) = resolved.as_deref().and_then(|path| path.parent()) {
             for name in ["steam_api64.dll", "steam_api.dll"] {
                 let path = parent.join(name);
                 if path.is_file() && !candidates.contains(&path) {
@@ -296,17 +235,25 @@ fn same_bytes(left: &Path, right: &Path) -> bool {
 fn payload_dirs(fixes: &Path) -> Vec<PathBuf> {
     let mut result = Vec::new();
     let Ok(files) = walk(fixes, 0) else { return result };
+    let mut push = |path: &Path| {
+        if !result.contains(&path.to_path_buf()) {
+            result.push(path.to_path_buf());
+        }
+    };
     for path in files {
         let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        let Some(parent) = path.parent() else { continue };
+        // The emulator library itself names the payload directory, even when
+        // the pack has no `steam_settings` (a bare DLL swap still counts).
+        if name == "steam_api64.dll" || name == "steam_api.dll" {
+            push(parent);
+            continue;
+        }
         if (name == "steam_appid.txt" || name == "steam_interfaces.txt")
-            && path.parent().and_then(|parent| parent.file_name()).and_then(|value| value.to_str()) == Some("steam_settings")
+            && parent.file_name().and_then(|value| value.to_str()) == Some("steam_settings")
         {
-            if let Some(parent) = path.parent() {
-                if let Some(payload) = parent.parent() {
-                    if !result.contains(&payload.to_path_buf()) {
-                        result.push(payload.to_path_buf());
-                    }
-                }
+            if let Some(payload) = parent.parent() {
+                push(payload);
             }
         }
     }
@@ -343,16 +290,31 @@ pub fn apply_goldberg(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_js
     if !app_id.is_empty() {
         fs::write(settings.join("steam_appid.txt"), &app_id).map_err(|error| error.to_string())?;
     }
-    let exports = pe_exports(&steam_api);
-    let interfaces = exports.join("\n");
-    fs::write(payload.join("steam_interfaces.txt"), &interfaces).map_err(|error| error.to_string())?;
-    fs::write(settings.join("steam_interfaces.txt"), &interfaces).map_err(|error| error.to_string())?;
-    let mut files = vec![
-        relative.to_string_lossy().into_owned(),
-        payload.strip_prefix(&fixes).unwrap_or(Path::new("")).join("steam_interfaces.txt").to_string_lossy().into_owned(),
-    ];
-    for name in ["steam_settings/steam_appid.txt", "steam_settings/steam_interfaces.txt"] {
-        files.push(payload.join(name).strip_prefix(&fixes).unwrap_or(Path::new("")).to_string_lossy().into_owned());
+    // GSE's `steam_interfaces.txt` lists interface *versions* the game uses
+    // (`SteamUtils007`), never the emulator's exported symbols. Writing
+    // `pe_exports` into it made GSE reject every lookup ("Missing interface")
+    // and the game exited right after the splash. Keep whatever the fixes pack
+    // already ships; when it ships none, GSE falls back to its built-in table.
+    let interfaces = settings.join("steam_interfaces.txt");
+    let mut files = vec![relative.to_string_lossy().into_owned()];
+    if !app_id.is_empty() {
+        files.push(
+            settings
+                .join("steam_appid.txt")
+                .strip_prefix(&fixes)
+                .unwrap_or(Path::new(""))
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    if interfaces.is_file() {
+        files.push(
+            interfaces
+                .strip_prefix(&fixes)
+                .unwrap_or(Path::new(""))
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
     files.retain(|file| !file.is_empty());
     write_manifest(&fixes.join(GOLDBERG_MANIFEST), &files)?;
@@ -437,8 +399,13 @@ pub fn apply_steamless(game_id: &str, progress: &dyn Fn(&str)) -> Result<serde_j
     progress("Unpacking registered launchers…");
     let mut launchers = Vec::new();
     for target in &game.launch_targets {
-        if target.executable.is_file() {
-            launchers.push(target.executable.clone());
+        // Stored targets can be Linux absolute paths after a library import;
+        // resolve_executable re-roots them onto the current library layout.
+        if let Some(executable) = steamtron_core::runtime::resolve_executable(
+            &game.installation.root,
+            &target.executable,
+        ) {
+            launchers.push(executable);
         }
     }
     if launchers.is_empty() {
@@ -535,4 +502,30 @@ pub fn status(game: &Game) -> serde_json::Value {
         "goldberg": goldberg_applied(game),
         "steamless": steamless_applied(game),
     })
+}
+
+#[cfg(test)]
+mod goldberg_tests {
+    use super::*;
+
+    #[test]
+    fn payload_dirs_finds_deep_ue4_layout() {
+        let temp = tempfile::tempdir().unwrap();
+        let payload = temp
+            .path()
+            .join("Engine/Binaries/ThirdParty/Steamworks/Steamv132/Win64");
+        fs::create_dir_all(payload.join("steam_settings")).unwrap();
+        fs::write(payload.join("steam_api64.dll"), b"dll").unwrap();
+        fs::write(payload.join("steam_settings/steam_appid.txt"), b"424840").unwrap();
+        assert_eq!(payload_dirs(temp.path()), vec![payload]);
+    }
+
+    #[test]
+    fn payload_dirs_uses_bare_dll_swap() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("a/b/c/d/e/f/g");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("steam_api64.dll"), b"dll").unwrap();
+        assert_eq!(payload_dirs(temp.path()), vec![dir]);
+    }
 }

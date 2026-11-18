@@ -136,20 +136,36 @@ impl OverlayGame {
     }
 
     /// Rewrite an absolute command argument from the game root to the merged root.
+    ///
+    /// Windows canonicalization yields verbatim `\\?\D:\...` paths while the
+    /// launch arguments carry plain `D:\...`; compare without the verbatim
+    /// prefix and case-insensitively there, or the rewrite silently no-ops and
+    /// the game runs from the untouched content instead of the merged view.
     pub fn rewrite_arg(&self, value: &str, merged: &Path) -> String {
-        let common = self.common.to_string_lossy();
-        if value.starts_with(common.as_ref()) {
-            return value.replacen(common.as_ref(), &merged.to_string_lossy(), 1);
+        let prefix = self.common.to_string_lossy();
+        let prefix = prefix.strip_prefix(r"\\?\").unwrap_or(&prefix);
+        let value = value.strip_prefix(r"\\?\").unwrap_or(value);
+        let matches = value.len() >= prefix.len()
+            && if cfg!(windows) {
+                value[..prefix.len()].eq_ignore_ascii_case(prefix)
+            } else {
+                &value[..prefix.len()] == prefix
+            };
+        if !matches {
+            return value.to_owned();
         }
-        value.to_owned()
+        let root = merged.to_string_lossy();
+        let root = root.trim_end_matches(['\\', '/']);
+        let rest = value[prefix.len()..].trim_start_matches(['\\', '/']);
+        if rest.is_empty() {
+            return root.to_owned();
+        }
+        format!("{root}{}{rest}", std::path::MAIN_SEPARATOR)
     }
 
     /// Rewrite a working directory if it is inside the game root.
     pub fn rewrite_cwd(&self, cwd: &Path, merged: &Path) -> PathBuf {
-        let Ok(relative) = cwd.strip_prefix(&self.common) else {
-            return cwd.to_path_buf();
-        };
-        merged.join(relative)
+        PathBuf::from(self.rewrite_arg(&cwd.to_string_lossy(), merged))
     }
 }
 
@@ -253,4 +269,38 @@ fn prepare_private_dir(path: &Path) -> Result<(), OverlayError> {
             .map_err(|error| OverlayError::io(path, error))?;
     }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod rewrite_tests {
+    use super::*;
+
+    fn game() -> OverlayGame {
+        OverlayGame {
+            common: PathBuf::from(r"\\?\D:\Lib\Game"),
+            fixes: PathBuf::from(r"\\?\D:\Lib\fixes"),
+            appid: Some("1".into()),
+        }
+    }
+
+    #[test]
+    fn rewrite_arg_maps_verbatim_game_root_to_merged_drive() {
+        // canonicalize() yields `\\?\D:\...` while Play passes `D:\...`.
+        assert_eq!(
+            game().rewrite_arg(r"D:\Lib\Game\Atlas\Binaries\Win64\Game.exe", Path::new("S:\\")),
+            r"S:\Atlas\Binaries\Win64\Game.exe"
+        );
+    }
+
+    #[test]
+    fn rewrite_arg_ignores_case_and_leaves_outside_paths_alone() {
+        assert_eq!(
+            game().rewrite_arg(r"d:\lib\game\Atlas\Game.exe", Path::new("S:\\")),
+            r"S:\Atlas\Game.exe"
+        );
+        assert_eq!(
+            game().rewrite_arg(r"E:\Other\Game.exe", Path::new("S:\\")),
+            r"E:\Other\Game.exe"
+        );
+    }
 }
