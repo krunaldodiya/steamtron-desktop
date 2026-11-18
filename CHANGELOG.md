@@ -5,7 +5,7 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.26] - 2026-11-18
 
 ### Added
 
@@ -313,6 +313,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.26]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.26
 [0.1.25]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.25
 [0.1.24]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.24
 [0.1.23]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.23
