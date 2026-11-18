@@ -1,5 +1,6 @@
 const invoke = (command, args = {}) => window.__TAURI__.core.invoke(command, args);
 const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
+const BACKEND_NAME = IS_WINDOWS ? "BetterSteamTools" : "SLSsteam Moon";
 const convertFileSrc = (path) => window.__TAURI__.core.convertFileSrc(path);
 const gamesEl = document.querySelector("#games");
 const detailEl = document.querySelector("#detail");
@@ -4323,11 +4324,10 @@ function doctorSyncRow(report, onRun) {
 
 async function loadDoctor(target = null) {
   const host = target || detailEl;
-  const backendName = IS_WINDOWS ? "BetterSteamTools" : "SLSsteam Moon";
   host.innerHTML = `<div class="doctor-head"><div><h2>Doctor</h2><p class="muted">Validate Steam and Steam library support.</p></div><div class="update-actions"><button class="primary" id="doctor-repair">Repair Steam library</button><button id="doctor-refresh">Recheck</button></div></div><div class="doctor-list"><div class="status">Running checks…</div></div>`;
   host.querySelector("#doctor-refresh").onclick = () => loadDoctor(host);
   host.querySelector("#doctor-repair").onclick = async () => {
-    if (!(await confirmDialog({ title: "Repair Steam integration", message: `Repair downloads and installs ${backendName} into your existing Steam installation. It does not install Steam or LuaTools, and it re-registers games missing from Steam. Start Steam manually afterward. Continue?`, confirmLabel: "Repair" }))) return;
+    if (!(await confirmDialog({ title: "Repair Steam integration", message: `Repair downloads and installs ${BACKEND_NAME} into your existing Steam installation. It does not install Steam or LuaTools, and it re-registers games missing from Steam. Start Steam manually afterward. Continue?`, confirmLabel: "Repair" }))) return;
     const button = host.querySelector("#doctor-repair");
     const stop = busy(button, "Repairing…");
     try {
@@ -4697,7 +4697,7 @@ async function renderGeneralSettings(host) {
         for (const button of results.querySelectorAll("[data-doctor-repair]")) {
           button.onclick = async () => {
             if (button.dataset.doctorConfirm
-              && !(await confirmDialog({ title: "Repair Steam components", message: `This repair downloads and installs ${backendName} inside your existing Steam installation. It does not install Steam or LuaTools, and it re-registers managed games missing from Steam. Continue?`, confirmLabel: "Repair" }))) return;
+              && !(await confirmDialog({ title: "Repair Steam components", message: `This repair downloads and installs ${BACKEND_NAME} inside your existing Steam installation. It does not install Steam or LuaTools, and it re-registers managed games missing from Steam. Continue?`, confirmLabel: "Repair" }))) return;
             void runRepair(button, button.dataset.doctorRepair);
           };
         }
@@ -4719,7 +4719,7 @@ async function renderGeneralSettings(host) {
 
     backdrop.querySelector("#doctor-refresh").onclick = () => { void runChecks(); };
     backdrop.querySelector("#doctor-repair").onclick = async () => {
-      if (!(await confirmDialog({ title: "Repair SteamTron integration", message: `Repair SteamTron's Steam integration? This downloads and installs ${backendName}, does not install Steam or LuaTools, and re-registers games missing from Steam. Start Steam manually afterward.`, confirmLabel: "Repair" }))) return;
+      if (!(await confirmDialog({ title: "Repair SteamTron integration", message: `Repair SteamTron's Steam integration? This downloads and installs ${BACKEND_NAME}, does not install Steam or LuaTools, and re-registers games missing from Steam. Start Steam manually afterward.`, confirmLabel: "Repair" }))) return;
       void runRepair(backdrop.querySelector("#doctor-repair"), "repair_steam_library");
     };
     await runChecks();

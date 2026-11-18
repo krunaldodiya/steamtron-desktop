@@ -22,8 +22,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$HOME/.local/share/steamtron/artwork/**",
-          "$LOCALAPPDATA/SteamTron/artwork/**"
+          "$LOCALDATA/steamtron/artwork/**"
         ]
       }
     }

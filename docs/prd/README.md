@@ -124,3 +124,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0099](0099-store-settings-loading.md) | Keep Settings and Store shells during loading | done | 2026-11-18 |
 | [0100](0100-restored-artwork.md) | Restored game keeps its artwork | done | 2026-11-18 |
 | [0101](0101-remove-steam-toggle.md) | Remove the per-game Steam-running toggle | done | 2026-11-18 |
+| [0102](0102-doctor-backend-name.md) | Fix Doctor install action reference | done | 2026-11-18 |
+| [0103](0103-windows-artwork-scope.md) | Windows artwork asset scope | done | 2026-11-18 |

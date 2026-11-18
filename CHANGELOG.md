@@ -5,6 +5,17 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Doctor repair buttons (for example **Install BetterSteamTools**) no longer
+  fail with `ReferenceError: backendName is not defined`; the shared backend
+  label is defined once for the whole UI.
+- Local cover and hero artwork now loads on Windows. The asset-protocol scope
+  used `$LOCALAPPDATA`, which Tauri does not resolve, so every local image URL
+  returned 403; the scope is now `$LOCALDATA/steamtron/artwork/**`.
+
 ## [0.1.26] - 2026-11-18
 
 ### Added
