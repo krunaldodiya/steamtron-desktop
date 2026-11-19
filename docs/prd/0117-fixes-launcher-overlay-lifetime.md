@@ -135,6 +135,13 @@ started has exited.
   `4559D753BC982875A8F583D4B75F3FA24DC662027063498B76D889AD5E7547B4`), the
   uninstall entry says `SteamTron 0.1.38`, and the app launches and responds
   from that path.
+- Release 0.1.39 (commit `10eb59a`, tag `v0.1.39`, workflow run
+  `44543377108`) includes the single launcher picker; its bootstrapper hash
+  matched `A6750ED535B6AA3967ADFFA8019A1D8FCB76B836F659ACA7AB59298A4089C629`.
+  Installed FileVersion/ProductVersion `0.1.39` (SHA-256
+  `137D0EC36392172AC0E292F577A509757DB636F465DED47191BA35D2CF642A89`), uninstall
+  entry `SteamTron 0.1.39`, shortcuts point at the Program Files install, and
+  the app launches and responds.
 - Installer defect found while installing: running the bootstrapper with `/S`
   exited `0` without writing anything (three attempts, including after closing
   the running app and removing the stale per-machine install). The visible,

@@ -94,6 +94,10 @@ by its launcher is gone, and Stop terminates that whole tree.
 - Not re-tested after this change: natural game exit returning the UI to Play,
   and the RDR2 overlay path. Both use the same wait/removal code; the overlay
   wrapper already tracked its tree before this change.
+- Release 0.1.39 (workflow `44543377108`) publishes this fix. The bootstrapper
+  was installed: FileVersion `0.1.39`, SHA-256
+  `137D0EC36392172AC0E292F577A509757DB636F465DED47191BA35D2CF642A89`, uninstall
+  entry `SteamTron 0.1.39`, app launches and responds.
 
 ## Decisions and risks
 
