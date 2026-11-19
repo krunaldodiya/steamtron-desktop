@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Fixed
+
+- Fixes for a linked game whose prefix or manifest lives in SteamTronLibrary now
+  import to `<drive>\SteamTronLibrary\steamtronapps\fixes\<game>` instead of
+  `%LOCALAPPDATA%\steamtron\fixes\<appid>`; existing app-data fixes move there
+  automatically.
+
 ## [0.1.36] - 2026-11-19
 
 ### Changed

@@ -131,7 +131,8 @@ pub struct FixesRemoved {
 }
 
 fn fixes_dir_for(game: &Game) -> Result<PathBuf, LibraryError> {
-    steamtron_core::library::fixes_dir(game).map_err(|error| LibraryError::Invalid(error.to_string()))
+    steamtron_core::library::migrate_legacy_fixes(game)
+        .map_err(|error| LibraryError::Invalid(error.to_string()))
 }
 
 fn app_id_for(game: &Game) -> String {

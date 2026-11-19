@@ -2068,7 +2068,7 @@ fn try_overlay_wrapper() -> Option<i32> {
 
 #[tauri::command]
 fn managed_fixes_dir(game: &steamtron_core::library::Game) -> Option<std::path::PathBuf> {
-    steamtron_core::library::fixes_dir(game).ok()
+    steamtron_core::library::migrate_legacy_fixes(game).ok()
 }
 
 fn dir_has_entries(path: &std::path::Path) -> bool {

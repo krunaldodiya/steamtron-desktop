@@ -692,18 +692,91 @@ pub struct GameLayout {
     pub manifest: PathBuf,
 }
 
-/// Fixes directory for a game. Managed games keep fixes beside their content;
-/// linked games outside SteamTronLibrary use the app-data fixes folder so they
-/// can still receive Goldberg/Steamless/imported fixes.
+/// Fixes directory for a game.
+///
+/// Managed games keep fixes beside their content. Linked games also use that
+/// folder when their prefix or manifest already lives in a managed library, so
+/// a Steam-installed game catalogued by SteamTron shares the same
+/// `SteamTronLibrary` fixes tree as managed games. Only games with no managed
+/// footprint fall back to the app-data folder keyed by App ID.
 pub fn fixes_dir(game: &Game) -> Result<PathBuf, LibraryError> {
-    if let Some(drive) = drive_root_for(&game.installation.root) {
+    let drive = [
+        &game.installation.root,
+        &game.installation.prefix,
+        &game.installation.manifest,
+    ]
+    .into_iter()
+    .find_map(|path| drive_root_for(path));
+    if let Some(drive) = drive {
         return game_layout(&drive, game).map(|layout| layout.fixes);
     }
+    Ok(legacy_fixes_dir(game))
+}
+
+/// App-data fixes folder used when a game has no managed library footprint.
+pub fn legacy_fixes_dir(game: &Game) -> PathBuf {
     let app_id = game
         .metadata_app_id
         .map(|id| id.to_string())
         .unwrap_or_else(|| game.id.clone());
-    Ok(crate::paths::layout().home().join("fixes").join(app_id))
+    crate::paths::layout().home().join("fixes").join(app_id)
+}
+
+/// Resolve the fixes folder and adopt fixes left in the app-data fallback once
+/// the game maps to a managed library. Best effort: I/O problems leave the
+/// legacy folder untouched and still return the resolved target.
+pub fn migrate_legacy_fixes(game: &Game) -> Result<PathBuf, LibraryError> {
+    let target = fixes_dir(game)?;
+    let legacy = legacy_fixes_dir(game);
+    if target != legacy && !target.exists() && legacy.is_dir() {
+        adopt_fixes(&legacy, &target);
+    }
+    Ok(target)
+}
+
+fn adopt_fixes(legacy: &Path, target: &Path) {
+    let Some(parent) = target.parent() else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() || fs::rename(legacy, target).is_ok() {
+        return;
+    }
+    let Some(folder) = target.file_name() else {
+        return;
+    };
+    let mut staging_name = std::ffi::OsString::from(".");
+    staging_name.push(folder);
+    staging_name.push(format!(".adopt-{}", std::process::id()));
+    let staging = parent.join(staging_name);
+    let _ = fs::remove_dir_all(&staging);
+    if copy_fixes_tree(legacy, &staging).is_err() {
+        let _ = fs::remove_dir_all(&staging);
+        return;
+    }
+    if fs::rename(&staging, target).is_ok() {
+        let _ = fs::remove_dir_all(legacy);
+    } else {
+        let _ = fs::remove_dir_all(&staging);
+    }
+}
+
+fn copy_fixes_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let source = entry.path();
+        let metadata = fs::symlink_metadata(&source)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        let destination = to.join(entry.file_name());
+        if metadata.is_dir() {
+            copy_fixes_tree(&source, &destination)?;
+        } else if metadata.is_file() {
+            fs::copy(&source, &destination)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn game_layout(drive_root: &Path, game: &Game) -> Result<GameLayout, LibraryError> {
@@ -1135,6 +1208,56 @@ mod tests {
         assert_eq!(layout.content, layout.base.join("common").join("Sample"));
         assert_eq!(layout.fixes, layout.base.join("fixes").join("Sample"));
         assert_eq!(layout.manifest, layout.base.join("appmanifest_42.json"));
+    }
+
+    #[test]
+    fn linked_game_with_managed_footprint_uses_the_library_fixes_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp
+            .path()
+            .join("SteamLibrary/steamapps/common/Red Dead Redemption 2");
+        let base = temp.path().join("SteamTronLibrary/steamtronapps");
+        let mut game = sample_game("1174180", "Red Dead Redemption 2", root);
+        game.installation.mode = InstallMode::Linked;
+        game.installation.prefix = base.join("compatdata/Red Dead Redemption 2");
+        game.installation.manifest = base.join("appmanifest_1174180.json");
+        assert_eq!(
+            fixes_dir(&game).unwrap(),
+            base.join("fixes/Red Dead Redemption 2")
+        );
+        assert_eq!(
+            legacy_fixes_dir(&game),
+            crate::paths::layout().home().join("fixes/1174180")
+        );
+    }
+
+    #[test]
+    fn linked_game_without_a_managed_footprint_uses_app_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut game = sample_game(
+            "1174180",
+            "Red Dead Redemption 2",
+            temp.path().join("SteamLibrary/steamapps/common/Red Dead Redemption 2"),
+        );
+        game.installation.mode = InstallMode::Linked;
+        game.installation.manifest = temp
+            .path()
+            .join("SteamLibrary/steamapps/appmanifest_1174180.acf");
+        assert_eq!(fixes_dir(&game).unwrap(), legacy_fixes_dir(&game));
+    }
+
+    #[test]
+    fn legacy_fixes_are_adopted_into_the_managed_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = temp.path().join("appdata/fixes/42");
+        let target = temp
+            .path()
+            .join("SteamTronLibrary/steamtronapps/fixes/Game");
+        fs::create_dir_all(legacy.join("sub")).unwrap();
+        fs::write(legacy.join("sub/a.dll"), b"alpha").unwrap();
+        adopt_fixes(&legacy, &target);
+        assert_eq!(fs::read(target.join("sub/a.dll")).unwrap(), b"alpha");
+        assert!(!legacy.exists());
     }
 
     #[test]

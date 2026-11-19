@@ -51,7 +51,9 @@ can receive fixes; closing the window hides to a tray icon with Show/Quit.
 ## Decisions and risks
 
 - External fixes live in app data, not beside the game, because linked games
-  are read-only references and SteamTron does not write into them.
+  are read-only references and SteamTron does not write into them. Superseded
+  for catalogued linked games by 0116: when the prefix or manifest lives in a
+  managed library, fixes use `SteamTronLibrary\steamtronapps\fixes\<title>`.
 - Windows tray uses Tauri's `tray-icon` feature instead of ksni.
 - Closing always hides on both platforms; Quit is explicit from the tray/app.
 

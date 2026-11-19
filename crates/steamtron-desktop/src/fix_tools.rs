@@ -24,7 +24,8 @@ fn client() -> Result<reqwest::blocking::Client, String> {
 }
 
 fn fixes_dir(game: &Game) -> Result<PathBuf, String> {
-    steamtron_core::library::fixes_dir(game).map_err(|error| error.to_string())
+    steamtron_core::library::migrate_legacy_fixes(game)
+        .map_err(|error| error.to_string())
 }
 
 fn download(url: &str, path: &Path, expected: Option<&str>, limit: u64) -> Result<(), String> {
