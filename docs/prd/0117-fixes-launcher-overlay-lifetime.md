@@ -126,6 +126,20 @@ started has exited.
 - Not verified: the two UI clicks above. The dialogs use `rfd`/OS pickers, so
   the picker and the no-overlay error message were not exercised; only their
   code paths and the backend validation tests were inspected.
+- Release 0.1.38 (commit `895bb3c`, tag `v0.1.38`, workflow run
+  `44519679566`) built and published `.deb`, `.rpm`, `.AppImage`, the Windows
+  bootstrapper, and `SHA256SUMS.txt`; the bootstrapper hash matched
+  (`16625765CE2AFFCC7B04C35BA54C82284606AC139A2B6C2480B5991F4F83ACC5`).
+  Installed `C:\Program Files (x86)\SteamTron\steamtron-desktop.exe` reports
+  FileVersion/ProductVersion `0.1.38` (SHA-256
+  `4559D753BC982875A8F583D4B75F3FA24DC662027063498B76D889AD5E7547B4`), the
+  uninstall entry says `SteamTron 0.1.38`, and the app launches and responds
+  from that path.
+- Installer defect found while installing: running the bootstrapper with `/S`
+  exited `0` without writing anything (three attempts, including after closing
+  the running app and removing the stale per-machine install). The visible,
+  interactive run succeeded. `/S` support needs its own investigation; the
+  0.1.38 install on this machine was done through the interactive wizard.
 
 ## Decisions and risks
 
