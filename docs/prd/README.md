@@ -139,3 +139,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0115](0115-fixes-transfer-progress.md) | Progress for fixes import and export | done | 2026-11-19 |
 | [0116](0116-linked-fixes-managed-location.md) | Managed fixes folder for linked games | done | 2026-11-19 |
 | [0117](0117-fixes-launcher-overlay-lifetime.md) | Fixes-folder launchers and overlay lifetime | active | 2026-11-19 |
+| [0118](0118-silent-installer-noop.md) | Silent installer exits without installing | draft | 2026-11-19 |
+| [0119](0119-orphaned-backup-staging.md) | Orphaned backup staging after a killed backup | draft | 2026-11-19 |
