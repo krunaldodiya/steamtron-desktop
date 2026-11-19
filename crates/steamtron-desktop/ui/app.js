@@ -631,7 +631,7 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
     <p class="pane-note">This list is the only source of truth for what Play starts. The default launcher starts when there is one entry; otherwise Play asks which launcher to start. Collections such as Uncharted 4 + The Lost Legacy share one folder with separate executables; add each one here. Each launcher can have its own arguments, added after the shared options in General.</p>
     ${linked ? "" : '<p class="pane-note">Choose the Proton compatibility layer in the Compatibility tab. The current selection is used when this game is linked.</p>'}
     <div id="gs-link-launchers"></div>
-    <div class="pane-actions"><button id="gs-link-add">Add launcher…</button></div>
+    <div class="pane-actions"><button id="gs-link-add">Add launcher…</button><button id="gs-link-add-fixes">Add fixes launcher…</button></div>
     <p class="pane-note" id="gs-link-status">A game with at least one launcher is linked automatically.</p>`;
   const rootInput = pane.querySelector("#gs-link-root");
   const list = pane.querySelector("#gs-link-launchers");
@@ -772,6 +772,17 @@ function renderManagedLink(pane, game, refreshGame, renderTab) {
         showToast("Choose a launcher inside the linked game folder.", true);
         return;
       }
+      draft.launchers.push({ name: "", executable, arguments: [], primary: draft.launchers.length === 0 });
+      renderLaunchers();
+      void persistLink();
+    } catch (error) { showToast(String(error), true); }
+  };
+  pane.querySelector("#gs-link-add-fixes").onclick = async () => {
+    try {
+      // Fixes often ship their own launcher. Store its fixes path; Play
+      // rewrites it onto the merged overlay drive before starting it.
+      const executable = await invoke("pick_managed_executable", { gameId: game.id, source: "fixes" });
+      if (!executable) return;
       draft.launchers.push({ name: "", executable, arguments: [], primary: draft.launchers.length === 0 });
       renderLaunchers();
       void persistLink();
@@ -3841,7 +3852,7 @@ function renderLaunchOptionsPanel(panel, game, current) {
     <div class="row"><div class="label">Launch options</div><div class="value">${targets.length} configured</div></div>
     <p class="muted">Add one or more executables. Play asks which launcher to use when more than one is configured. Arguments such as <code>-nolauncher</code> are passed only to that launcher.</p>
     <div class="launch-options-list">${rows || '<div class="status">No launch options configured. Add the game executable, or a launcher executable you want to use.</div>'}</div>
-    <div class="actions"><button class="primary" id="add-launch-option">Add launcher…</button></div>
+    <div class="actions"><button class="primary" id="add-launch-option">Add launcher…</button><button id="add-launch-option-fixes">Add fixes launcher…</button></div>
     <div class="status" id="launch-options-status">${note}</div>
   </div>`;
   const statusNode = panel.querySelector("#launch-options-status");
@@ -3854,6 +3865,18 @@ function renderLaunchOptionsPanel(panel, game, current) {
   if (add) add.onclick = async () => {
     try {
       const path = await invoke("pick_launch_executable", { appid: game.appid });
+      if (!path) return;
+      showLaunchEditor(game, null, (result) => {
+        refresh(result);
+      }, path);
+    } catch (error) { setStatus(String(error), true); }
+  };
+  const addFixes = panel.querySelector("#add-launch-option-fixes");
+  if (addFixes) addFixes.onclick = async () => {
+    try {
+      // A fixes pack can ship its own launcher (RDR2's Launcher.exe). Store
+      // the fixes path; Play rewrites it onto the merged overlay drive.
+      const path = await invoke("pick_launch_executable", { appid: game.appid, source: "fixes" });
       if (!path) return;
       showLaunchEditor(game, null, (result) => {
         refresh(result);

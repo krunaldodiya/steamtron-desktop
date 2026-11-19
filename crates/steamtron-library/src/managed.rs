@@ -298,9 +298,9 @@ pub fn set_launch_target_at(
             executable.display()
         )));
     }
-    if !executable.starts_with(root) {
+    if !launcher_path_allowed(&executable, &game) {
         return Err(LibraryError::Invalid(
-            "executable must be inside the game folder".into(),
+            "executable must be inside the game folder or its fixes folder".into(),
         ));
     }
     if !request.proton.trim().is_empty() && !Path::new(request.proton.trim()).exists() {
@@ -375,6 +375,21 @@ pub struct LinkReport {
     pub primary: String,
 }
 
+/// Whether a launcher belongs to the game folder or its fixes folder.
+///
+/// Fixes can ship their own entry point (RDR2's Razor1911 `Launcher.exe` is
+/// one). The overlay merges both folders, so a launcher from either is valid;
+/// anything outside is rejected.
+fn launcher_path_allowed(executable: &Path, game: &Game) -> bool {
+    if steamtron_core::paths::path_within(executable, &game.installation.root) {
+        return true;
+    }
+    steamtron_core::library::fixes_dir(game)
+        .ok()
+        .map(|fixes| fixes.canonicalize().unwrap_or(fixes))
+        .is_some_and(|fixes| steamtron_core::paths::path_within(executable, &fixes))
+}
+
 /// Link an installed folder and its launchers, mirroring UmuTron Game Link.
 pub fn link_game(request: LinkGameRequest) -> Result<LinkReport, LibraryError> {
     link_game_at(request, &Library::default_path())
@@ -412,6 +427,8 @@ pub fn link_game_at(
         ));
     }
     let mut targets = Vec::with_capacity(request.launchers.len());
+    let mut pending_game = previous.clone();
+    pending_game.installation.root = root.clone();
     for (index, launcher) in request.launchers.into_iter().enumerate() {
         let candidate = if Path::new(&launcher.executable).is_absolute() {
             PathBuf::from(&launcher.executable)
@@ -427,9 +444,9 @@ pub fn link_game_at(
                 executable.display()
             )));
         }
-        if !executable.starts_with(&root) {
+        if !launcher_path_allowed(&executable, &pending_game) {
             return Err(LibraryError::Invalid(
-                "Choose a launcher inside the linked game folder.".into(),
+                "Choose a launcher inside the linked game folder or its fixes folder.".into(),
             ));
         }
         let name = if launcher.name.trim().is_empty() {
@@ -1389,6 +1406,100 @@ mod tests {
         assert_eq!(game.launch_targets.len(), 2);
         assert!(game.launch_targets[0].primary);
         assert!(!game.launch_targets[1].primary);
+    }
+
+    #[test]
+    fn links_a_launcher_from_the_fixes_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 42,
+                title: "Sample Game".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                proton: String::new(),
+                provider: ManifestProvider::SteamMl,
+            },
+            sample_bundle("42"),
+            Some(&backend),
+            &library_path,
+        )
+        .unwrap();
+        let fixes = {
+            let library = Library::open(&library_path).unwrap();
+            steamtron_core::library::fixes_dir(library.game("42").unwrap()).unwrap()
+        };
+        fs::create_dir_all(&fixes).unwrap();
+        fs::write(fixes.join("Launcher.exe"), b"launcher").unwrap();
+        let root = temp.path().join("installed");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("game.exe"), b"game").unwrap();
+        let report = link_game_at(
+            LinkGameRequest {
+                game_id: "42".into(),
+                root: root.display().to_string(),
+                launchers: vec![LinkLauncher {
+                    name: "Fix launcher".into(),
+                    executable: fixes.join("Launcher.exe").display().to_string(),
+                    arguments: Vec::new(),
+                    primary: true,
+                }],
+            },
+            &library_path,
+        )
+        .unwrap();
+        assert_eq!(report.launchers, 1);
+        let library = Library::open(&library_path).unwrap();
+        let target = &library.game("42").unwrap().launch_targets[0];
+        assert!(target.executable.ends_with("Launcher.exe"));
+        assert!(target.primary);
+    }
+
+    #[test]
+    fn rejects_a_launcher_outside_the_game_and_fixes_folders() {
+        let temp = tempfile::tempdir().unwrap();
+        let library_path = temp.path().join("library.json");
+        let backend = MemoryBackend {
+            root: temp.path().join("steam"),
+        };
+        add_managed_game_at(
+            ManagedAddRequest {
+                app_id: 42,
+                title: "Sample Game".into(),
+                drive_root: temp.path().join("drive"),
+                drive_label: String::new(),
+                proton: String::new(),
+                provider: ManifestProvider::SteamMl,
+            },
+            sample_bundle("42"),
+            Some(&backend),
+            &library_path,
+        )
+        .unwrap();
+        let root = temp.path().join("installed");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("game.exe"), b"game").unwrap();
+        let outside = temp.path().join("outside.exe");
+        fs::write(&outside, b"outside").unwrap();
+        let error = link_game_at(
+            LinkGameRequest {
+                game_id: "42".into(),
+                root: root.display().to_string(),
+                launchers: vec![LinkLauncher {
+                    name: String::new(),
+                    executable: outside.display().to_string(),
+                    arguments: Vec::new(),
+                    primary: true,
+                }],
+            },
+            &library_path,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("fixes folder"));
     }
 
     #[test]

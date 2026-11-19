@@ -202,6 +202,34 @@ fn xdg(key: &str, relative: &str) -> PathBuf {
         })
 }
 
+/// Whether `path` sits inside `root`, comparing Windows-style paths without
+/// the verbatim prefix and case-insensitively.
+///
+/// `Path::starts_with` is case-sensitive on every platform, so a launcher
+/// chosen through a dialog can fail the check on Windows when the stored root
+/// and the selected path disagree on case or carry `\\?\`. Both managed and
+/// legacy launch validation use this instead.
+pub fn path_within(path: &Path, root: &Path) -> bool {
+    fn parts(value: &Path) -> Vec<String> {
+        let text = value.to_string_lossy();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        text.split(['\\', '/'])
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                if cfg!(windows) {
+                    part.to_ascii_lowercase()
+                } else {
+                    part.to_owned()
+                }
+            })
+            .collect()
+    }
+
+    let path = parts(path);
+    let root = parts(root);
+    !root.is_empty() && path.len() >= root.len() && path[..root.len()] == root[..]
+}
+
 /// Create one private directory (0700 on Unix) and return it.
 pub fn ensure_private_dir(path: &Path) -> Result<PathBuf, std::io::Error> {
     std::fs::create_dir_all(path)?;
@@ -248,5 +276,23 @@ mod tests {
         let path = temp.path().join("diagnostics/game");
         ensure_private_dir(&path).unwrap();
         assert!(path.is_dir());
+    }
+
+    #[test]
+    fn path_within_accepts_roots_and_descendants_only() {
+        let root = Path::new(r"D:\SteamTronLibrary\steamtronapps\fixes\Red Dead Redemption 2");
+        assert!(path_within(
+            Path::new(r"D:\SteamTronLibrary\steamtronapps\fixes\Red Dead Redemption 2\Launcher.exe"),
+            root
+        ));
+        assert!(path_within(
+            Path::new(r"\\?\D:\SteamTronLibrary\steamtronapps\fixes\Red Dead Redemption 2\Launcher.exe"),
+            root
+        ));
+        assert!(!path_within(
+            Path::new(r"D:\SteamTronLibrary\steamtronapps\fixes\Red Dead Redemption 2 Again\Launcher.exe"),
+            root
+        ));
+        assert!(!path_within(Path::new(r"C:\Other\Launcher.exe"), root));
     }
 }

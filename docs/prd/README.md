@@ -138,3 +138,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0114](0114-game-named-fixes-backup.md) | Game-named fixes archive in backups | active | 2026-11-19 |
 | [0115](0115-fixes-transfer-progress.md) | Progress for fixes import and export | done | 2026-11-19 |
 | [0116](0116-linked-fixes-managed-location.md) | Managed fixes folder for linked games | done | 2026-11-19 |
+| [0117](0117-fixes-launcher-overlay-lifetime.md) | Fixes-folder launchers and overlay lifetime | active | 2026-11-19 |

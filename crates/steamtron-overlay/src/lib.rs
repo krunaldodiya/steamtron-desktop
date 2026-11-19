@@ -135,38 +135,58 @@ impl OverlayGame {
         format!("{:x}", digest.finalize())[..16].to_owned()
     }
 
-    /// Rewrite an absolute command argument from the game root to the merged root.
+    /// Rewrite an absolute command argument from the game root or the fixes
+    /// root to the merged root.
     ///
     /// Windows canonicalization yields verbatim `\\?\D:\...` paths while the
     /// launch arguments carry plain `D:\...`; compare without the verbatim
     /// prefix and case-insensitively there, or the rewrite silently no-ops and
     /// the game runs from the untouched content instead of the merged view.
+    ///
+    /// Fixes often ship their own launcher (for example RDR2's Razor1911
+    /// `Launcher.exe`). Such a launcher lives in the fixes folder but still
+    /// needs the merged view so the game content and every other fix are
+    /// visible while it runs.
     pub fn rewrite_arg(&self, value: &str, merged: &Path) -> String {
-        let prefix = self.common.to_string_lossy();
-        let prefix = prefix.strip_prefix(r"\\?\").unwrap_or(&prefix);
-        let value = value.strip_prefix(r"\\?\").unwrap_or(value);
-        let matches = value.len() >= prefix.len()
-            && if cfg!(windows) {
-                value[..prefix.len()].eq_ignore_ascii_case(prefix)
-            } else {
-                &value[..prefix.len()] == prefix
-            };
-        if !matches {
-            return value.to_owned();
-        }
-        let root = merged.to_string_lossy();
-        let root = root.trim_end_matches(['\\', '/']);
-        let rest = value[prefix.len()..].trim_start_matches(['\\', '/']);
-        if rest.is_empty() {
-            return root.to_owned();
-        }
-        format!("{root}{}{rest}", std::path::MAIN_SEPARATOR)
+        rewrite_under(value, &self.common, merged)
+            .or_else(|| rewrite_under(value, &self.fixes, merged))
+            .unwrap_or_else(|| value.to_owned())
     }
 
-    /// Rewrite a working directory if it is inside the game root.
+    /// Rewrite a working directory if it is inside the game root or fixes.
     pub fn rewrite_cwd(&self, cwd: &Path, merged: &Path) -> PathBuf {
         PathBuf::from(self.rewrite_arg(&cwd.to_string_lossy(), merged))
     }
+}
+
+fn rewrite_under(value: &str, root: &Path, merged: &Path) -> Option<String> {
+    let root_text = root.to_string_lossy();
+    let root_text = root_text
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&root_text)
+        .trim_end_matches(['\\', '/']);
+    if root_text.is_empty() {
+        return None;
+    }
+    let value = value.strip_prefix(r"\\?\").unwrap_or(value);
+    let head = value.get(..root_text.len())?;
+    let tail = &value[root_text.len()..];
+    let matches = if cfg!(windows) {
+        head.eq_ignore_ascii_case(root_text)
+    } else {
+        head == root_text
+    };
+    if !matches || (!tail.is_empty() && !tail.starts_with(['\\', '/'])) {
+        return None;
+    }
+    let merged_text = merged.to_string_lossy();
+    let merged_text = merged_text.trim_end_matches(['\\', '/']);
+    let rest = tail.trim_start_matches(['\\', '/']);
+    Some(if rest.is_empty() {
+        merged_text.to_owned()
+    } else {
+        format!("{merged_text}{}{rest}", std::path::MAIN_SEPARATOR)
+    })
 }
 
 /// Per-user data root, matching the existing Python SteamTron layout.
@@ -301,6 +321,61 @@ mod rewrite_tests {
         assert_eq!(
             game().rewrite_arg(r"E:\Other\Game.exe", Path::new("S:\\")),
             r"E:\Other\Game.exe"
+        );
+        assert_eq!(
+            game().rewrite_arg(r"D:\Lib\GameData2\RDR2.exe", Path::new("S:\\")),
+            r"D:\Lib\GameData2\RDR2.exe"
+        );
+    }
+
+    #[test]
+    fn rewrite_arg_maps_fixes_launchers_to_the_merged_drive() {
+        assert_eq!(
+            game().rewrite_arg(r"D:\Lib\fixes\Launcher.exe", Path::new("S:\\")),
+            r"S:\Launcher.exe"
+        );
+        assert_eq!(
+            game().rewrite_arg(r"\\?\D:\Lib\fixes\bin\Launcher.exe", Path::new("S:\\")),
+            r"S:\bin\Launcher.exe"
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod rewrite_unix_tests {
+    use super::*;
+
+    fn game() -> OverlayGame {
+        OverlayGame {
+            common: PathBuf::from("/mnt/games/Red Dead Redemption 2"),
+            fixes: PathBuf::from("/mnt/library/steamtronapps/fixes/Red Dead Redemption 2"),
+            appid: Some("1174180".into()),
+        }
+    }
+
+    #[test]
+    fn rewrite_arg_maps_game_and_fixes_paths_but_not_siblings() {
+        let merged = Path::new("/tmp/steamtron/merged");
+        assert_eq!(
+            game().rewrite_arg(
+                "/mnt/games/Red Dead Redemption 2/RDR2.exe",
+                merged
+            ),
+            "/tmp/steamtron/merged/RDR2.exe"
+        );
+        assert_eq!(
+            game().rewrite_arg(
+                "/mnt/library/steamtronapps/fixes/Red Dead Redemption 2/Launcher.exe",
+                merged
+            ),
+            "/tmp/steamtron/merged/Launcher.exe"
+        );
+        assert_eq!(
+            game().rewrite_arg(
+                "/mnt/library/steamtronapps/fixes/Red Dead Redemption 2 Backup/Launcher.exe",
+                merged
+            ),
+            "/mnt/library/steamtronapps/fixes/Red Dead Redemption 2 Backup/Launcher.exe"
         );
     }
 }

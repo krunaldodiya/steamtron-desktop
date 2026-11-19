@@ -10,6 +10,8 @@ mod dlc;
 mod download;
 mod fix_tools;
 mod igdb;
+#[cfg(target_os = "windows")]
+mod process_tree;
 mod proton_sources;
 #[cfg(target_os = "windows")]
 mod runtimes;
@@ -1247,32 +1249,67 @@ fn installed_game(appid: &str) -> Result<steam::SteamGame, String> {
         .ok_or_else(|| "This game is not installed in a Steam library.".to_string())
 }
 
-fn validate_launch_executable(game: &steam::SteamGame, value: &str) -> Result<std::path::PathBuf, String> {
+fn fix_launch_folder(appid: &str) -> Option<std::path::PathBuf> {
+    if let Ok(config) = Config::load() {
+        if let Some(entry) = config.entry(appid) {
+            if !entry.fixes.as_os_str().is_empty() {
+                return Some(entry.fixes.clone());
+            }
+        }
+    }
+    steamtron_core::fixes::fixes_path(appid).ok()
+}
+
+fn validate_launch_executable(
+    game: &steam::SteamGame,
+    fixes: Option<&Path>,
+    value: &str,
+) -> Result<std::path::PathBuf, String> {
     let path = std::path::PathBuf::from(value)
         .canonicalize()
         .map_err(|error| error.to_string())?;
     if !path.is_file() {
         return Err("Launch target is not a file.".into());
     }
-    if !path.starts_with(&game.common) {
-        return Err("Launch target must be inside the game directory.".into());
+    let inside_game = steamtron_core::paths::path_within(&path, &game.common);
+    let inside_fixes = fixes.is_some_and(|fixes| steamtron_core::paths::path_within(&path, fixes));
+    if !inside_game && !inside_fixes {
+        return Err("Launch target must be inside the game directory or its fixes folder.".into());
     }
     Ok(path)
 }
 
 #[tauri::command]
-fn pick_launch_executable(appid: String) -> Result<Option<String>, String> {
+fn pick_launch_executable(
+    appid: String,
+    source: Option<String>,
+) -> Result<Option<String>, String> {
     require_auth()?;
     let game = installed_game(&appid)?;
+    let fixes = fix_launch_folder(&appid);
+    let from_fixes = source.as_deref() == Some("fixes");
+    let directory = if from_fixes {
+        fixes
+            .as_deref()
+            .filter(|path| path.is_dir())
+            .ok_or_else(|| "This game has no fixes folder yet. Import fixes first.".to_string())?
+            .to_path_buf()
+    } else {
+        game.common.clone()
+    };
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Choose launch executable")
-        .set_directory(&game.common)
+        .set_title(if from_fixes {
+            "Choose a launcher from fixes"
+        } else {
+            "Choose launch executable"
+        })
+        .set_directory(directory)
         .add_filter("Windows executable", &["exe"])
         .pick_file()
     else {
         return Ok(None);
     };
-    let path = validate_launch_executable(&game, &path.display().to_string())?;
+    let path = validate_launch_executable(&game, fixes.as_deref(), &path.display().to_string())?;
     Ok(Some(path.display().to_string()))
 }
 
@@ -1299,7 +1336,8 @@ fn add_launch_target(
 ) -> Result<FixView, String> {
     require_auth()?;
     let game = installed_game(&appid)?;
-    let path = validate_launch_executable(&game, &executable)?;
+    let fixes = fix_launch_folder(&appid);
+    let path = validate_launch_executable(&game, fixes.as_deref(), &executable)?;
     let mut config = Config::load().map_err(|error| error.to_string())?;
     config
         .add_launch_target(
@@ -1450,10 +1488,21 @@ fn play_game(appid: String, target_id: Option<String>) -> Result<(), String> {
         }
         return launch_steam_app(&appid, false);
     };
-    if !target.starts_with(&game.common) {
-        return Err("Launch target is outside the game directory.".into());
+    if !steamtron_core::paths::path_within(&target, &game.common)
+        && !(!entry.fixes.as_os_str().is_empty()
+            && steamtron_core::paths::path_within(&target, &entry.fixes))
+    {
+        return Err("Launch target is outside the game directory and its fixes folder.".into());
     }
+    let target_from_fixes = !entry.fixes.as_os_str().is_empty()
+        && steamtron_core::paths::path_within(&target, &entry.fixes);
     if entry.launch_only || !entry.enabled {
+        if target_from_fixes {
+            return Err(
+                "This launcher comes from the fixes folder and needs the fixes overlay. Enable fixes first."
+                    .into(),
+            );
+        }
         let arguments = selected
             .map(|target| target.arguments.clone())
             .unwrap_or_default();
@@ -1888,6 +1937,28 @@ fn overlay_log(message: impl AsRef<str>) {
     eprintln!("SteamTron overlay: {}", message.as_ref());
 }
 
+#[cfg(target_os = "linux")]
+fn has_overlay_users(merged: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        for link in ["exe", "cwd"] {
+            if let Ok(target) = std::fs::read_link(entry.path().join(link)) {
+                if target.starts_with(merged) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn try_overlay_wrapper() -> Option<i32> {
     use steamtron_overlay::{OverlayGame, PlatformOverlay};
@@ -2053,10 +2124,49 @@ fn try_overlay_wrapper() -> Option<i32> {
             }
             process.env("WINEDLLOVERRIDES", overrides.join(";"));
         }
-        let status = process.status().map_err(|error| format!("could not launch game: {error}"))?;
-        overlay_log(format!("exit={}", status.code().unwrap_or(1)));
+        // A fixes launcher may start the real game and exit immediately
+        // (RDR2's Razor1911 Launcher.exe does this). Keep the union mounted
+        // until the whole tree is gone, otherwise the game loses the merged
+        // drive halfway through loading and looks like it crashed.
+        #[allow(unused_mut)]
+        let mut child = process
+            .spawn()
+            .map_err(|error| format!("could not launch game: {error}"))?;
+        #[cfg(windows)]
+        let tree = {
+            let mut tree = process_tree::ProcessTree::new();
+            if let Some(tree) = tree.as_mut() {
+                if !tree.assign(&child) {
+                    overlay_log("process tree tracking unavailable; waiting for the launcher only");
+                }
+            }
+            tree
+        };
+        let status = child
+            .wait()
+            .map_err(|error| format!("could not launch game: {error}"))?;
+        let code = status.code().unwrap_or(1);
+        overlay_log(format!("exit={code}"));
+        #[cfg(windows)]
+        if let Some(tree) = tree.as_ref() {
+            if tree.active() > 0 {
+                overlay_log("launcher exited; keeping the overlay mounted for child processes");
+                while tree.active() > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+                overlay_log("child processes finished");
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if has_overlay_users(&merged) {
+            overlay_log("launcher exited; keeping the overlay mounted for child processes");
+            while has_overlay_users(&merged) {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            overlay_log("child processes finished");
+        }
         overlay.unmount().map_err(|error| error.to_string())?;
-        Ok(status.code().unwrap_or(1))
+        Ok(code)
     })();
     Some(match result {
         Ok(code) => code,
@@ -2209,6 +2319,16 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     // The game content is never modified.
     let use_overlay =
         fixes.as_ref().is_some_and(|path| dir_has_entries(path));
+    if !use_overlay
+        && fixes
+            .as_deref()
+            .is_some_and(|root| steamtron_core::paths::path_within(&target.executable, root))
+    {
+        return Err(
+            "This launcher comes from the fixes folder and needs the fixes overlay. Import fixes and enable them first."
+                .into(),
+        );
+    }
     let command = if use_overlay {
         let fixes_path = fixes.as_ref().expect("checked above").clone();
         let appid = game
@@ -2565,6 +2685,7 @@ fn stop_managed_blocking(game_id: String) -> Result<(), String> {
 fn pick_managed_executable(
     game_id: String,
     start: Option<String>,
+    source: Option<String>,
 ) -> Result<Option<String>, String> {
     use steamtron_core::library::Library;
 
@@ -2572,12 +2693,26 @@ fn pick_managed_executable(
     let game = library
         .game(&game_id)
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
-    let directory = start
-        .map(std::path::PathBuf::from)
-        .filter(|path| path.is_dir())
-        .unwrap_or_else(|| game.installation.root.clone());
+    let from_fixes = source.as_deref() == Some("fixes");
+    let directory = if from_fixes {
+        let fixes = managed_fixes_dir(game)
+            .ok_or_else(|| "This game has no managed fixes folder.".to_string())?;
+        if !fixes.is_dir() {
+            return Err("This game has no fixes yet. Import fixes first.".into());
+        }
+        fixes
+    } else {
+        start
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| game.installation.root.clone())
+    };
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Choose game launcher")
+        .set_title(if from_fixes {
+            "Choose a launcher from fixes"
+        } else {
+            "Choose game launcher"
+        })
         .set_directory(directory)
         .pick_file()
     else {
