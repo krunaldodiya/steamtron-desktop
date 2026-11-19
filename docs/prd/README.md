@@ -134,3 +134,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0110](0110-unlink-keeps-library-entry.md) | Unlink keeps the library entry | active | 2026-11-19 |
 | [0111](0111-large-fixes-import.md) | Import large fixes archives | done | 2026-11-19 |
 | [0112](0112-fixes-tar-format.md) | Fixes TAR format and backup updates | done | 2026-11-19 |
+| [0113](0113-linux-overlay-launch-env.md) | Linux overlay carries launch environment | active | 2026-11-19 |

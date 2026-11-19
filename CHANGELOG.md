@@ -10,6 +10,10 @@
 
 ### Fixed
 
+- Linux Play now passes the game's launch environment through the fixes overlay
+  helper. Without it, Proton ignored `WINEDLLOVERRIDES=steam_api64=n,b` and
+  `PROTON_DISABLE_LSTEAMCLIENT=1`, so GoldBerg packs exited after the splash
+  even though the same fixes worked on Windows.
 - TAR export no longer overflows the 1 MiB Windows main-thread stack; the
   SHA-256 buffer is heap allocated.
 
