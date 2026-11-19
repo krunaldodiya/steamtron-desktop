@@ -37,9 +37,10 @@ Export and import fixes as a backup-layout TAR.
 - `cargo check -p steamtron-desktop` passes.
 - Runtime export on 0.1.34 initially crashed with `STATUS_STACK_OVERFLOW`; fixed
   by moving the 1 MiB hash buffer off the stack. Rebuilt and re-tested.
-- Installed build (`%LOCALAPPDATA%\Programs\SteamTron`, hash `5b925fcc…`):
-  exported 424840 to a 7.2 MiB TAR, imported it back (3 files), and showed the
-  new import/export controls plus the corrected GoldBerg text.
+- Installed build 0.1.35 (`%LOCALAPPDATA%\Programs\SteamTron`, hash
+  `17af2cb0…`): Fixes shows only Import fixes TAR and Export fixes TAR (no ZIP
+  or backup-update action). Exported 582160 to TAR, imported 424840 TAR
+  (3 files), and rejected a ZIP fixture with `fixes archive is invalid`.
 - Program Files replacement is still pending: the UAC prompt was denied, so the
   final binary was installed per-user with a desktop shortcut.
 

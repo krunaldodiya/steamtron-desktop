@@ -1,3 +1,9 @@
+## [0.1.35] - 2026-11-19
+
+### Changed
+
+- Fixes import and export use TAR only; the ZIP reader/writer and the backup-update action were removed.
+
 ## [0.1.34] - 2026-11-19
 
 ### Changed
@@ -390,6 +396,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.35]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.35
 [0.1.34]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.34
 [0.1.33]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.33
 [0.1.32]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.32
