@@ -1,3 +1,18 @@
+## [0.1.39] - 2026-11-19
+
+### Changed
+
+- The Game Link and Fixes tabs now use one "Add launcher…" picker. The dialog
+  can browse anywhere and accepts a launcher from the game folder or its fixes
+  folder; the separate fixes-only picker was removed.
+
+### Fixed
+
+- Play stays on Stop while a game's launcher has exited but the game it started
+  is still running. Managed Windows launches now track the whole process tree,
+  and Stop terminates it, so games such as The Witcher 3 no longer flip back to
+  Play right after starting.
+
 ## [0.1.38] - 2026-11-19
 
 ### Added
