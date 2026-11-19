@@ -89,6 +89,9 @@ move there automatically.
   and installed to `%LOCALAPPDATA%\Programs\SteamTron\steamtron-desktop.exe`
   with the same hash. The import above used the library code, not a UI click;
   the Fixes tab was not driven on the installed build.
+- Published `v0.1.37` from `fb6d0ba` (workflow run `44510274555`): Linux
+  `.deb`, `.rpm`, `.AppImage`, and the Windows NSIS bootstrapper; downloaded
+  SHA-256 of all four assets matches `SHA256SUMS.txt`.
 
 ## Decisions and risks
 
