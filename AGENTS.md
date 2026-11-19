@@ -56,16 +56,17 @@ preference for batching commits or keeping a clean history.
 - Commit and push manually; there is no autosave timing service. Never create
   or push `autosave/*` branches.
 
-## Rebuild and install after every change — mandatory
+## Build and install only on request — mandatory
 
-Source changes are not visible in the running application until the desktop
-binary is rebuilt and replaced.
+Builds and installs are slow and are not part of every change.
 
-- After every change that affects the desktop UI or binary, build the release
-  bundle (`scripts/build-linux.sh` or the equivalent `tauri build`), then
-  install the freshly built binary over `~/.local/bin/steamtron-desktop`.
-- Verify the installed file timestamp/hash matches the new build before
-  reporting the work as done.
-- Commit the source first; build artifacts stay out of git.
-- Do not report a UI fix as verified against the installed app while the
-  installed binary predates the change.
+- Do **not** build or install after each change. Accumulate work and build only
+  when the user asks, or after a substantial batch of changes **and** with the
+  user's explicit permission.
+- Always ask before starting a build/install unless the user just asked for one.
+- When a build is approved, commit the source first, build the release bundle,
+  install it, and verify the installed file timestamp/hash matches the new build.
+- Until a build is approved and installed, report only code-level verification
+  (compile, tests, diffs). Never claim a UI change was verified against the
+  running app while the installed binary predates it.
+- Build artifacts stay out of git.

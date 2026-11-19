@@ -132,3 +132,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0108](0108-windows-no-depot-manifests.md) | Windows must not publish depot manifests to Steam | done | 2026-11-18 |
 | [0109](0109-windows-parity-link-tray-fixes.md) | Windows parity: link tabs, external fixes, close to tray | active | 2026-11-19 |
 | [0110](0110-unlink-keeps-library-entry.md) | Unlink keeps the library entry | active | 2026-11-19 |
+| [0111](0111-large-fixes-import.md) | Import large fixes archives | done | 2026-11-19 |

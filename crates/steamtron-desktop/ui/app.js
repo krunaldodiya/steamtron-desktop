@@ -2323,7 +2323,7 @@ function openManagedGameOptions(game) {
         }
       };
       pane.querySelector("#fix-import").onclick = (event) => run(event.currentTarget, async () => {
-        const result = await invoke("install_managed_fixes", { gameId: game.id });
+        const result = await invoke("install_managed_fixes", { gameId: game.id, path: null });
         return result || { files: [] };
       }, (result) => `Installed ${result.files?.length || 0} fix file${result.files?.length === 1 ? "" : "s"}`);
       pane.querySelector("#fix-export").onclick = (event) => run(event.currentTarget, async () => {

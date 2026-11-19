@@ -9,8 +9,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 
 const MARKER: &str = "steamtron-fixes.json";
-const MAX_ARCHIVE: u64 = 512 * 1024 * 1024;
-const MAX_UNCOMPRESSED: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_ARCHIVE: u64 = 64 * 1024 * 1024 * 1024;
+const MAX_UNCOMPRESSED: u64 = 64 * 1024 * 1024 * 1024;
 const MAX_FILES: usize = 20_000;
 
 #[derive(Debug, Error)]

@@ -2653,14 +2653,21 @@ fn managed_fixes(game_id: String) -> Result<steamtron_library::managed::FixesVie
 #[tauri::command]
 fn install_managed_fixes(
     game_id: String,
+    path: Option<String>,
 ) -> Result<Option<steamtron_library::managed::FixesView>, String> {
     require_auth()?;
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Choose a fixes ZIP")
-        .add_filter("Fixes ZIP", &["zip"])
-        .pick_file()
-    else {
-        return Ok(None);
+    let path = match path {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Choose a fixes ZIP")
+                .add_filter("Fixes ZIP", &["zip"])
+                .pick_file()
+            else {
+                return Ok(None);
+            };
+            path
+        }
     };
     steamtron_library::managed::install_fixes(&game_id, &path)
         .map(Some)
