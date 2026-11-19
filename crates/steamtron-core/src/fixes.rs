@@ -395,7 +395,7 @@ pub fn export_tar(
         let mut file =
             fs::File::open(destination).map_err(|error| FixesError::io(destination, error))?;
         let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 1024 * 1024];
+        let mut buffer = vec![0u8; 1024 * 1024];
         loop {
             let read = file
                 .read(&mut buffer)
@@ -597,6 +597,22 @@ mod tests {
         let second = temp.path().join("installed2");
         install_archive_into("42", &tar, &second).unwrap();
         assert!(second.join("a.txt").is_file());
+    }
+
+    #[test]
+    fn tar_export_fits_a_small_stack() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("fixes");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("steam_api64.dll"), vec![0u8; 4096]).unwrap();
+        let tar = temp.path().join("fixes.tar");
+        std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(move || export_tar(&source, &tar, "Stack Game", "1").map(|_| ()))
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap();
     }
 
     #[test]

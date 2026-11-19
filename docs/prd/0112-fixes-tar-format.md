@@ -44,9 +44,12 @@ Export fixes in the exact backup layout, import either format, and update only
 
 ## Verification
 
-- `cargo test -p steamtron-core fixes::tests::tar_round_trips_backup_layout` and
-  `archive_detection_rejects_unknown_files` pass.
+- `cargo test -p steamtron-core fixes::tests::tar_round_trips_backup_layout`,
+  `archive_detection_rejects_unknown_files` and `tar_export_fits_a_small_stack`
+  pass.
 - `cargo check -p steamtron-desktop` passes.
+- Runtime export on 0.1.34 initially crashed with `STATUS_STACK_OVERFLOW`; fixed
+  by moving the 1 MiB hash buffer off the stack. UI re-test pending the rebuild.
 
 ## Decisions and risks
 

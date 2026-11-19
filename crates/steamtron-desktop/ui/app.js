@@ -2296,7 +2296,7 @@ function openManagedGameOptions(game) {
           <div class="fix-action-row"><button id="fix-open"${present ? "" : " disabled"}>Open fixes folder</button><button id="fix-remove" class="danger"${present ? "" : " disabled"}>Remove fixes</button></div>
         </section>
         <section class="fix-section"><h4>GoldBerg emulator</h4>
-          <p class="pane-note">Replaces this game's Steam library with the GoldBerg emulator and generates its interface list from the original library. The emulator release is downloaded once and shared by every game; the installed game files are never changed.</p>
+          <p class="pane-note">Replaces this game's Steam library with the GoldBerg emulator. The emulator release is downloaded once and shared by every game; an existing steam_interfaces.txt is preserved and the installed game files are never changed.</p>
           <p class="fix-meta">${status.goldberg ? "GoldBerg is applied to this fixes folder." : "GoldBerg is not applied. Assets are downloaded and verified on first use."}</p>
           <div class="fix-action-row"><button id="fix-goldberg-apply">Apply GoldBerg</button><button id="fix-goldberg-remove" class="danger"${status.goldberg ? "" : " disabled"}>Remove GoldBerg</button></div>
         </section>
@@ -2327,7 +2327,7 @@ function openManagedGameOptions(game) {
         return result || { files: [] };
       }, (result) => `Installed ${result.files?.length || 0} fix file${result.files?.length === 1 ? "" : "s"}`);
       pane.querySelector("#fix-export").onclick = (event) => run(event.currentTarget, async () => {
-        const path = await invoke("export_managed_fixes", { gameId: game.id });
+        const path = await invoke("export_managed_fixes", { gameId: game.id, path: null });
         if (!path) throw new Error("Export cancelled.");
         return path;
       }, (path) => `Exported to ${path}`);

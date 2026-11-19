@@ -2571,7 +2571,7 @@ fn managed_fixes_status(game_id: String) -> Result<serde_json::Value, String> {
 
 
 #[tauri::command]
-fn export_managed_fixes(game_id: String) -> Result<Option<String>, String> {
+fn export_managed_fixes(game_id: String, path: Option<String>) -> Result<Option<String>, String> {
     use steamtron_core::library::Library;
 
     require_auth()?;
@@ -2591,13 +2591,19 @@ fn export_managed_fixes(game_id: String) -> Result<Option<String>, String> {
     let mut name = steamtron_core::fixes::export_name(&game.title);
     name.truncate(name.len().saturating_sub(4));
     name.push_str(".tar");
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Export fixes TAR")
-        .set_file_name(name)
-        .add_filter("Fixes TAR", &["tar"])
-        .save_file()
-    else {
-        return Ok(None);
+    let path = match path {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Export fixes TAR")
+                .set_file_name(name)
+                .add_filter("Fixes TAR", &["tar"])
+                .save_file()
+            else {
+                return Ok(None);
+            };
+            path
+        }
     };
     let folder = game
         .installation

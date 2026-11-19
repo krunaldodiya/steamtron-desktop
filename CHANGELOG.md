@@ -1,4 +1,4 @@
-## [Unreleased]
+## [0.1.34] - 2026-11-19
 
 ### Changed
 
@@ -7,6 +7,11 @@
 - The Fixes tab can update an existing backup's `fixes.tar` and SHA-256 in
   place without rewriting `content.tar`; the backup's original internal folder
   name is preserved.
+
+### Fixed
+
+- TAR export no longer overflows the 1 MiB Windows main-thread stack; the
+  SHA-256 buffer is heap allocated.
 
 # Changelog
 
@@ -384,6 +389,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.34]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.34
 [0.1.33]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.33
 [0.1.32]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.32
 [0.1.31]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.31
