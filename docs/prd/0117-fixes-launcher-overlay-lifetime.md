@@ -63,9 +63,9 @@ started has exited.
 - R2: `validate_launch_executable`, `add_launch_target`, and the Game Link
   `link_game` flow accept an executable inside the game folder or the game's
   fixes folder, and reject anything else.
-- R3: Both UIs offer a fixes-folder picker (`pick_launch_executable` and
-  `pick_managed_executable` gain `source: "fixes"`), so the fixes path is
-  stored without the user navigating there manually.
+- R3: Both UIs offer one launcher picker that opens in the game folder and can
+  browse anywhere; the backend accepts the game folder or its fixes folder, so
+  a second "add fixes launcher" dialog is not needed.
 - R4: Selecting a fixes launcher while no overlay is active fails with an
   explanatory error instead of running the bare fixes executable.
 - R5: The wrapper keeps the overlay mounted while any descendant process of
@@ -85,9 +85,9 @@ started has exited.
 - [x] RDR2 started through the fixes `Launcher.exe` stayed up for 3m41s from
       `S:\RDR2.exe` with no crash or WER entry; stopping the wrapper killed the
       launcher and game and unmounted `S:\`.
-- [ ] Storing the fixes launcher with the new picker in the Fixes and Game Link
-      tabs, then Play from that stored target (needs a real click on the native
-      dialog).
+- [ ] Storing the fixes launcher with the single launcher picker in the Fixes
+      and Game Link tabs, then Play from that stored target (needs a real click
+      on the native dialog).
 - [ ] Removing the overlay while a fixes launcher is selected reports the
       explanatory error (code inspected, not exercised).
 

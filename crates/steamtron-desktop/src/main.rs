@@ -1280,30 +1280,16 @@ fn validate_launch_executable(
 }
 
 #[tauri::command]
-fn pick_launch_executable(
-    appid: String,
-    source: Option<String>,
-) -> Result<Option<String>, String> {
+fn pick_launch_executable(appid: String) -> Result<Option<String>, String> {
     require_auth()?;
     let game = installed_game(&appid)?;
     let fixes = fix_launch_folder(&appid);
-    let from_fixes = source.as_deref() == Some("fixes");
-    let directory = if from_fixes {
-        fixes
-            .as_deref()
-            .filter(|path| path.is_dir())
-            .ok_or_else(|| "This game has no fixes folder yet. Import fixes first.".to_string())?
-            .to_path_buf()
-    } else {
-        game.common.clone()
-    };
+    // One dialog, starting in the game folder. The user can browse to the
+    // fixes folder from here; validation below and in add_launch_target
+    // accepts either location.
     let Some(path) = rfd::FileDialog::new()
-        .set_title(if from_fixes {
-            "Choose a launcher from fixes"
-        } else {
-            "Choose launch executable"
-        })
-        .set_directory(directory)
+        .set_title("Choose launch executable")
+        .set_directory(&game.common)
         .add_filter("Windows executable", &["exe"])
         .pick_file()
     else {
@@ -2685,7 +2671,6 @@ fn stop_managed_blocking(game_id: String) -> Result<(), String> {
 fn pick_managed_executable(
     game_id: String,
     start: Option<String>,
-    source: Option<String>,
 ) -> Result<Option<String>, String> {
     use steamtron_core::library::Library;
 
@@ -2693,26 +2678,14 @@ fn pick_managed_executable(
     let game = library
         .game(&game_id)
         .ok_or_else(|| format!("Unknown game {game_id}"))?;
-    let from_fixes = source.as_deref() == Some("fixes");
-    let directory = if from_fixes {
-        let fixes = managed_fixes_dir(game)
-            .ok_or_else(|| "This game has no managed fixes folder.".to_string())?;
-        if !fixes.is_dir() {
-            return Err("This game has no fixes yet. Import fixes first.".into());
-        }
-        fixes
-    } else {
-        start
-            .map(std::path::PathBuf::from)
-            .filter(|path| path.is_dir())
-            .unwrap_or_else(|| game.installation.root.clone())
-    };
+    // One dialog, starting in the linked game folder. The user can browse to
+    // the fixes folder; link_game accepts a launcher from either location.
+    let directory = start
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| game.installation.root.clone());
     let Some(path) = rfd::FileDialog::new()
-        .set_title(if from_fixes {
-            "Choose a launcher from fixes"
-        } else {
-            "Choose game launcher"
-        })
+        .set_title("Choose game launcher")
         .set_directory(directory)
         .pick_file()
     else {
