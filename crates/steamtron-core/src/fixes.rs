@@ -1,12 +1,9 @@
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
-use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipArchive, ZipWriter};
-
 
 const MARKER: &str = "steamtron-fixes.json";
 const MAX_ARCHIVE: u64 = 64 * 1024 * 1024 * 1024;
@@ -17,9 +14,9 @@ const MAX_FILES: usize = 20_000;
 pub enum FixesError {
     #[error("invalid App ID")]
     InvalidAppId,
-    #[error("fixes ZIP is unsafe: {0}")]
+    #[error("fixes archive is unsafe: {0}")]
     Unsafe(String),
-    #[error("fixes ZIP is invalid: {0}")]
+    #[error("fixes archive is invalid: {0}")]
     Invalid(String),
     #[error("I/O error at {path}: {source}")]
     Io {
@@ -27,8 +24,6 @@ pub enum FixesError {
         #[source]
         source: std::io::Error,
     },
-    #[error("ZIP error: {0}")]
-    Zip(#[from] zip::result::ZipError),
 }
 
 impl FixesError {
@@ -89,187 +84,9 @@ fn safe_name(name: &str) -> Result<String, FixesError> {
     Ok(parts.join("/"))
 }
 
-/// Extract a ZIP exactly as structured, excluding the SteamTron marker.
-pub fn install_zip(appid: &str, zip_path: &Path) -> Result<PathBuf, FixesError> {
-    install_zip_into(appid, zip_path, &fixes_path(appid)?)
-}
-
-/// Extract a fixes ZIP into an explicit target folder (managed games).
-///
-/// Staging and backups live beside the target so a rename never crosses
-/// filesystems when the fixes folder is on a game drive.
-pub fn install_zip_into(
-    appid: &str,
-    zip_path: &Path,
-    target: &Path,
-) -> Result<PathBuf, FixesError> {
-    if appid.is_empty() || !appid.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(FixesError::InvalidAppId);
-    }
-    let archive_size = fs::metadata(zip_path)
-        .map_err(|error| FixesError::io(zip_path, error))?
-        .len();
-    if archive_size > MAX_ARCHIVE {
-        return Err(FixesError::Invalid("archive is too large".into()));
-    }
-    let root = target
-        .parent()
-        .ok_or_else(|| FixesError::Invalid("fixes target has no parent".into()))?;
-    prepare_root(root)?;
-    let target = target.to_path_buf();
-    let staging = root.join(format!(
-        ".{appid}.staging-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    fs::create_dir(&staging).map_err(|error| FixesError::io(&staging, error))?;
-    let content = staging.join("content");
-    fs::create_dir(&content).map_err(|error| FixesError::io(&content, error))?;
-    let result = (|| -> Result<(), FixesError> {
-        let mut archive = ZipArchive::new(fs::File::open(zip_path).map_err(|error| {
-            FixesError::io(zip_path, error)
-        })?)?;
-        let mut count = 0usize;
-        let mut total = 0u64;
-        for index in 0..archive.len() {
-            let mut entry = archive.by_index(index)?;
-            if entry.is_dir() {
-                continue;
-            }
-            let name = safe_name(entry.name())?;
-            if name == MARKER {
-                continue;
-            }
-            if entry.encrypted() {
-                return Err(FixesError::Invalid(
-                    "encrypted entries are not supported".into(),
-                ));
-            }
-            if entry
-                .unix_mode()
-                .is_some_and(|mode| mode & 0o170000 == 0o120000)
-            {
-                return Err(FixesError::Unsafe("symbolic link in ZIP".into()));
-            }
-            count += 1;
-            total = total.saturating_add(entry.size());
-            if count > MAX_FILES || total > MAX_UNCOMPRESSED {
-                return Err(FixesError::Invalid("ZIP limits exceeded".into()));
-            }
-            let destination = content.join(&name);
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|error| FixesError::io(parent, error))?;
-            }
-            let mut output =
-                fs::File::create(&destination).map_err(|error| FixesError::io(&destination, error))?;
-            std::io::copy(&mut entry, &mut output)
-                .map_err(|error| FixesError::io(&destination, error))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut mode = entry.unix_mode().unwrap_or(0o644);
-                if destination
-                    .extension()
-                    .and_then(|value| value.to_str())
-                    .is_some_and(|value| value.eq_ignore_ascii_case("exe"))
-                {
-                    mode |= 0o111;
-                }
-                fs::set_permissions(&destination, fs::Permissions::from_mode(mode))
-                    .map_err(|error| FixesError::io(&destination, error))?;
-            }
-        }
-        if count == 0 {
-            return Err(FixesError::Invalid("ZIP is empty".into()));
-        }
-        if target.is_symlink() {
-            return Err(FixesError::Unsafe("target fixes path is a symlink".into()));
-        }
-        if target.exists() {
-            let backup = root.join(format!(
-                ".{appid}.old-{}",
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-            ));
-            fs::rename(&target, &backup).map_err(|error| FixesError::io(&target, error))?;
-            fs::rename(&content, &target).map_err(|error| FixesError::io(&target, error))?;
-            let _ = fs::remove_dir_all(backup);
-        } else {
-            fs::rename(&content, &target).map_err(|error| FixesError::io(&target, error))?;
-        }
-        Ok(())
-    })();
-    let _ = fs::remove_dir_all(&staging);
-    result.map(|_| target)
-}
-
-/// Export a fixes directory as a portable ZIP containing the format marker.
-pub fn export_zip(target: &Path, destination: &Path, _appid: &str) -> Result<(), FixesError> {
-    if !target.is_dir() || target.is_symlink() {
-        return Err(FixesError::Invalid("no fixes directory".into()));
-    }
-    if destination
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-        != Some("zip")
-    {
-        return Err(FixesError::Invalid("destination must be a .zip".into()));
-    }
-    if let Some(parent) = destination.parent() {
-        let metadata = fs::symlink_metadata(parent)
-            .map_err(|error| FixesError::io(parent, error))?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(FixesError::Invalid(
-                "destination folder must be a real directory".into(),
-            ));
-        }
-        fs::create_dir_all(parent).map_err(|error| FixesError::io(parent, error))?;
-    }
-    if let Ok(metadata) = fs::symlink_metadata(destination) {
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(FixesError::Invalid(
-                "destination must be a regular ZIP file".into(),
-            ));
-        }
-    }
-    let temporary = destination.with_extension(format!("zip.{}.tmp", std::process::id()));
-    let result = (|| -> Result<(), FixesError> {
-        let file = fs::File::create(&temporary).map_err(|error| FixesError::io(&temporary, error))?;
-        let mut writer = ZipWriter::new(file);
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        writer
-            .start_file(MARKER, options)
-            .map_err(FixesError::Zip)?;
-        writer
-            .write_all(b"{\"format\":1}\n")
-            .map_err(|error| FixesError::io(&temporary, error))?;
-        let mut files = Vec::new();
-        collect_files(target, target, &mut files)?;
-        if files.is_empty() {
-            return Err(FixesError::Invalid("fixes directory is empty".into()));
-        }
-        for (path, name) in files {
-            writer.start_file(name, options).map_err(FixesError::Zip)?;
-            let mut input = fs::File::open(&path).map_err(|error| FixesError::io(&path, error))?;
-            std::io::copy(&mut input, &mut writer)
-                .map_err(|error| FixesError::io(&path, error))?;
-        }
-        writer.finish().map_err(FixesError::Zip)?;
-        fs::rename(&temporary, destination)
-            .map_err(|error| FixesError::io(destination, error))?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+/// Install a TAR fixes pack into the app's legacy fixes folder.
+pub fn install_tar(appid: &str, tar_path: &Path) -> Result<PathBuf, FixesError> {
+    install_tar_into(appid, tar_path, &fixes_path(appid)?)
 }
 
 fn collect_files(
@@ -319,7 +136,7 @@ pub fn export_name(title: &str) -> String {
         value = "Game".to_owned();
     }
     value.truncate(180);
-    format!("{value}.zip")
+    format!("{value}.tar")
 }
 
 /// Export the fixes folder in the backup layout:
@@ -418,7 +235,7 @@ pub fn export_tar(
 }
 
 /// Prefix used by an existing fixes TAR (`fixes/<folder>`), if any.
-pub fn tar_prefix(path: &Path) -> Option<String> {
+fn tar_prefix(path: &Path) -> Option<String> {
     let file = fs::File::open(path).ok()?;
     let mut archive = tar::Archive::new(file);
     for entry in archive.entries().ok()? {
@@ -548,30 +365,6 @@ pub fn install_tar_into(
     result.map(|_| target)
 }
 
-/// Install a ZIP or TAR fixes archive based on its magic bytes.
-pub fn install_archive_into(
-    appid: &str,
-    archive_path: &Path,
-    target: &Path,
-) -> Result<PathBuf, FixesError> {
-    let mut header = [0u8; 512];
-    let read = {
-        let mut file =
-            fs::File::open(archive_path).map_err(|error| FixesError::io(archive_path, error))?;
-        file.read(&mut header)
-            .map_err(|error| FixesError::io(archive_path, error))?
-    };
-    if read >= 4 && header[..4] == [0x50, 0x4b, 0x03, 0x04] {
-        return install_zip_into(appid, archive_path, target);
-    }
-    if read >= 262 && &header[257..262] == b"ustar" {
-        return install_tar_into(appid, archive_path, target);
-    }
-    Err(FixesError::Invalid(
-        "archive must be a ZIP or TAR fixes pack".into(),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,7 +388,7 @@ mod tests {
         assert_eq!(fs::read(target.join("sub/b.bin")).unwrap(), b"beta");
         assert!(!target.join(MARKER).exists());
         let second = temp.path().join("installed2");
-        install_archive_into("42", &tar, &second).unwrap();
+        install_tar_into("42", &tar, &second).unwrap();
         assert!(second.join("a.txt").is_file());
     }
 
@@ -616,31 +409,9 @@ mod tests {
     }
 
     #[test]
-    fn archive_detection_rejects_unknown_files() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("notes.txt");
-        fs::write(&path, b"not an archive").unwrap();
-        let target = temp.path().join("out");
-        assert!(install_archive_into("42", &path, &target).is_err());
-    }
-
-    #[test]
     fn export_name_uses_sanitized_title() {
-        assert_eq!(export_name("Resident Evil Village"), "Resident Evil Village.zip");
-        assert_eq!(export_name("Game: Deluxe/Test"), "Game Deluxe Test.zip");
-    }
-
-    #[test]
-    fn exports_marker_and_preserves_structure() {
-        let temp = tempfile::tempdir().unwrap();
-        let fixes = temp.path().join("fixes");
-        fs::create_dir_all(fixes.join("bin")).unwrap();
-        fs::write(fixes.join("bin/game.dll"), b"fix").unwrap();
-        let target = temp.path().join("out.zip");
-        export_zip(&fixes, &target, "42").unwrap();
-        let mut archive = ZipArchive::new(fs::File::open(target).unwrap()).unwrap();
-        assert!(archive.by_name(MARKER).is_ok());
-        assert!(archive.by_name("bin/game.dll").is_ok());
+        assert_eq!(export_name("Resident Evil Village"), "Resident Evil Village.tar");
+        assert_eq!(export_name("Game: Deluxe/Test"), "Game Deluxe Test.tar");
     }
 
     #[test]

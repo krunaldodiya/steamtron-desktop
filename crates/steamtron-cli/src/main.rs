@@ -4,7 +4,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use steamtron_core::config::Config;
-use steamtron_core::fixes::{export_name, export_zip, install_zip};
+use steamtron_core::fixes::{export_name, export_tar, install_tar};
 use steamtron_core::steam;
 use steamtron_doctor::run as run_doctor;
 use steamtron_overlay::{OverlayGame, PlatformOverlay};
@@ -52,7 +52,7 @@ enum CommandKind {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Install, export, or inspect fixes ZIPs.
+    /// Install, export, or inspect fixes TARs.
     Fixes {
         #[command(subcommand)]
         command: FixesCommand,
@@ -146,7 +146,7 @@ enum ManagedFixesCommand {
     },
     Install {
         game_id: String,
-        zip: PathBuf,
+        tar: PathBuf,
     },
     Remove {
         game_id: String,
@@ -167,7 +167,7 @@ enum ConfigCommand {
 
 #[derive(Debug, Subcommand)]
 enum FixesCommand {
-    Install { appid: String, zip: PathBuf },
+    Install { appid: String, tar: PathBuf },
     Export { appid: String, destination: PathBuf },
     List,
 }
@@ -306,7 +306,7 @@ fn main() -> Result<()> {
                             provider,
                             proton: proton.unwrap_or_default(),
                         },
-                        &backend,
+                        Some(&backend),
                     )?;
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 }
@@ -332,9 +332,9 @@ fn main() -> Result<()> {
                         let view = steamtron_library::managed::fixes_view(&game_id)?;
                         println!("{}", serde_json::to_string_pretty(&view)?);
                     }
-                    ManagedFixesCommand::Install { game_id, zip } => {
+                    ManagedFixesCommand::Install { game_id, tar } => {
                         let view =
-                            steamtron_library::managed::install_fixes(&game_id, &zip)?;
+                            steamtron_library::managed::install_fixes(&game_id, &tar)?;
                         println!("{}", serde_json::to_string_pretty(&view)?);
                     }
                     ManagedFixesCommand::Remove { game_id } => {
@@ -498,8 +498,8 @@ fn main() -> Result<()> {
         CommandKind::Fixes { command } => {
             let mut config = Config::load()?;
             match command {
-                FixesCommand::Install { appid, zip } => {
-                    let target = install_zip(&appid, &zip)?;
+                FixesCommand::Install { appid, tar } => {
+                    let target = install_tar(&appid, &tar)?;
                     let entry = config.upsert(&appid, target.clone(), true)?;
                     println!(
                         "{} enabled={} fixes={}",
@@ -512,7 +512,7 @@ fn main() -> Result<()> {
                     let entry = config
                         .entry(&appid)
                         .with_context(|| format!("no fixes configured for {appid}"))?;
-                    export_zip(&entry.fixes, &destination, &appid)?;
+                    export_tar(&entry.fixes, &destination, &appid, &appid)?;
                     println!("{}", destination.display());
                     println!("name={}", export_name(&appid));
                 }

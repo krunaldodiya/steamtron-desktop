@@ -185,7 +185,7 @@ pub fn fixes_view_at(game_id: &str, library_path: &Path) -> Result<FixesView, Li
 
 pub fn install_fixes_at(
     game_id: &str,
-    zip_path: &Path,
+    tar_path: &Path,
     library_path: &Path,
 ) -> Result<FixesView, LibraryError> {
     let library =
@@ -194,7 +194,7 @@ pub fn install_fixes_at(
         .game(game_id)
         .ok_or_else(|| LibraryError::Invalid(format!("unknown game {game_id}")))?;
     let dir = fixes_dir_for(game)?;
-    steamtron_core::fixes::install_archive_into(&app_id_for(game), zip_path, &dir)
+    steamtron_core::fixes::install_tar_into(&app_id_for(game), tar_path, &dir)
         .map_err(|error| LibraryError::Invalid(error.to_string()))?;
     fixes_view_at(game_id, library_path)
 }
@@ -217,8 +217,8 @@ pub fn fixes_view(game_id: &str) -> Result<FixesView, LibraryError> {
     fixes_view_at(game_id, &Library::default_path())
 }
 
-pub fn install_fixes(game_id: &str, zip_path: &Path) -> Result<FixesView, LibraryError> {
-    install_fixes_at(game_id, zip_path, &Library::default_path())
+pub fn install_fixes(game_id: &str, tar_path: &Path) -> Result<FixesView, LibraryError> {
+    install_fixes_at(game_id, tar_path, &Library::default_path())
 }
 
 pub fn remove_fixes(game_id: &str) -> Result<FixesRemoved, LibraryError> {
@@ -1229,9 +1229,6 @@ mod tests {
 
     #[test]
     fn installs_lists_and_removes_managed_fixes() {
-        use std::io::Write;
-        use zip::write::SimpleFileOptions;
-
         let temp = tempfile::tempdir().unwrap();
         let library_path = temp.path().join("library.json");
         let backend = MemoryBackend {
@@ -1251,19 +1248,15 @@ mod tests {
             &library_path,
         )
         .unwrap();
-        let zip_path = temp.path().join("fixes.zip");
-        {
-            let file = std::fs::File::create(&zip_path).unwrap();
-            let mut zip = zip::ZipWriter::new(file);
-            zip.start_file("fix.dll", SimpleFileOptions::default()).unwrap();
-            zip.write_all(b"dll").unwrap();
-            zip.start_file("nested/readme.txt", SimpleFileOptions::default()).unwrap();
-            zip.write_all(b"readme").unwrap();
-            zip.finish().unwrap();
-        }
-        let view = install_fixes_at("42", &zip_path, &library_path).unwrap();
+        let source = temp.path().join("fixes-source");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::write(source.join("fix.dll"), b"dll").unwrap();
+        std::fs::write(source.join("nested/readme.txt"), b"readme").unwrap();
+        let tar_path = temp.path().join("fixes.tar");
+        steamtron_core::fixes::export_tar(&source, &tar_path, "Sample", "42").unwrap();
+        let view = install_fixes_at("42", &tar_path, &library_path).unwrap();
         assert_eq!(view.files.len(), 2);
-        assert!(view.path.ends_with("fixes/Sample"));
+        assert_eq!(Path::new(&view.path).file_name().and_then(|name| name.to_str()), Some("Sample"));
         assert!(view.files.iter().any(|file| file.name == "fix.dll"));
 
         let removed = remove_fixes_at("42", &library_path).unwrap();

@@ -20,7 +20,7 @@ use tauri::Emitter;
 mod security;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
-use steamtron_core::fixes::{export_name, export_zip, install_zip};
+use steamtron_core::fixes::{export_name, export_tar, install_tar};
 use steamtron_core::steam;
 use steamtron_register::{platform_backend, RegistrationBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
@@ -1603,12 +1603,12 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     require_steam_stopped()?;
     security::require_exception(&appid)?;
     let Some(path) = rfd::FileDialog::new()
-        .add_filter("Fixes archive (ZIP or TAR)", &["zip", "tar"])
+        .add_filter("Fixes TAR", &["tar"])
         .pick_file()
     else {
         return Ok(None);
     };
-    let target = install_zip(&appid, &path).map_err(|error| error.to_string())?;
+    let target = install_tar(&appid, &path).map_err(|error| error.to_string())?;
     let mut config = Config::load().map_err(|error| error.to_string())?;
     let entry = config
         .upsert(&appid, target, true)
@@ -1692,12 +1692,13 @@ fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, 
     let name = export_name(&game_title);
     let Some(path) = rfd::FileDialog::new()
         .set_file_name(&name)
-        .add_filter("ZIP", &["zip"])
+        .add_filter("Fixes TAR", &["tar"])
         .save_file()
     else {
         return Ok(None);
     };
-    export_zip(&entry.fixes, &path, &appid).map_err(|error| error.to_string())?;
+    export_tar(&entry.fixes, &path, &game_title, &appid)
+        .map_err(|error| error.to_string())?;
     Ok(Some(path.display().to_string()))
 }
 
@@ -2623,81 +2624,6 @@ fn export_managed_fixes(game_id: String, path: Option<String>) -> Result<Option<
 }
 
 #[tauri::command]
-fn update_backup_fixes(
-    game_id: String,
-    path: Option<String>,
-) -> Result<serde_json::Value, String> {
-    use steamtron_core::library::Library;
-
-    require_auth()?;
-    let folder = match path {
-        Some(value) => std::path::PathBuf::from(value),
-        None => {
-            let Some(value) = rfd::FileDialog::new()
-                .set_title("Choose the SteamTron backup folder")
-                .pick_folder()
-            else {
-                return Ok(serde_json::json!({ "updated": false }));
-            };
-            value
-        }
-    };
-    let library = Library::load().map_err(|error| error.to_string())?;
-    let game = library
-        .game(&game_id)
-        .ok_or_else(|| format!("unknown game {game_id}"))?;
-    let appid = game
-        .metadata_app_id
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| game.id.clone());
-    let manifest_path = folder.join(format!("appmanifest_{appid}.json"));
-    let mut manifest: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(&manifest_path).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    let fixes = steamtron_core::library::fixes_dir(game).map_err(|error| error.to_string())?;
-    if !fixes.is_dir() {
-        return Err("No fixes are installed for this game.".into());
-    }
-    let tar_path = folder.join("fixes.tar");
-    let prefix = steamtron_core::fixes::tar_prefix(&tar_path)
-        .and_then(|value| value.strip_prefix("fixes/").map(str::to_owned))
-        .or_else(|| {
-            manifest
-                .get("fixes_directory")
-                .and_then(|value| value.as_str())
-                .and_then(|value| value.rsplit('/').next())
-                .map(str::to_owned)
-        })
-        .or_else(|| {
-            game.installation
-                .root
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_owned)
-        })
-        .ok_or_else(|| "Could not determine the backup fixes folder name.".to_string())?;
-    let digest = steamtron_core::fixes::export_tar(&fixes, &tar_path, &prefix, &appid)
-        .map_err(|error| error.to_string())?;
-    manifest["fixes_directory"] = serde_json::Value::String(format!("fixes/{prefix}"));
-    manifest["components"]["fixes"] =
-        serde_json::json!({ "name": "fixes.tar", "sha256": digest });
-    let temporary = manifest_path.with_extension("json.steamtron.tmp");
-    std::fs::write(
-        &temporary,
-        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    std::fs::rename(&temporary, &manifest_path).map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({
-        "updated": true,
-        "path": tar_path.display().to_string(),
-        "sha256": digest,
-        "folder": prefix,
-    }))
-}
-
-#[tauri::command]
 async fn apply_managed_goldberg(
     app: tauri::AppHandle,
     game_id: String,
@@ -2756,8 +2682,8 @@ fn install_managed_fixes(
         Some(path) => std::path::PathBuf::from(path),
         None => {
             let Some(path) = rfd::FileDialog::new()
-                .set_title("Choose a fixes ZIP")
-                .add_filter("Fixes ZIP", &["zip"])
+                .set_title("Choose a fixes TAR")
+                .add_filter("Fixes TAR", &["tar"])
                 .pick_file()
             else {
                 return Ok(None);
@@ -5012,7 +4938,7 @@ fn export_managed_saves(game_id: String) -> Result<Option<String>, String> {
     require_auth()?;
     let library = Library::load().map_err(|error| error.to_string())?;
     let game = library.game(&game_id).ok_or_else(|| "unknown game".to_string())?;
-    let Some(path) = rfd::FileDialog::new().set_title("Export save snapshot").set_file_name(format!("{}_saves.zip", steamtron_core::fixes::export_name(&game.title).trim_end_matches(".zip"))).add_filter("ZIP", &["zip"]).save_file() else {
+    let Some(path) = rfd::FileDialog::new().set_title("Export save snapshot").set_file_name(format!("{}_saves.zip", steamtron_core::fixes::export_name(&game.title).trim_end_matches(".tar"))).add_filter("ZIP", &["zip"]).save_file() else {
         return Ok(None);
     };
     let mut files = Vec::new();
@@ -6507,7 +6433,6 @@ fn main() {
             managed_fixes,
             managed_fixes_status,
             export_managed_fixes,
-            update_backup_fixes,
             apply_managed_goldberg,
             remove_managed_goldberg,
             apply_managed_steamless,

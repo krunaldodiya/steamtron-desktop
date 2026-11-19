@@ -3,10 +3,7 @@
 ### Changed
 
 - Fixes export now writes a backup-compatible `fixes.tar`
-  (`fixes/<game folder>/...`), and import accepts both ZIP and TAR.
-- The Fixes tab can update an existing backup's `fixes.tar` and SHA-256 in
-  place without rewriting `content.tar`; the backup's original internal folder
-  name is preserved.
+  (`fixes/<game folder>/...`); import accepts TAR only.
 
 ### Fixed
 

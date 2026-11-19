@@ -2289,7 +2289,7 @@ function openManagedGameOptions(game) {
       const present = status.files > 0;
       pane.innerHTML = `<h3>Fixes</h3>
         <p class="pane-note">Import, export, or remove per-game fixes. Fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
-        <div class="fix-action-row"><button class="primary" id="fix-import">Import fixes ZIP/TAR…</button><button id="fix-export"${present ? "" : " disabled"}>Export fixes TAR…</button><button id="fix-backup-update"${present ? "" : " disabled"}>Update backup fixes…</button></div>
+        <div class="fix-action-row"><button class="primary" id="fix-import">Import fixes TAR…</button><button id="fix-export"${present ? "" : " disabled"}>Export fixes TAR…</button></div>
         <section class="fix-section"><h4>Current fixes location</h4>
           <p class="fix-path">${status.path ? escape(status.path) : "No fixes folder yet."}</p>
           <p class="fix-meta">${present ? `${status.files} file${status.files === 1 ? "" : "s"} · ${formatBytes(status.bytes)}` : "No fixes installed."}</p>
@@ -2331,11 +2331,6 @@ function openManagedGameOptions(game) {
         if (!path) throw new Error("Export cancelled.");
         return path;
       }, (path) => `Exported to ${path}`);
-      pane.querySelector("#fix-backup-update").onclick = (event) => run(event.currentTarget, async () => {
-        const result = await invoke("update_backup_fixes", { gameId: game.id, path: null });
-        if (!result?.updated) throw new Error("Update cancelled.");
-        return result;
-      }, (result) => `Backup fixes updated · ${result.folder}`);
       pane.querySelector("#fix-open").onclick = async () => {
         if (!status.path) return;
         try { await invoke("open_path", { path: status.path }); }
@@ -3985,8 +3980,8 @@ function renderFixesPanel(panel, game, current) {
     <div class="fixes-separator"></div>
     <div class="fixes-section">
       <div class="actions">
-        <button class="primary" id="install">Import fixes ZIP</button>
-        <button id="export" ${hasFixes ? "" : "disabled"}>Export fixes ZIP</button>
+        <button class="primary" id="install">Import fixes TAR</button>
+        <button id="export" ${hasFixes ? "" : "disabled"}>Export fixes TAR</button>
       </div>
     </div>
     <div class="fixes-separator"></div>
@@ -4075,7 +4070,7 @@ function renderFixesPanel(panel, game, current) {
     if (!await ensureSecurity()) return;
     const stop = busy(button, "Installing…");
     try {
-      status("Choose a fixes ZIP…");
+      status("Choose a fixes TAR…");
       const result = await invoke("install_fixes", { appid: game.appid });
       if (result) {
         fixes.set(game.appid, result);
@@ -4119,7 +4114,7 @@ function renderFixesPanel(panel, game, current) {
     const button = panel.querySelector("#export");
     if (!await ensureSteamClosed("export fixes")) return;
     const stop = busy(button, "Exporting…");
-    try { status("Preparing fixes ZIP…"); const result = await invoke("export_fixes", { appid: game.appid, title: game.name }); status(result ? `Exported ${result}` : "Export cancelled."); }
+    try { status("Preparing fixes TAR…"); const result = await invoke("export_fixes", { appid: game.appid, title: game.name }); status(result ? `Exported ${result}` : "Export cancelled."); }
     catch (error) { status(String(error), true); }
     finally { stop(); }
   };
