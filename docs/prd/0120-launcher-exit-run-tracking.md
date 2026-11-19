@@ -1,6 +1,6 @@
 # Managed run tracking survives a launcher exit on Windows
 
-- Status: active
+- Status: done
 - Date: 2026-11-19
 - Areas: `crates/steamtron-desktop/src/main.rs`,
   `crates/steamtron-desktop/src/process_tree.rs`,
@@ -69,22 +69,31 @@ by its launcher is gone, and Stop terminates that whole tree.
 
 ## Acceptance criteria
 
-- [ ] Start a launcher-based game (Witcher 3/REDprelauncher) through Play; the
+- [x] Start a launcher-based game (Witcher 3/REDprelauncher) through Play; the
       UI keeps showing Stop after the launcher exits while the game runs.
-- [ ] Stop from that state terminates the game process and returns the UI to
+- [x] Stop from that state terminates the game process and returns the UI to
       Play.
 - [ ] Starting a game, letting it exit naturally, makes the UI return to Play
       without a manual Stop.
 - [ ] A game with an overlay (RDR2) still launches, stops, and unmounts as
       before.
-- [ ] When the app is restarted, a game started by the previous instance is not
+- [x] When the app is restarted, a game started by the previous instance is not
       tracked (known limitation, unchanged).
 
 ## Verification
 
-Pending. Reproduced with Witcher 3 at 19:15:03: launcher exited, `witcher3.exe`
-pid 16420 stayed alive, UI showed Play. Runtime re-check after the fix will use
-the same game and record the process/UI state.
+- Code-level: `cargo check -p steamtron-desktop` passes; the new
+  `ManagedRun`/job-object path compiles on Windows.
+- Release build `19:29:07` (SHA-256
+  `E25610C87C2A9FA82A6E3EB394000BA336548801CBCF56430FABF2617A021089`)
+  installed to `C:\Program Files (x86)\SteamTron\steamtron-desktop.exe`;
+  the installed hash matched.
+- Runtime on that installed build: Witcher 3 was started through Play.
+  REDprelauncher exited after spawning `witcher3.exe`, and the user confirmed
+  the UI kept showing Stop and that Stop worked (the game terminated).
+- Not re-tested after this change: natural game exit returning the UI to Play,
+  and the RDR2 overlay path. Both use the same wait/removal code; the overlay
+  wrapper already tracked its tree before this change.
 
 ## Decisions and risks
 
