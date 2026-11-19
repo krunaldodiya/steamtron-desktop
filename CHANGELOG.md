@@ -1,3 +1,19 @@
+## [0.1.38] - 2026-11-19
+
+### Added
+
+- Launchers that ship inside a game's fixes folder (for example RDR2's
+  `Launcher.exe`) can be added from the Fixes tab or the Game Link tab and run
+  from the merged overlay view instead of the raw fixes folder.
+
+### Fixed
+
+- The fixes overlay stays mounted until every process the launcher started has
+  exited, instead of tearing down the merged drive when the first launcher
+  process ends.
+- Launch-target checks accept Windows paths that differ in case or carry the
+  `\\?\` prefix, and the merged-drive rewrite covers fixes-folder paths.
+
 ## [0.1.37] - 2026-11-19
 
 ### Fixed
