@@ -194,7 +194,7 @@ pub fn install_fixes_at(
         .game(game_id)
         .ok_or_else(|| LibraryError::Invalid(format!("unknown game {game_id}")))?;
     let dir = fixes_dir_for(game)?;
-    steamtron_core::fixes::install_zip_into(&app_id_for(game), zip_path, &dir)
+    steamtron_core::fixes::install_archive_into(&app_id_for(game), zip_path, &dir)
         .map_err(|error| LibraryError::Invalid(error.to_string()))?;
     fixes_view_at(game_id, library_path)
 }

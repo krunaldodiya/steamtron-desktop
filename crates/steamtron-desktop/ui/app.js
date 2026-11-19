@@ -2289,7 +2289,7 @@ function openManagedGameOptions(game) {
       const present = status.files > 0;
       pane.innerHTML = `<h3>Fixes</h3>
         <p class="pane-note">Import, export, or remove per-game fixes. Fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
-        <div class="fix-action-row"><button class="primary" id="fix-import">Import fixes ZIP…</button><button id="fix-export"${present ? "" : " disabled"}>Export fixes ZIP…</button></div>
+        <div class="fix-action-row"><button class="primary" id="fix-import">Import fixes ZIP/TAR…</button><button id="fix-export"${present ? "" : " disabled"}>Export fixes TAR…</button><button id="fix-backup-update"${present ? "" : " disabled"}>Update backup fixes…</button></div>
         <section class="fix-section"><h4>Current fixes location</h4>
           <p class="fix-path">${status.path ? escape(status.path) : "No fixes folder yet."}</p>
           <p class="fix-meta">${present ? `${status.files} file${status.files === 1 ? "" : "s"} · ${formatBytes(status.bytes)}` : "No fixes installed."}</p>
@@ -2331,6 +2331,11 @@ function openManagedGameOptions(game) {
         if (!path) throw new Error("Export cancelled.");
         return path;
       }, (path) => `Exported to ${path}`);
+      pane.querySelector("#fix-backup-update").onclick = (event) => run(event.currentTarget, async () => {
+        const result = await invoke("update_backup_fixes", { gameId: game.id, path: null });
+        if (!result?.updated) throw new Error("Update cancelled.");
+        return result;
+      }, (result) => `Backup fixes updated · ${result.folder}`);
       pane.querySelector("#fix-open").onclick = async () => {
         if (!status.path) return;
         try { await invoke("open_path", { path: status.path }); }

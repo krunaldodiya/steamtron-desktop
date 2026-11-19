@@ -1603,7 +1603,7 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     require_steam_stopped()?;
     security::require_exception(&appid)?;
     let Some(path) = rfd::FileDialog::new()
-        .add_filter("Fixes ZIP", &["zip"])
+        .add_filter("Fixes archive (ZIP or TAR)", &["zip", "tar"])
         .pick_file()
     else {
         return Ok(None);
@@ -2588,17 +2588,102 @@ fn export_managed_fixes(game_id: String) -> Result<Option<String>, String> {
         .metadata_app_id
         .map(|id| id.to_string())
         .unwrap_or_else(|| game.id.clone());
+    let mut name = steamtron_core::fixes::export_name(&game.title);
+    name.truncate(name.len().saturating_sub(4));
+    name.push_str(".tar");
     let Some(path) = rfd::FileDialog::new()
-        .set_title("Export fixes ZIP")
-        .set_file_name(steamtron_core::fixes::export_name(&game.title))
-        .add_filter("Fixes ZIP", &["zip"])
+        .set_title("Export fixes TAR")
+        .set_file_name(name)
+        .add_filter("Fixes TAR", &["tar"])
         .save_file()
     else {
         return Ok(None);
     };
-    steamtron_core::fixes::export_zip(&fixes, &path, &appid)
+    let folder = game
+        .installation
+        .root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&game.title)
+        .to_owned();
+    steamtron_core::fixes::export_tar(&fixes, &path, &folder, &appid)
         .map_err(|error| error.to_string())?;
     Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+fn update_backup_fixes(
+    game_id: String,
+    path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let folder = match path {
+        Some(value) => std::path::PathBuf::from(value),
+        None => {
+            let Some(value) = rfd::FileDialog::new()
+                .set_title("Choose the SteamTron backup folder")
+                .pick_folder()
+            else {
+                return Ok(serde_json::json!({ "updated": false }));
+            };
+            value
+        }
+    };
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    let appid = game
+        .metadata_app_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| game.id.clone());
+    let manifest_path = folder.join(format!("appmanifest_{appid}.json"));
+    let mut manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&manifest_path).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    let fixes = steamtron_core::library::fixes_dir(game).map_err(|error| error.to_string())?;
+    if !fixes.is_dir() {
+        return Err("No fixes are installed for this game.".into());
+    }
+    let tar_path = folder.join("fixes.tar");
+    let prefix = steamtron_core::fixes::tar_prefix(&tar_path)
+        .and_then(|value| value.strip_prefix("fixes/").map(str::to_owned))
+        .or_else(|| {
+            manifest
+                .get("fixes_directory")
+                .and_then(|value| value.as_str())
+                .and_then(|value| value.rsplit('/').next())
+                .map(str::to_owned)
+        })
+        .or_else(|| {
+            game.installation
+                .root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| "Could not determine the backup fixes folder name.".to_string())?;
+    let digest = steamtron_core::fixes::export_tar(&fixes, &tar_path, &prefix, &appid)
+        .map_err(|error| error.to_string())?;
+    manifest["fixes_directory"] = serde_json::Value::String(format!("fixes/{prefix}"));
+    manifest["components"]["fixes"] =
+        serde_json::json!({ "name": "fixes.tar", "sha256": digest });
+    let temporary = manifest_path.with_extension("json.steamtron.tmp");
+    std::fs::write(
+        &temporary,
+        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, &manifest_path).map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "updated": true,
+        "path": tar_path.display().to_string(),
+        "sha256": digest,
+        "folder": prefix,
+    }))
 }
 
 #[tauri::command]
@@ -6411,6 +6496,7 @@ fn main() {
             managed_fixes,
             managed_fixes_status,
             export_managed_fixes,
+            update_backup_fixes,
             apply_managed_goldberg,
             remove_managed_goldberg,
             apply_managed_steamless,
