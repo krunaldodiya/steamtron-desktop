@@ -1,6 +1,6 @@
 # Fixes TAR format and backup updates
 
-- Status: active
+- Status: done
 - Date: 2026-11-19
 - Areas: `crates/steamtron-core/src/fixes.rs`,
   `crates/steamtron-library/src/managed.rs`,
@@ -39,8 +39,7 @@ Export fixes in the exact backup layout, import either format, and update only
 - [x] Backups with an old prefix (e.g. `Assassins Creed Origins`) keep that
   prefix when updated.
 - [x] ZIP import still works.
-- [ ] UI export/import/update exercised on a rebuilt app. Not built yet per the
-  on-request build policy.
+- [x] UI export/import/update exercised on the rebuilt 0.1.34 app.
 
 ## Verification
 
@@ -49,7 +48,15 @@ Export fixes in the exact backup layout, import either format, and update only
   pass.
 - `cargo check -p steamtron-desktop` passes.
 - Runtime export on 0.1.34 initially crashed with `STATUS_STACK_OVERFLOW`; fixed
-  by moving the 1 MiB hash buffer off the stack. UI re-test pending the rebuild.
+  by moving the 1 MiB hash buffer off the stack. Rebuilt and re-tested.
+- Installed build (`%LOCALAPPDATA%\Programs\SteamTron`, hash `5b925fcc…`):
+  exported 424840 to a 7.2 MiB TAR, imported it back (3 files), and showed the
+  new import/export/update controls plus the corrected GoldBerg text.
+- Backup update against `%TEMP%\st-backup-test` preserved `fixes/Little
+  Nightmares`; update against `%TEMP%\st-backup-old` preserved
+  `fixes/Assassins Creed Origins` and left `content.tar` byte-identical.
+- Program Files replacement is still pending: the UAC prompt was denied, so the
+  final binary was installed per-user with a desktop shortcut.
 
 ## Decisions and risks
 
