@@ -1317,6 +1317,8 @@ const OPERATION_LABELS = {
   verify: ["Verifying files integrity…", "Verify files integrity"],
   restore: ["Restoring game backup…", "Restore…"],
   "library-export": ["Exporting game backups…", "Export"],
+  "fixes-import": ["Importing fixes…", "Import fixes TAR…"],
+  "fixes-export": ["Exporting fixes…", "Export fixes TAR…"],
 };
 const operationInlineTimers = new WeakMap();
 const inlineOperations = new Set();
@@ -2106,7 +2108,7 @@ function openManagedGameOptions(game) {
         const linked = latestGame.installation?.mode === "linked";
         pane.innerHTML = `<h3>Installed Files</h3>
           <div class="files-card files-size-card"><strong>Size of installation: ${formatBytes(size)} (${escape(name)})</strong><button id="files-browse">Browse…</button></div>
-          <div class="files-card"><p class="pane-note">Create a portable backup folder with content.tar, fixes.tar, depot manifests and appmanifest metadata.</p><button class="files-wide" id="files-backup" data-operation-button="backup">Back up game files…</button><div class="operation-inline hidden" data-operation-inline="backup" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div></div>
+          <div class="files-card"><p class="pane-note">Create a portable backup folder with content.tar, <game>.tar fixes, depot manifests and appmanifest metadata.</p><button class="files-wide" id="files-backup" data-operation-button="backup">Back up game files…</button><div class="operation-inline hidden" data-operation-inline="backup" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div></div>
           <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify" data-operation-button="verify">Verify files integrity</button><div class="operation-inline hidden" data-operation-inline="verify" data-operation-game="${game.id}"><div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="verify" data-operation-game="${game.id}" title="Cancel verification" aria-label="Cancel verification"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div><p class="files-status" id="files-status"></p></div>
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
           <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's launchers and Steam registration while keeping the library entry and all files on disk. Use Remove from library on the game page to delete the entry." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
@@ -2289,7 +2291,15 @@ function openManagedGameOptions(game) {
       const present = status.files > 0;
       pane.innerHTML = `<h3>Fixes</h3>
         <p class="pane-note">Import, export, or remove per-game fixes. Fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
-        <div class="fix-action-row"><button class="primary" id="fix-import">Import fixes TAR…</button><button id="fix-export"${present ? "" : " disabled"}>Export fixes TAR…</button></div>
+        <div class="fix-action-row"><button class="primary" id="fix-import" data-operation-button="fixes-import">Import fixes TAR…</button><button id="fix-export" data-operation-button="fixes-export"${present ? "" : " disabled"}>Export fixes TAR…</button></div>
+        <div class="operation-inline hidden" data-operation-inline="fixes-import" data-operation-game="${game.id}">
+          <div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="fixes-import" data-operation-game="${game.id}" title="Cancel import" aria-label="Cancel import"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+          <div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div>
+        </div>
+        <div class="operation-inline hidden" data-operation-inline="fixes-export" data-operation-game="${game.id}">
+          <div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="fixes-export" data-operation-game="${game.id}" title="Cancel export" aria-label="Cancel export"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+          <div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div>
+        </div>
         <section class="fix-section"><h4>Current fixes location</h4>
           <p class="fix-path">${status.path ? escape(status.path) : "No fixes folder yet."}</p>
           <p class="fix-meta">${present ? `${status.files} file${status.files === 1 ? "" : "s"} · ${formatBytes(status.bytes)}` : "No fixes installed."}</p>
@@ -2322,15 +2332,46 @@ function openManagedGameOptions(game) {
           showToast(String(error), true);
         }
       };
-      pane.querySelector("#fix-import").onclick = (event) => run(event.currentTarget, async () => {
+      const runTransfer = async (operation, work, message) => {
+        beginOperation(operation, game.id);
+        try {
+          const result = await work();
+          if (result === null) {
+            cancelOperation(operation, game.id);
+            return;
+          }
+          finishOperation(operation, game.id, "Complete");
+          showToast(typeof message === "function" ? message(result) : message);
+          await refresh();
+        } catch (error) {
+          const key = `${operation}:${game.id}`;
+          if (cancelledInline.has(key)) {
+            cancelledInline.delete(key);
+            cancelOperation(operation, game.id);
+          } else {
+            failOperation(operation, game.id, String(error));
+            showToast(String(error), true);
+          }
+        }
+      };
+      pane.querySelector("#fix-import").onclick = () => runTransfer("fixes-import", async () => {
         const result = await invoke("install_managed_fixes", { gameId: game.id, path: null });
         return result || { files: [] };
       }, (result) => `Installed ${result.files?.length || 0} fix file${result.files?.length === 1 ? "" : "s"}`);
-      pane.querySelector("#fix-export").onclick = (event) => run(event.currentTarget, async () => {
+      pane.querySelector("#fix-export").onclick = () => runTransfer("fixes-export", async () => {
         const path = await invoke("export_managed_fixes", { gameId: game.id, path: null });
-        if (!path) throw new Error("Export cancelled.");
         return path;
       }, (path) => `Exported to ${path}`);
+      for (const operation of ["fixes-import", "fixes-export"]) {
+        const cancel = pane.querySelector(`[data-operation-cancel="${operation}"]`);
+        if (!cancel) continue;
+        cancel.onclick = async () => {
+          if (!(await confirmDialog({ title: "Cancel fixes transfer", message: "Stop this fixes transfer? Partial files are discarded.", confirmLabel: "Cancel transfer", cancelLabel: "Keep running", danger: true }))) return;
+          cancelledInline.add(`${operation}:${game.id}`);
+          try { await invoke("cancel_operation", { operation, gameId: game.id }); }
+          catch (error) { cancelledInline.delete(`${operation}:${game.id}`); showToast(String(error), true); }
+        };
+      }
       pane.querySelector("#fix-open").onclick = async () => {
         if (!status.path) return;
         try { await invoke("open_path", { path: status.path }); }
@@ -3980,8 +4021,16 @@ function renderFixesPanel(panel, game, current) {
     <div class="fixes-separator"></div>
     <div class="fixes-section">
       <div class="actions">
-        <button class="primary" id="install">Import fixes TAR</button>
-        <button id="export" ${hasFixes ? "" : "disabled"}>Export fixes TAR</button>
+        <button class="primary" id="install" data-operation-button="fixes-import">Import fixes TAR</button>
+        <button id="export" data-operation-button="fixes-export" ${hasFixes ? "" : "disabled"}>Export fixes TAR</button>
+      </div>
+      <div class="operation-inline hidden" data-operation-inline="fixes-import" data-operation-game="${game.appid}">
+        <div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="fixes-import" data-operation-game="${game.appid}" title="Cancel import" aria-label="Cancel import"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+        <div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div>
+      </div>
+      <div class="operation-inline hidden" data-operation-inline="fixes-export" data-operation-game="${game.appid}">
+        <div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="fixes-export" data-operation-game="${game.appid}" title="Cancel export" aria-label="Cancel export"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+        <div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div>
       </div>
     </div>
     <div class="fixes-separator"></div>
@@ -4065,10 +4114,9 @@ function renderFixesPanel(panel, game, current) {
     finally { stop(); }
   };
   panel.querySelector("#install").onclick = async () => {
-    const button = panel.querySelector("#install");
     if (!await ensureSteamClosed("import fixes")) return;
     if (!await ensureSecurity()) return;
-    const stop = busy(button, "Installing…");
+    beginOperation("fixes-import", game.appid);
     try {
       status("Choose a fixes TAR…");
       const result = await invoke("install_fixes", { appid: game.appid });
@@ -4076,14 +4124,18 @@ function renderFixesPanel(panel, game, current) {
         fixes.set(game.appid, result);
         await loadFixes();
         markRestartRequired(`Fixes installed for ${game.name}. Restart Steam to apply the launch option.`);
-        stop();
+        finishOperation("fixes-import", game.appid, "Import complete");
         renderDetail(game, "fixes");
         renderGames();
         status(result.launch_option_error
           ? `Fixes installed, but the Steam launch option failed: ${result.launch_option_error}`
           : "Fixes installed and Steam launch option set. Start Steam manually.", !!result.launch_option_error);
-      } else { stop(); status("Install cancelled."); }
-    } catch (error) { stop(); status(String(error), true); }
+      } else { cancelOperation("fixes-import", game.appid); status("Install cancelled."); }
+    } catch (error) {
+      const key = `fixes-import:${game.appid}`;
+      if (cancelledInline.has(key)) { cancelledInline.delete(key); cancelOperation("fixes-import", game.appid); status("Install cancelled."); }
+      else { failOperation("fixes-import", game.appid, String(error)); status(String(error), true); }
+    }
   };
   panel.querySelector("#open-folder").onclick = async () => {
     const button = panel.querySelector("#open-folder");
@@ -4111,13 +4163,34 @@ function renderFixesPanel(panel, game, current) {
     } catch (error) { stop(); status(String(error), true); }
   };
   panel.querySelector("#export").onclick = async () => {
-    const button = panel.querySelector("#export");
     if (!await ensureSteamClosed("export fixes")) return;
-    const stop = busy(button, "Exporting…");
-    try { status("Preparing fixes TAR…"); const result = await invoke("export_fixes", { appid: game.appid, title: game.name }); status(result ? `Exported ${result}` : "Export cancelled."); }
-    catch (error) { status(String(error), true); }
-    finally { stop(); }
+    beginOperation("fixes-export", game.appid);
+    try {
+      status("Preparing fixes TAR…");
+      const result = await invoke("export_fixes", { appid: game.appid, title: game.name });
+      if (result) {
+        finishOperation("fixes-export", game.appid, "Export complete");
+        status(`Exported ${result}`);
+      } else {
+        cancelOperation("fixes-export", game.appid);
+        status("Export cancelled.");
+      }
+    } catch (error) {
+      const key = `fixes-export:${game.appid}`;
+      if (cancelledInline.has(key)) { cancelledInline.delete(key); cancelOperation("fixes-export", game.appid); status("Export cancelled."); }
+      else { failOperation("fixes-export", game.appid, String(error)); status(String(error), true); }
+    }
   };
+  for (const operation of ["fixes-import", "fixes-export"]) {
+    const cancel = panel.querySelector(`[data-operation-cancel="${operation}"]`);
+    if (!cancel) continue;
+    cancel.onclick = async () => {
+      if (!(await confirmDialog({ title: "Cancel fixes transfer", message: "Stop this fixes transfer? Partial files are discarded.", confirmLabel: "Cancel transfer", cancelLabel: "Keep running", danger: true }))) return;
+      cancelledInline.add(`${operation}:${game.appid}`);
+      try { await invoke("cancel_operation", { operation, gameId: game.appid }); }
+      catch (error) { cancelledInline.delete(`${operation}:${game.appid}`); showToast(String(error), true); }
+    };
+  }
   panel.querySelector("#launch-option").onclick = async () => {
     const button = panel.querySelector("#launch-option");
     if (!await ensureSteamClosed(current?.launch_option_set ? "clear the launch option" : "set the launch option")) return;

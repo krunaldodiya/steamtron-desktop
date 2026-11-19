@@ -1,3 +1,10 @@
+## [0.1.36] - 2026-11-19
+
+### Changed
+
+- Backups name the fixes component `<game>.tar` instead of `fixes.tar`; restore reads the manifest name and still accepts old backups.
+- Fixes import and export show an inline progress bar with percent and cancellation.
+
 ## [0.1.35] - 2026-11-19
 
 ### Changed
@@ -396,6 +403,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.36]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.36
 [0.1.35]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.35
 [0.1.34]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.34
 [0.1.33]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.33

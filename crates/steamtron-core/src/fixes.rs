@@ -89,6 +89,14 @@ pub fn install_tar(appid: &str, tar_path: &Path) -> Result<PathBuf, FixesError> 
     install_tar_into(appid, tar_path, &fixes_path(appid)?)
 }
 
+pub fn install_tar_with_progress(
+    appid: &str,
+    tar_path: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> Result<(), String>,
+) -> Result<PathBuf, FixesError> {
+    install_tar_into_with_progress(appid, tar_path, &fixes_path(appid)?, progress)
+}
+
 fn collect_files(
     base: &Path,
     directory: &Path,
@@ -145,7 +153,19 @@ pub fn export_tar(
     target: &Path,
     destination: &Path,
     folder: &str,
+    appid: &str,
+) -> Result<String, FixesError> {
+    export_tar_with_progress(target, destination, folder, appid, &mut |_, _| Ok(()))
+}
+
+/// Same as [`export_tar`], reporting `(completed, total)` bytes and allowing
+/// the caller to cancel by returning an error.
+pub fn export_tar_with_progress(
+    target: &Path,
+    destination: &Path,
+    folder: &str,
     _appid: &str,
+    progress: &mut dyn FnMut(u64, u64) -> Result<(), String>,
 ) -> Result<String, FixesError> {
     use sha2::{Digest, Sha256};
 
@@ -178,6 +198,18 @@ pub fn export_tar(
             ));
         }
     }
+    let mut files = Vec::new();
+    collect_files(target, target, &mut files)?;
+    files.retain(|(_, name)| name != MARKER);
+    if files.is_empty() {
+        return Err(FixesError::Invalid("fixes directory is empty".into()));
+    }
+    let payload_total: u64 = files
+        .iter()
+        .filter_map(|(path, _)| fs::metadata(path).ok().map(|metadata| metadata.len()))
+        .sum();
+    let work_total = payload_total.saturating_mul(2).max(1);
+    progress(0, work_total).map_err(FixesError::Invalid)?;
     let temporary = destination.with_extension(format!("tar.{}.tmp", std::process::id()));
     let result = (|| -> Result<String, FixesError> {
         let file =
@@ -192,36 +224,56 @@ pub fn export_tar(
         archive
             .append_data(&mut header, &top, std::io::empty())
             .map_err(|error| FixesError::Invalid(error.to_string()))?;
-        let mut files = Vec::new();
-        collect_files(target, target, &mut files)?;
-        files.retain(|(_, name)| name != MARKER);
-        if files.is_empty() {
-            return Err(FixesError::Invalid("fixes directory is empty".into()));
-        }
-        for (path, name) in files {
+        let mut written = 0u64;
+        for (path, name) in &files {
+            let metadata =
+                fs::metadata(path).map_err(|error| FixesError::io(path, error))?;
+            let mut header = tar::Header::new_gnu();
+            header.set_size(metadata.len());
+            header.set_mode(0o644);
+            header.set_cksum();
+            let input = fs::File::open(path).map_err(|error| FixesError::io(path, error))?;
+            let mut reader = ProgressReader {
+                inner: input,
+                on_read: &mut |count| {
+                    written = written.saturating_add(count);
+                    progress(written, work_total).map_err(|error| {
+                        std::io::Error::new(std::io::ErrorKind::Interrupted, error)
+                    })
+                },
+            };
             archive
-                .append_path_with_name(&path, format!("{top}/{name}"))
+                .append_data(&mut header, format!("{top}/{name}"), &mut reader)
                 .map_err(|error| FixesError::Invalid(error.to_string()))?;
         }
         let file = archive
             .into_inner()
             .map_err(|error| FixesError::Invalid(error.to_string()))?;
         file.sync_data().map_err(|error| FixesError::io(&temporary, error))?;
-        fs::rename(&temporary, destination)
-            .map_err(|error| FixesError::io(destination, error))?;
         let mut file =
-            fs::File::open(destination).map_err(|error| FixesError::io(destination, error))?;
+            fs::File::open(&temporary).map_err(|error| FixesError::io(&temporary, error))?;
         let mut hasher = Sha256::new();
         let mut buffer = vec![0u8; 1024 * 1024];
+        let mut hashed = 0u64;
         loop {
             let read = file
                 .read(&mut buffer)
-                .map_err(|error| FixesError::io(destination, error))?;
+                .map_err(|error| FixesError::io(&temporary, error))?;
             if read == 0 {
                 break;
             }
             hasher.update(&buffer[..read]);
+            hashed = hashed.saturating_add(read as u64);
+            progress(
+                payload_total.saturating_add(hashed).min(work_total),
+                work_total,
+            )
+            .map_err(FixesError::Invalid)?;
         }
+        drop(file);
+        fs::rename(&temporary, destination)
+            .map_err(|error| FixesError::io(destination, error))?;
+        progress(work_total, work_total).map_err(FixesError::Invalid)?;
         Ok(hasher
             .finalize()
             .iter()
@@ -232,6 +284,21 @@ pub fn export_tar(
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+struct ProgressReader<'a> {
+    inner: fs::File,
+    on_read: &'a mut dyn FnMut(u64) -> std::io::Result<()>,
+}
+
+impl std::io::Read for ProgressReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.inner.read(buffer)?;
+        if count > 0 {
+            (self.on_read)(count as u64)?;
+        }
+        Ok(count)
+    }
 }
 
 /// Prefix used by an existing fixes TAR (`fixes/<folder>`), if any.
@@ -263,6 +330,17 @@ pub fn install_tar_into(
     tar_path: &Path,
     target: &Path,
 ) -> Result<PathBuf, FixesError> {
+    install_tar_into_with_progress(appid, tar_path, target, &mut |_, _| Ok(()))
+}
+
+/// Same as [`install_tar_into`], reporting archive bytes read and allowing the
+/// caller to cancel by returning an error.
+pub fn install_tar_into_with_progress(
+    appid: &str,
+    tar_path: &Path,
+    target: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> Result<(), String>,
+) -> Result<PathBuf, FixesError> {
     if appid.is_empty() || !appid.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(FixesError::InvalidAppId);
     }
@@ -288,10 +366,20 @@ pub fn install_tar_into(
     let content = staging.join("content");
     fs::create_dir(&content).map_err(|error| FixesError::io(&content, error))?;
     let prefix = tar_prefix(tar_path);
+    progress(0, archive_size).map_err(FixesError::Invalid)?;
     let result = (|| -> Result<(), FixesError> {
         let file =
             fs::File::open(tar_path).map_err(|error| FixesError::io(tar_path, error))?;
-        let mut archive = tar::Archive::new(file);
+        let mut read_total = 0u64;
+        let mut on_read = |count| {
+            read_total = read_total.saturating_add(count);
+            progress(read_total.min(archive_size), archive_size)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Interrupted, error))
+        };
+        let mut archive = tar::Archive::new(ProgressReader {
+            inner: file,
+            on_read: &mut on_read,
+        });
         let mut count = 0usize;
         let mut total = 0u64;
         for entry in archive
@@ -339,9 +427,11 @@ pub fn install_tar_into(
             std::io::copy(&mut entry, &mut output)
                 .map_err(|error| FixesError::io(&destination, error))?;
         }
+        drop(archive);
         if count == 0 {
             return Err(FixesError::Invalid("TAR is empty".into()));
         }
+        progress(archive_size, archive_size).map_err(FixesError::Invalid)?;
         if target.is_symlink() {
             return Err(FixesError::Unsafe("target fixes path is a symlink".into()));
         }
@@ -390,6 +480,43 @@ mod tests {
         let second = temp.path().join("installed2");
         install_tar_into("42", &tar, &second).unwrap();
         assert!(second.join("a.txt").is_file());
+    }
+
+    #[test]
+    fn tar_progress_is_monotonic_and_cancellable() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("fixes");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("a.dll"), vec![7u8; 256 * 1024]).unwrap();
+        let tar = temp.path().join("fixes.tar");
+        let mut export_steps = Vec::new();
+        export_tar_with_progress(&source, &tar, "Game", "42", &mut |done, total| {
+            export_steps.push((done, total));
+            Ok(())
+        })
+        .unwrap();
+        assert!(export_steps.len() > 1);
+        assert!(export_steps.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert_eq!(export_steps.last().copied(), Some((*&export_steps.last().unwrap().1, export_steps.last().unwrap().1)));
+        let target = temp.path().join("installed");
+        let mut import_steps = Vec::new();
+        install_tar_into_with_progress("42", &tar, &target, &mut |done, total| {
+            import_steps.push((done, total));
+            Ok(())
+        })
+        .unwrap();
+        assert!(import_steps.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        assert_eq!(import_steps.last().map(|step| step.0), import_steps.last().map(|step| step.1));
+
+        let cancelled = temp.path().join("cancelled.tar");
+        let mut calls = 0;
+        let error = export_tar_with_progress(&source, &cancelled, "Game", "42", &mut |_, _| {
+            calls += 1;
+            if calls > 1 { Err("cancelled".into()) } else { Ok(()) }
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("cancelled"));
+        assert!(!cancelled.exists());
     }
 
     #[test]

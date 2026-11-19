@@ -135,3 +135,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0111](0111-large-fixes-import.md) | Import large fixes archives | done | 2026-11-19 |
 | [0112](0112-fixes-tar-format.md) | Fixes TAR import and export | done | 2026-11-19 |
 | [0113](0113-linux-overlay-launch-env.md) | Linux overlay carries launch environment | active | 2026-11-19 |
+| [0114](0114-game-named-fixes-backup.md) | Game-named fixes archive in backups | active | 2026-11-19 |
+| [0115](0115-fixes-transfer-progress.md) | Progress for fixes import and export | done | 2026-11-19 |

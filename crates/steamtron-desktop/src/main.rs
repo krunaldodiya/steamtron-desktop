@@ -20,7 +20,7 @@ use tauri::Emitter;
 mod security;
 use steamtron_core::config::Config;
 use steamtron_core::launch::{clear_managed_launch_option, has_launch_option_value, launch_option_value_with_target, set_launch_option};
-use steamtron_core::fixes::{export_name, export_tar, install_tar};
+use steamtron_core::fixes::{export_name, export_tar, export_tar_with_progress, install_tar, install_tar_with_progress};
 use steamtron_core::steam;
 use steamtron_register::{platform_backend, RegistrationBackend};
 use steamtron_doctor::{run as run_doctor, launch_unlock_installer};
@@ -1598,7 +1598,7 @@ fn game_running(appid: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
+async fn install_fixes(app: tauri::AppHandle, appid: String) -> Result<Option<FixView>, String> {
     require_auth()?;
     require_steam_stopped()?;
     security::require_exception(&appid)?;
@@ -1608,7 +1608,40 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     else {
         return Ok(None);
     };
-    let target = install_tar(&appid, &path).map_err(|error| error.to_string())?;
+    let operation = "fixes-import";
+    let control = register_operation(operation, &appid);
+    let worker_control = control.clone();
+    let emit_app = app.clone();
+    let emit_game = appid.clone();
+    let started = std::time::Instant::now();
+    let worker_appid = appid.clone();
+    emit_operation_stats(&app, operation, &appid, "extract", "Importing fixes TAR…", 0.0, 0, 0, started);
+    let extracted = tauri::async_runtime::spawn_blocking(move || {
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(250);
+        install_tar_with_progress(&worker_appid, &path, &mut |done, total| {
+            operation_check(&worker_control)?;
+            if last_emit.elapsed() >= std::time::Duration::from_millis(120) || done >= total {
+                let percent = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+                emit_operation_stats(&emit_app, operation, &emit_game, "extract", "Importing fixes TAR…", percent, done, total, started);
+                last_emit = std::time::Instant::now();
+            }
+            Ok(())
+        })
+    })
+    .await
+    .map_err(|error| format!("Import task failed: {error}"))?;
+    unregister_operation(operation, &appid);
+    let target = match extracted {
+        Ok(target) => target,
+        Err(error) => {
+            if control.cancelled.load(Ordering::SeqCst) {
+                emit_operation_at(&app, operation, &appid, "done", "cancelled", "Import cancelled", 0.0);
+            } else {
+                emit_operation_at(&app, operation, &appid, "done", "error", &error.to_string(), 0.0);
+            }
+            return Err(error.to_string());
+        }
+    };
     let mut config = Config::load().map_err(|error| error.to_string())?;
     let entry = config
         .upsert(&appid, target, true)
@@ -1619,6 +1652,7 @@ fn install_fixes(appid: String) -> Result<Option<FixView>, String> {
     let launch = configure_launch_option(&entry.appid, true);
     let mut view = fix_view(&entry);
     view.launch_option_error = launch.err();
+    emit_operation_at(&app, operation, &appid, "done", "done", "Import complete", 100.0);
     Ok(Some(view))
 }
 
@@ -1674,7 +1708,11 @@ fn open_fixes_folder(appid: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, String> {
+async fn export_fixes(
+    app: tauri::AppHandle,
+    appid: String,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
     require_auth()?;
     require_steam_stopped()?;
     let config = Config::load().map_err(|error| error.to_string())?;
@@ -1697,11 +1735,54 @@ fn export_fixes(appid: String, title: Option<String>) -> Result<Option<String>, 
     else {
         return Ok(None);
     };
-    export_tar(&entry.fixes, &path, &game_title, &appid)
-        .map_err(|error| error.to_string())?;
-    Ok(Some(path.display().to_string()))
+    let operation = "fixes-export";
+    let control = register_operation(operation, &appid);
+    let worker_control = control.clone();
+    let emit_app = app.clone();
+    let emit_game = appid.clone();
+    let started = std::time::Instant::now();
+    let folder = entry.fixes.clone();
+    let path_display = path.display().to_string();
+    let worker_path = path.clone();
+    let worker_appid = appid.clone();
+    let worker_title = game_title.clone();
+    emit_operation_stats(&app, operation, &appid, "write", "Writing fixes TAR…", 0.0, 0, 0, started);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(250);
+        export_tar_with_progress(
+            &folder,
+            &worker_path,
+            &worker_title,
+            &worker_appid,
+            &mut |done, total| {
+                operation_check(&worker_control)?;
+                if last_emit.elapsed() >= std::time::Duration::from_millis(120) || done >= total {
+                    let percent = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+                    emit_operation_stats(&emit_app, operation, &emit_game, "write", "Writing fixes TAR…", percent, done, total, started);
+                    last_emit = std::time::Instant::now();
+                }
+                Ok(())
+            },
+        )
+    })
+    .await
+    .map_err(|error| format!("Export task failed: {error}"))?;
+    unregister_operation(operation, &appid);
+    match result {
+        Ok(_) => {
+            emit_operation_at(&app, operation, &appid, "done", "done", "Export complete", 100.0);
+            Ok(Some(path_display))
+        }
+        Err(error) => {
+            if control.cancelled.load(Ordering::SeqCst) {
+                emit_operation_at(&app, operation, &appid, "done", "cancelled", "Export cancelled", 0.0);
+            } else {
+                emit_operation_at(&app, operation, &appid, "done", "error", &error.to_string(), 0.0);
+            }
+            Err(error.to_string())
+        }
+    }
 }
-
 
 #[tauri::command]
 fn apply_launch_option(appid: String, enabled: bool) -> Result<String, String> {
@@ -2577,7 +2658,11 @@ fn managed_fixes_status(game_id: String) -> Result<serde_json::Value, String> {
 
 
 #[tauri::command]
-fn export_managed_fixes(game_id: String, path: Option<String>) -> Result<Option<String>, String> {
+async fn export_managed_fixes(
+    app: tauri::AppHandle,
+    game_id: String,
+    path: Option<String>,
+) -> Result<Option<String>, String> {
     use steamtron_core::library::Library;
 
     require_auth()?;
@@ -2594,9 +2679,7 @@ fn export_managed_fixes(game_id: String, path: Option<String>) -> Result<Option<
         .metadata_app_id
         .map(|id| id.to_string())
         .unwrap_or_else(|| game.id.clone());
-    let mut name = steamtron_core::fixes::export_name(&game.title);
-    name.truncate(name.len().saturating_sub(4));
-    name.push_str(".tar");
+    let name = steamtron_core::fixes::export_name(&game.title);
     let path = match path {
         Some(path) => std::path::PathBuf::from(path),
         None => {
@@ -2618,9 +2701,61 @@ fn export_managed_fixes(game_id: String, path: Option<String>) -> Result<Option<
         .and_then(|name| name.to_str())
         .unwrap_or(&game.title)
         .to_owned();
-    steamtron_core::fixes::export_tar(&fixes, &path, &folder, &appid)
-        .map_err(|error| error.to_string())?;
-    Ok(Some(path.display().to_string()))
+    let operation = "fixes-export";
+    let control = register_operation(operation, &game_id);
+    let worker_control = control.clone();
+    let emit_app = app.clone();
+    let emit_game = game_id.clone();
+    let started = std::time::Instant::now();
+    let path_display = path.display().to_string();
+    let worker_path = path.clone();
+    emit_operation_stats(&app, operation, &game_id, "write", "Writing fixes TAR…", 0.0, 0, 0, started);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(250);
+        let result = steamtron_core::fixes::export_tar_with_progress(
+            &fixes,
+            &worker_path,
+            &folder,
+            &appid,
+            &mut |done, total| {
+                operation_check(&worker_control)?;
+                if last_emit.elapsed() >= std::time::Duration::from_millis(120) || done >= total {
+                    let percent = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+                    emit_operation_stats(
+                        &emit_app,
+                        operation,
+                        &emit_game,
+                        "write",
+                        "Writing fixes TAR…",
+                        percent,
+                        done,
+                        total,
+                        started,
+                    );
+                    last_emit = std::time::Instant::now();
+                }
+                Ok(())
+            },
+        );
+        result
+    })
+    .await
+    .map_err(|error| format!("Export task failed: {error}"))?;
+    unregister_operation(operation, &game_id);
+    match result {
+        Ok(_) => {
+            emit_operation_at(&app, operation, &game_id, "done", "done", "Export complete", 100.0);
+            Ok(Some(path_display))
+        }
+        Err(error) => {
+            if control.cancelled.load(Ordering::SeqCst) {
+                emit_operation_at(&app, operation, &game_id, "done", "cancelled", "Export cancelled", 0.0);
+            } else {
+                emit_operation_at(&app, operation, &game_id, "done", "error", &error.to_string(), 0.0);
+            }
+            Err(error.to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -2673,7 +2808,8 @@ fn managed_fixes(game_id: String) -> Result<steamtron_library::managed::FixesVie
 }
 
 #[tauri::command]
-fn install_managed_fixes(
+async fn install_managed_fixes(
+    app: tauri::AppHandle,
     game_id: String,
     path: Option<String>,
 ) -> Result<Option<steamtron_library::managed::FixesView>, String> {
@@ -2691,9 +2827,58 @@ fn install_managed_fixes(
             path
         }
     };
-    steamtron_library::managed::install_fixes(&game_id, &path)
-        .map(Some)
-        .map_err(|error| error.to_string())
+    let operation = "fixes-import";
+    let control = register_operation(operation, &game_id);
+    let worker_control = control.clone();
+    let emit_app = app.clone();
+    let emit_game = game_id.clone();
+    let started = std::time::Instant::now();
+    emit_operation_stats(&app, operation, &game_id, "extract", "Importing fixes TAR…", 0.0, 0, 0, started);
+    let worker_path = path.clone();
+    let worker_game = game_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(250);
+        steamtron_library::managed::install_fixes_with_progress(
+            &worker_game,
+            &worker_path,
+            &mut |done, total| {
+                operation_check(&worker_control)?;
+                if last_emit.elapsed() >= std::time::Duration::from_millis(120) || done >= total {
+                    let percent = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+                    emit_operation_stats(
+                        &emit_app,
+                        operation,
+                        &emit_game,
+                        "extract",
+                        "Importing fixes TAR…",
+                        percent,
+                        done,
+                        total,
+                        started,
+                    );
+                    last_emit = std::time::Instant::now();
+                }
+                Ok(())
+            },
+        )
+    })
+    .await
+    .map_err(|error| format!("Import task failed: {error}"))?;
+    unregister_operation(operation, &game_id);
+    match result {
+        Ok(view) => {
+            emit_operation_at(&app, operation, &game_id, "done", "done", "Import complete", 100.0);
+            Ok(Some(view))
+        }
+        Err(error) => {
+            if control.cancelled.load(Ordering::SeqCst) {
+                emit_operation_at(&app, operation, &game_id, "done", "cancelled", "Import cancelled", 0.0);
+            } else {
+                emit_operation_at(&app, operation, &game_id, "done", "error", &error.to_string(), 0.0);
+            }
+            Err(error.to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -4093,6 +4278,22 @@ fn backup_safe_folder(title: &str) -> String {
     if value.is_empty() { "Game".into() } else { value.chars().take(120).collect() }
 }
 
+fn fixes_archive_name(title: &str, fallback: &str) -> String {
+    let base = steamtron_core::library::safe_folder(title).unwrap_or_else(|_| fallback.to_owned());
+    format!("{base}.tar")
+}
+
+fn backup_component_name(manifest: &serde_json::Value, key: &str, fallback: &str) -> String {
+    manifest
+        .get("components")
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.get("name"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| std::path::Path::new(value).file_name().and_then(|name| name.to_str()))
+        .unwrap_or(fallback)
+        .to_owned()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn archive_component(
     source: &Path,
@@ -4254,6 +4455,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
     let app_id = game.metadata_app_id;
     let persistent = app_id.and_then(|id| steamtron_library::persistent_bundle(&id.to_string()));
     let title = game.title.clone();
+    let fixes_name = fixes_archive_name(&game.title, &folder);
     let game_id_emit = game_id.clone();
     let emit_app = app.clone();
     let control = register_operation("backup", &game_id);
@@ -4317,7 +4519,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
             let mut fixes_emit = |percent, completed, total, message: &str| emit_operation_stats(&emit_app, "backup", &game_id_emit, "fixes", message, percent, completed, total, started);
             archive_component(
                 fixes.as_ref().expect("fixes checked above"),
-                &package.join("fixes.tar"),
+                &package.join(&fixes_name),
                 &format!("fixes/{folder}"),
                 &fixes_dirs,
                 &fixes_files,
@@ -4378,7 +4580,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         let mut components = serde_json::Map::new();
         components.insert("content".into(), serde_json::json!({"name":"content.tar","sha256":content_sha}));
         if !fixes_sha.is_empty() {
-            components.insert("fixes".into(), serde_json::json!({"name":"fixes.tar","sha256":fixes_sha}));
+            components.insert("fixes".into(), serde_json::json!({"name": fixes_name, "sha256":fixes_sha}));
         }
         if !manifest_sha.is_empty() {
             components.insert("manifest_bundle".into(), serde_json::json!({"name":"manifest-bundle.tar","sha256":manifest_sha}));
@@ -4629,6 +4831,8 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let target_root_worker = target_root.clone();
     let content_folder_worker = content_folder.clone();
     let fixes_directory = manifest.get("fixes_directory").and_then(|value| value.as_str()).unwrap_or("").to_owned();
+    let fixes_component = backup_component_name(&manifest, "fixes", "fixes.tar");
+    let manifests_component = backup_component_name(&manifest, "manifest_bundle", "manifest-bundle.tar");
     let manifest_components = manifest.get("components").cloned().unwrap_or(serde_json::Value::Null);
     let manifest_worker = manifest.clone();
     let expected_content_sha_worker = expected_content_sha.clone();
@@ -4639,8 +4843,8 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         // header first made the UI sit at 10% for minutes on multi-gigabyte
         // backups; extraction already reads the same bytes.
         let content_total = std::fs::metadata(restore_folder.join("content.tar")).map(|metadata| metadata.len()).unwrap_or(0);
-        let fixes_total = if !fixes_directory.is_empty() { std::fs::metadata(restore_folder.join("fixes.tar")).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
-        let manifests_total = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() { std::fs::metadata(restore_folder.join("manifest-bundle.tar")).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
+        let fixes_total = if !fixes_directory.is_empty() { std::fs::metadata(restore_folder.join(&fixes_component)).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
+        let manifests_total = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() { std::fs::metadata(restore_folder.join(&manifests_component)).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
         let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
         let started = std::time::Instant::now();
@@ -4657,14 +4861,14 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         // Extract every component before touching the installed game. A cancel
         // or failure during extraction only discards the staging folder.
         let staged_fixes = if !fixes_directory.is_empty() {
-            let _ = extract_tar_component(&restore_folder.join("fixes.tar"), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join(&fixes_component), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
             let path = staging.join("fixes").join(&content_folder_worker);
             path.is_dir().then_some(path)
         } else {
             None
         };
         let staged_manifests = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
-            let _ = extract_tar_component(&restore_folder.join("manifest-bundle.tar"), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join(&manifests_component), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
             let path = staging.join("manifests").join(&content_folder_worker);
             path.is_dir().then_some(path)
         } else {
@@ -6503,6 +6707,38 @@ mod backup_manifest_tests {
         };
         let mut buffer = [0u8; 16];
         assert!(std::io::Read::read(&mut reader, &mut buffer).is_err());
+    }
+
+    #[test]
+    fn fixes_archive_name_uses_the_game_title() {
+        assert_eq!(
+            fixes_archive_name("Assassin's Creed Origins", "fallback"),
+            "Assassin's Creed Origins.tar"
+        );
+        assert_eq!(fixes_archive_name("A/B: C?", "fallback"), "A B C.tar");
+        assert_eq!(fixes_archive_name("", "fallback"), "fallback.tar");
+    }
+
+    #[test]
+    fn backup_component_name_prefers_the_manifest_and_blocks_paths() {
+        let manifest = serde_json::json!({
+            "components": { "fixes": { "name": "Little Nightmares.tar" } }
+        });
+        assert_eq!(
+            backup_component_name(&manifest, "fixes", "fixes.tar"),
+            "Little Nightmares.tar"
+        );
+        let unsafe_name = serde_json::json!({
+            "components": { "fixes": { "name": "../evil.tar" } }
+        });
+        assert_eq!(
+            backup_component_name(&unsafe_name, "fixes", "fixes.tar"),
+            "evil.tar"
+        );
+        assert_eq!(
+            backup_component_name(&serde_json::json!({}), "fixes", "fixes.tar"),
+            "fixes.tar"
+        );
     }
 
     #[test]

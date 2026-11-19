@@ -188,14 +188,28 @@ pub fn install_fixes_at(
     tar_path: &Path,
     library_path: &Path,
 ) -> Result<FixesView, LibraryError> {
+    install_fixes_at_with_progress(game_id, tar_path, library_path, &mut |_, _| Ok(()))
+}
+
+pub fn install_fixes_at_with_progress(
+    game_id: &str,
+    tar_path: &Path,
+    library_path: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> Result<(), String>,
+) -> Result<FixesView, LibraryError> {
     let library =
         Library::open(library_path).map_err(|error| LibraryError::Invalid(error.to_string()))?;
     let game = library
         .game(game_id)
         .ok_or_else(|| LibraryError::Invalid(format!("unknown game {game_id}")))?;
     let dir = fixes_dir_for(game)?;
-    steamtron_core::fixes::install_tar_into(&app_id_for(game), tar_path, &dir)
-        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    steamtron_core::fixes::install_tar_into_with_progress(
+        &app_id_for(game),
+        tar_path,
+        &dir,
+        progress,
+    )
+    .map_err(|error| LibraryError::Invalid(error.to_string()))?;
     fixes_view_at(game_id, library_path)
 }
 
@@ -219,6 +233,19 @@ pub fn fixes_view(game_id: &str) -> Result<FixesView, LibraryError> {
 
 pub fn install_fixes(game_id: &str, tar_path: &Path) -> Result<FixesView, LibraryError> {
     install_fixes_at(game_id, tar_path, &Library::default_path())
+}
+
+pub fn install_fixes_with_progress(
+    game_id: &str,
+    tar_path: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> Result<(), String>,
+) -> Result<FixesView, LibraryError> {
+    install_fixes_at_with_progress(
+        game_id,
+        tar_path,
+        &Library::default_path(),
+        progress,
+    )
 }
 
 pub fn remove_fixes(game_id: &str) -> Result<FixesRemoved, LibraryError> {
