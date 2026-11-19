@@ -1,13 +1,12 @@
-//! Keep the fixes overlay mounted for the whole game process tree.
+//! Track a launched game's whole process tree.
 //!
-//! Many fixes ship a launcher that starts the real game and exits (RDR2's
-//! Razor1911 `Launcher.exe` is one). Waiting only for that first process tore
-//! the union down while the game was still loading, which looked like a crash
-//! halfway through the intro. A Windows job object follows every descendant,
-//! so the mount lives until the last game process exits.
+//! Many launchers start the real game and exit (Witcher 3's REDprelauncher,
+//! RDR2's Razor1911 `Launcher.exe`). A Windows job object follows every
+//! descendant, so the overlay stays mounted and the Play button stays Stop
+//! until the last game process exits.
 //!
-//! The job also kills the tree when the wrapper is stopped, matching the old
-//! direct-child lifetime for the Stop button.
+//! The job also kills the tree when the wrapper or the app's Stop button closes
+//! the job, matching the intended direct-child lifetime.
 
 #![cfg(windows)]
 
@@ -17,8 +16,8 @@ use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
     JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 
 pub struct ProcessTree {
@@ -78,7 +77,18 @@ impl ProcessTree {
             }
         }
     }
+
+    /// Kill every process in the job.
+    pub fn terminate(&self) -> bool {
+        unsafe { TerminateJobObject(self.job, 1) != 0 }
+    }
 }
+
+// A job handle is a kernel object handle; the Win32 APIs used here accept it
+// from any thread. The app stores one in the shared run map so Stop can
+// terminate the tree from a worker thread.
+unsafe impl Send for ProcessTree {}
+unsafe impl Sync for ProcessTree {}
 
 impl Drop for ProcessTree {
     fn drop(&mut self) {

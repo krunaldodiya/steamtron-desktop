@@ -160,8 +160,15 @@ fn running_games() -> &'static Mutex<HashMap<String, std::process::Child>> {
     RUNNING_GAMES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn managed_runs() -> &'static Mutex<HashMap<String, u32>> {
-    static RUNS: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+#[derive(Clone)]
+struct ManagedRun {
+    pid: u32,
+    #[cfg(windows)]
+    tree: Option<std::sync::Arc<process_tree::ProcessTree>>,
+}
+
+fn managed_runs() -> &'static Mutex<HashMap<String, ManagedRun>> {
+    static RUNS: OnceLock<Mutex<HashMap<String, ManagedRun>>> = OnceLock::new();
     RUNS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -2403,10 +2410,33 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .spawn()
         .map_err(|error| format!("Could not start the game: {error}"))?;
     let pid = child.id();
+    // Launchers often start the real game and exit (Witcher 3's
+    // REDprelauncher, RDR2's Launcher.exe). Track the whole job so the run
+    // marker and the Stop button survive that exit.
+    #[cfg(windows)]
+    let tree: Option<std::sync::Arc<process_tree::ProcessTree>> = {
+        let mut handle = process_tree::ProcessTree::new();
+        let assigned = handle
+            .as_mut()
+            .is_some_and(|handle| handle.assign(&child));
+        if assigned {
+            handle.map(std::sync::Arc::new)
+        } else {
+            eprintln!("SteamTron: process tree tracking unavailable for pid {pid}");
+            None
+        }
+    };
     managed_runs()
         .lock()
         .map_err(|_| "Game state lock failed.".to_string())?
-        .insert(game.id.clone(), pid);
+        .insert(
+            game.id.clone(),
+            ManagedRun {
+                pid,
+                #[cfg(windows)]
+                tree: tree.clone(),
+            },
+        );
     let tracked = game.id.clone();
     let observed_at = stamp as i64;
     std::thread::spawn(move || {
@@ -2418,12 +2448,19 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         if alive {
             let _ = steamtron_core::play_history::record(&tracked, observed_at);
         }
-        // Keep the run marker while the launched game process is alive. The
-        // UI polls this map to switch Play to Stop; removing it before the
-        // process exits made Windows games look stopped after two seconds.
+        // Keep the run marker while the launched process or any process it
+        // started is alive. The UI polls this map to switch Play to Stop;
+        // removing it when the launcher exits made games look stopped while
+        // the real game was still running.
         let _ = child.wait();
+        #[cfg(windows)]
+        if let Some(tree) = tree.as_ref() {
+            while tree.active() > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
         if let Ok(mut runs) = managed_runs().lock() {
-            if runs.get(&tracked) == Some(&pid) {
+            if runs.get(&tracked).map(|run| run.pid) == Some(pid) {
                 runs.remove(&tracked);
             }
         }
@@ -2596,16 +2633,16 @@ async fn stop_managed(game_id: String) -> Result<(), String> {
 fn stop_managed_blocking(game_id: String) -> Result<(), String> {
     use steamtron_core::library::Library;
 
-    let tracked = managed_runs()
+    let run = managed_runs()
         .lock()
         .map_err(|_| "Game state lock failed.".to_string())?
         .get(&game_id)
-        .copied();
+        .cloned();
     let game = Library::load()
         .ok()
         .and_then(|library| library.game(&game_id).cloned());
     #[cfg(target_os = "linux")]
-    let mut pids: Vec<u32> = tracked.into_iter().collect();
+    let mut pids: Vec<u32> = run.iter().map(|run| run.pid).collect();
     #[cfg(target_os = "linux")]
     if let Some(game) = game.as_ref() {
         pids.extend(game_process_pids(game));
@@ -2651,13 +2688,22 @@ fn stop_managed_blocking(game_id: String) -> Result<(), String> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let pid = tracked.ok_or_else(|| "This game is not running.".to_string())?;
-        let status = hidden_command("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status()
-            .map_err(|error| format!("Could not stop the game: {error}"))?;
-        if !status.success() {
-            return Err(format!("taskkill exited with {status}"));
+        let run = run.ok_or_else(|| "This game is not running.".to_string())?;
+        // Kill the whole job when tracking was available; the launcher that
+        // spawned the game has usually exited by now, so its pid alone cannot
+        // stop the game.
+        #[cfg(windows)]
+        let killed = run.tree.as_ref().is_some_and(|tree| tree.terminate());
+        #[cfg(not(windows))]
+        let killed = false;
+        if !killed {
+            let status = hidden_command("taskkill")
+                .args(["/PID", &run.pid.to_string(), "/T", "/F"])
+                .status()
+                .map_err(|error| format!("Could not stop the game: {error}"))?;
+            if !status.success() {
+                return Err(format!("taskkill exited with {status}"));
+            }
         }
         managed_runs()
             .lock()
