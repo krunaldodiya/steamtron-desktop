@@ -1104,6 +1104,14 @@ fn reconcile_managed_installs() -> Result<usize, String> {
         if !root.is_dir() {
             continue;
         }
+        // An unlinked external game keeps its folder and library entry but has
+        // no launchers. Do not auto-confirm or re-detect it; only an explicit
+        // link may do that.
+        if game.installation.mode == steamtron_core::library::InstallMode::Linked
+            && game.launch_targets.is_empty()
+        {
+            continue;
+        }
         // A download that outlived the app can leave smd's
         // "<AppID> - <Game>" folder inside the managed root. Promote its
         // contents before detecting a launcher.
@@ -1978,9 +1986,7 @@ fn try_overlay_wrapper() -> Option<i32> {
 
 #[tauri::command]
 fn managed_fixes_dir(game: &steamtron_core::library::Game) -> Option<std::path::PathBuf> {
-    let drive = steamtron_core::library::drive_root_for(&game.installation.root)?;
-    let layout = steamtron_core::library::game_layout(&drive, game).ok()?;
-    Some(layout.fixes)
+    steamtron_core::library::fixes_dir(game).ok()
 }
 
 fn dir_has_entries(path: &std::path::Path) -> bool {
@@ -2675,7 +2681,8 @@ fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value
         .map(|game| {
             let mut value = serde_json::to_value(game).unwrap_or(serde_json::Value::Null);
             let root = &game.installation.root;
-            let installed = root.is_dir()
+            let installed = game.installation.confirmed
+                && root.is_dir()
                 && std::fs::read_dir(root)
                     .map(|mut entries| entries.next().is_some())
                     .unwrap_or(false);
@@ -5739,6 +5746,55 @@ async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, Strin
 
 
 #[tauri::command]
+async fn unlink_managed_game(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    if managed_runs()
+        .lock()
+        .map_err(|_| "Game state lock failed.".to_string())?
+        .contains_key(&game_id)
+    {
+        return Err("Stop the game before unlinking it.".into());
+    }
+    let _ = download::cancel(&game_id);
+    let mut library = Library::load().map_err(|error| error.to_string())?;
+    let mut game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| format!("unknown game {game_id}"))?;
+    if game.installation.mode != steamtron_core::library::InstallMode::Linked {
+        return Err("Only external linked games can be unlinked. Use Uninstall for managed games.".into());
+    }
+    let mut unregistered = false;
+    if let Some(registration) = game.steam.as_ref() {
+        if let Ok(backend) = platform_backend() {
+            if backend
+                .verify(&registration.app_id.to_string())
+                .map(|state| state.registered)
+                .unwrap_or(false)
+            {
+                backend
+                    .unregister(&registration.app_id.to_string())
+                    .map_err(|error| error.to_string())?;
+                unregistered = true;
+            }
+        }
+    }
+    // Unlink removes only the launchers and Steam registration. The library
+    // entry, metadata, artwork, and all game files stay; removal is explicit.
+    game.launch_targets.clear();
+    game.installation.confirmed = false;
+    game.setup_completed_at = None;
+    library.upsert_game(game.clone()).map_err(|error| error.to_string())?;
+    library.save().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "title": game.title,
+        "unregistered": unregistered,
+        "library": library_json(&library),
+    }))
+}
+
+#[tauri::command]
 fn choose_prelaunch_script() -> Result<Option<serde_json::Value>, String> {
     require_auth()?;
     let Some(path) = rfd::FileDialog::new()
@@ -5978,7 +6034,7 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -6066,7 +6122,40 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     linux_tray::setup(app)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let show = MenuItem::with_id(app, "show", "Show SteamTron", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit SteamTron", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut builder = TrayIconBuilder::with_id("steamtron")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn setup_tray(_app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
@@ -6182,7 +6271,7 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if window.label() == "main" {
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "windows"))]
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
@@ -6256,6 +6345,7 @@ fn main() {
             regenerate_managed_manifests,
             steam_download_size,
             remove_managed_game,
+            unlink_managed_game,
             detach_umutron_paths,
             update_managed_launch_settings,
             choose_prelaunch_script,

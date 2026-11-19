@@ -1852,18 +1852,22 @@ function openManagedGameOptions(game) {
   }
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  const installed = Boolean(game.installed) || game.installation?.mode === "linked";
-  const tabs = [
-    ["general", "General"],
-    ...(IS_WINDOWS ? [] : [["compatibility", "Compatibility"]]),
-    ["environment", "Environment"],
-    ["debug", "Debug"],
-    ["link", "Game Link"],
-  ];
-  if (installed) {
-    if (game.metadata_app_id) tabs.push(["dlc", "DLC"], ["updates", "Updates"]);
-    tabs.push(["files", "Installed Files"], ["fixes", "Fixes"]);
-  }
+  const tabsFor = (entry) => {
+    const installed = Boolean(entry.installed);
+    const entries = [
+      ["general", "General"],
+      ...(IS_WINDOWS ? [] : [["compatibility", "Compatibility"]]),
+      ["environment", "Environment"],
+      ["debug", "Debug"],
+      ["link", "Game Link"],
+    ];
+    if (installed) {
+      if (entry.metadata_app_id) entries.push(["dlc", "DLC"], ["updates", "Updates"]);
+      entries.push(["files", "Installed Files"], ["fixes", "Fixes"]);
+    }
+    return entries;
+  };
+  const tabs = tabsFor(game);
   backdrop.innerHTML = `<div class="modal game-settings-modal">
     <div class="game-settings-head"><h2>Game Settings · ${escape(game.title)}</h2><button class="modal-close" aria-label="Close">×</button></div>
     <div class="game-settings-body">
@@ -1875,6 +1879,7 @@ function openManagedGameOptions(game) {
   registerDialog(backdrop);
   const pane = backdrop.querySelector("#game-settings-pane");
   let latestGame = game;
+  let currentTab = "general";
   const close = () => { backdrop.remove(); renderManagedMode(); };
   backdrop.querySelector(".modal-close").onclick = close;
 
@@ -1882,13 +1887,26 @@ function openManagedGameOptions(game) {
     try {
       managedLibrary = await invoke("library_snapshot");
       latestGame = managedLibrary?.games.find((entry) => entry.id === game.id) || latestGame;
+      refreshTabs();
     } catch (_error) { /* keep the last copy */ }
     return latestGame;
   };
 
+  function refreshTabs() {
+    const nav = backdrop.querySelector(".game-settings-nav");
+    if (!nav) return;
+    nav.innerHTML = tabsFor(latestGame)
+      .map(([key, label]) => `<button class="game-settings-tab${key === currentTab ? " active" : ""}" data-game-tab="${key}">${label}</button>`)
+      .join("");
+    for (const button of nav.querySelectorAll("[data-game-tab]")) {
+      button.onclick = () => { focusControl(button); renderTab(button.dataset.gameTab); };
+    }
+  }
+
   const row = (label, value) => `<div class="row"><div class="label">${escape(label)}</div><div class="value">${escape(value || "—")}</div></div>`;
 
   const renderTab = (key) => {
+    currentTab = key;
     for (const button of backdrop.querySelectorAll("[data-game-tab]")) {
       button.classList.toggle("active", button.dataset.gameTab === key);
     }
@@ -2091,7 +2109,7 @@ function openManagedGameOptions(game) {
           <div class="files-card"><p class="pane-note">Create a portable backup folder with content.tar, fixes.tar, depot manifests and appmanifest metadata.</p><button class="files-wide" id="files-backup" data-operation-button="backup">Back up game files…</button><div class="operation-inline hidden" data-operation-inline="backup" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div></div>
           <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify" data-operation-button="verify">Verify files integrity</button><div class="operation-inline hidden" data-operation-inline="verify" data-operation-game="${game.id}"><div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="verify" data-operation-game="${game.id}" title="Cancel verification" aria-label="Cancel verification"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div><p class="files-status" id="files-status"></p></div>
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
-          <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's library entry while keeping all files on disk. Uninstall is unavailable for external folders." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
+          <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's launchers and Steam registration while keeping the library entry and all files on disk. Use Remove from library on the game page to delete the entry." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
           <div class="files-card"><p class="pane-note">Restore the game's Lua manifest and every depot manifest from SteamTron's persistent bundle store. The API is used only when the bundle is missing.</p><button class="files-wide" id="files-regenerate">Generate Lua/manifests</button></div>`;
 
@@ -2218,12 +2236,13 @@ function openManagedGameOptions(game) {
           };
         };
         pane.querySelector("#files-unlink").onclick = async () => {
-          if (!(await confirmDialog({ title: "Unlink game", message: "Unlink this game? The library entry and Steam registration are removed; all game files stay on disk.", confirmLabel: "Unlink", danger: true }))) return;
+          if (!(await confirmDialog({ title: "Unlink game", message: "Unlink this game? Its launchers and Steam registration are removed. The library entry and all game files stay on disk.", confirmLabel: "Unlink", danger: true }))) return;
           try {
-            await invoke("remove_managed_game", { gameId: game.id });
+            const result = await invoke("unlink_managed_game", { gameId: game.id });
+            managedLibrary = result.library;
             close();
             setView("library");
-            showToast("Game unlinked; files were kept");
+            showToast(result.unregistered ? "Game unlinked; library entry and files were kept" : "Game unlinked; library entry and files were kept");
           } catch (error) { showToast(String(error), true); }
         };
         pane.querySelector("#files-uninstall").onclick = async () => {

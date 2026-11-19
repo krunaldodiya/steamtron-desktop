@@ -22,7 +22,7 @@ tar = "0.4"
 sha2 = "0.10"
 libc = "0.2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 regex = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }

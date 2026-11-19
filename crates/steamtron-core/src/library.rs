@@ -692,6 +692,20 @@ pub struct GameLayout {
     pub manifest: PathBuf,
 }
 
+/// Fixes directory for a game. Managed games keep fixes beside their content;
+/// linked games outside SteamTronLibrary use the app-data fixes folder so they
+/// can still receive Goldberg/Steamless/imported fixes.
+pub fn fixes_dir(game: &Game) -> Result<PathBuf, LibraryError> {
+    if let Some(drive) = drive_root_for(&game.installation.root) {
+        return game_layout(&drive, game).map(|layout| layout.fixes);
+    }
+    let app_id = game
+        .metadata_app_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| game.id.clone());
+    Ok(crate::paths::layout().home().join("fixes").join(app_id))
+}
+
 pub fn game_layout(drive_root: &Path, game: &Game) -> Result<GameLayout, LibraryError> {
     let base = steamtronapps_root(drive_root);
     let folder = safe_folder(&game.title)?;

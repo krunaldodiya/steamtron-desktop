@@ -24,11 +24,7 @@ fn client() -> Result<reqwest::blocking::Client, String> {
 }
 
 fn fixes_dir(game: &Game) -> Result<PathBuf, String> {
-    let drive = steamtron_core::library::drive_root_for(&game.installation.root)
-        .ok_or_else(|| "game is not inside a managed library".to_string())?;
-    steamtron_core::library::game_layout(&drive, game)
-        .map(|layout| layout.fixes)
-        .map_err(|error| error.to_string())
+    steamtron_core::library::fixes_dir(game).map_err(|error| error.to_string())
 }
 
 fn download(url: &str, path: &Path, expected: Option<&str>, limit: u64) -> Result<(), String> {

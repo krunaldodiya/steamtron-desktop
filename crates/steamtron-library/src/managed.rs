@@ -131,11 +131,7 @@ pub struct FixesRemoved {
 }
 
 fn fixes_dir_for(game: &Game) -> Result<PathBuf, LibraryError> {
-    let drive = steamtron_core::library::drive_root_for(&game.installation.root)
-        .ok_or_else(|| LibraryError::Invalid("game is not inside a library folder".into()))?;
-    steamtron_core::library::game_layout(&drive, game)
-        .map(|layout| layout.fixes)
-        .map_err(|error| LibraryError::Invalid(error.to_string()))
+    steamtron_core::library::fixes_dir(game).map_err(|error| LibraryError::Invalid(error.to_string()))
 }
 
 fn app_id_for(game: &Game) -> String {

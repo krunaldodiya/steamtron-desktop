@@ -130,3 +130,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0105](0105-windows-stplug-registration.md) | Windows registration writes stplug-in | done | 2026-11-18 |
 | [0106](0106-antivirus-exclusions.md) | Antivirus exclusions cover the unlock backend | done | 2026-11-18 |
 | [0108](0108-windows-no-depot-manifests.md) | Windows must not publish depot manifests to Steam | done | 2026-11-18 |
+| [0109](0109-windows-parity-link-tray-fixes.md) | Windows parity: link tabs, external fixes, close to tray | active | 2026-11-19 |
+| [0110](0110-unlink-keeps-library-entry.md) | Unlink keeps the library entry | active | 2026-11-19 |

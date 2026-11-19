@@ -5,6 +5,21 @@ All notable changes to SteamTron Desktop are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [0.1.32] - 2026-11-19
+
+### Fixed
+
+- Unlinking an external linked game now keeps its library entry, metadata,
+  artwork, and files. Only launchers and the Steam registration are removed;
+  use **Remove from library** to delete the entry deliberately.
+- Game Settings now refreshes its tabs immediately after linking a launcher, so
+  DLC, Updates, Installed Files, and Fixes appear without reopening the dialog.
+- Linked games outside `SteamTronLibrary` can receive fixes again. Their fixes
+  live under the app-data `fixes/<appid>` folder instead of failing with
+  "game is not inside a library folder".
+- Closing the main window on Windows hides SteamTron to a tray icon instead of
+  exiting; the tray offers Show SteamTron and Quit SteamTron.
+
 ## [0.1.31] - 2026-11-18
 
 ### Fixed
@@ -351,6 +366,7 @@ and releases use [Semantic Versioning](https://semver.org/).
 - DLC, update pinning, backups, saves, diagnostics, and tray support.
 - Fullscreen and controller navigation.
 
+[0.1.32]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.32
 [0.1.31]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.31
 [0.1.30]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.30
 [0.1.29]: https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.29
