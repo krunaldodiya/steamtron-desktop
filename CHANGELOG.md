@@ -1,3 +1,25 @@
+## [0.1.40] - 2026-11-21
+
+### Fixed
+
+- Restoring a game backup no longer fails on Windows with
+  `The directory name is invalid. (os error 267)` when the backup's fixes or
+  manifest TAR used the raw game title as its folder (for example
+  `Marvel's Spider-Man: Miles Morales`). Restore maps that folder to the
+  installed folder recorded in the appmanifest, skips directory entries it
+  does not need, and names the offending entry when a file name cannot be
+  created on the current platform.
+- Restore checks the fixes and manifest-bundle TARs before copying the game
+  content, so a backup that cannot be restored fails in seconds instead of
+  after a multi-gigabyte copy.
+
+### Changed
+
+- Whole-game backups name the fixes component with the same `<game>.tar` name
+  as the standalone fixes export, and the legacy fixes export uses the fixes
+  folder's name for the TAR wrapper instead of the raw title. Metadata repair
+  also writes a sanitized manifest-bundle wrapper.
+
 ## [0.1.39] - 2026-11-19
 
 ### Changed
