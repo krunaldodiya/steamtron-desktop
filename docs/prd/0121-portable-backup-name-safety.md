@@ -162,6 +162,15 @@ standalone fixes export.
   `cargo fmt` was not applied.
 - Not run: a full restore with the rebuilt, installed app. The repaired Miles
   backup is also restorable by 0.1.39 because its wrapper is now valid.
+- Release 0.1.40 (workflow run 44919200367, Linux and Windows builds green)
+  published
+  https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.40 with
+  `SteamTron_0.1.40_x64-setup.exe` (SHA-256
+  `c09363d4a1c19c32b34a81455528cf2af0a535fbc407f69dbb4fa9d6a6b1e515`, matching
+  the published `SHA256SUMS.txt`), `SteamTron_0.1.40_amd64.deb`,
+  `SteamTron-0.1.40-1.x86_64.rpm` and `SteamTron_0.1.40_amd64.AppImage`. The
+  installer was downloaded to `C:\Users\krunaldodiya\Downloads` and was not
+  installed in this session.
 
 ## Decisions and risks
 
