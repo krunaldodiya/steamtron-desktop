@@ -801,7 +801,12 @@ fn write_manifest_tar(
     let temporary = folder.join(format!(".manifest-bundle.tar.repair-{}", std::process::id()));
     let file = fs::File::create(&temporary).map_err(|error| LibraryError::io(&temporary, error))?;
     let mut archive = tar::Builder::new(file);
-    let top = format!("manifests/{title}");
+    // The wrapper folder is decorative: restore maps it to the installed game
+    // folder. Sanitize it here so a title with `:` or `?` can never produce an
+    // archive whose entries Windows cannot create.
+    let bundle_folder = steamtron_core::library::safe_folder(title)
+        .unwrap_or_else(|_| export_safe_name(title));
+    let top = format!("manifests/{bundle_folder}");
     let mut header = tar::Header::new_gnu();
     header.set_entry_type(tar::EntryType::Directory);
     header.set_size(0);
@@ -884,6 +889,15 @@ pub fn repair_backup_manifests_with_zips(
             continue;
         };
         let title = manifest.get("title").and_then(|value| value.as_str()).unwrap_or("Game");
+        // Prefer the folder the backup already records for its content; it is
+        // the name restore expects and is safe on every platform.
+        let bundle_folder = manifest
+            .get("content_directory")
+            .and_then(|value| value.as_str())
+            .and_then(|value| value.rsplit('/').next())
+            .filter(|value| !value.is_empty())
+            .unwrap_or(title)
+            .to_owned();
         let tar = folder.join("manifest-bundle.tar");
         let (existing_lua, existing_manifests) = read_manifest_tar(&tar);
         if existing_lua.is_some() && !existing_manifests.is_empty() {
@@ -910,7 +924,7 @@ pub fn repair_backup_manifests_with_zips(
         }
         progress(index, total, &format!("Repairing {} of {} · {}", index + 1, total, title))
             .map_err(LibraryError::Archive)?;
-        match write_manifest_tar(folder, title, &appid, &lua, &manifests) {
+        match write_manifest_tar(folder, &bundle_folder, &appid, &lua, &manifests) {
             Ok(()) => repaired += 1,
             Err(error) => {
                 skipped += 1;

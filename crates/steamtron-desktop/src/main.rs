@@ -1784,17 +1784,23 @@ async fn export_fixes(
     let emit_game = appid.clone();
     let started = std::time::Instant::now();
     let folder = entry.fixes.clone();
+    // The TAR wrapper follows the fixes folder itself. Using the raw title here
+    // wrote names Windows cannot create (for example `Game: Deluxe`).
+    let archive_folder = folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&game_title)
+        .to_owned();
     let path_display = path.display().to_string();
     let worker_path = path.clone();
     let worker_appid = appid.clone();
-    let worker_title = game_title.clone();
     emit_operation_stats(&app, operation, &appid, "write", "Writing fixes TAR…", 0.0, 0, 0, started);
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(250);
         export_tar_with_progress(
             &folder,
             &worker_path,
-            &worker_title,
+            &archive_folder,
             &worker_appid,
             &mut |done, total| {
                 operation_check(&worker_control)?;
@@ -4432,9 +4438,11 @@ fn backup_safe_folder(title: &str) -> String {
     if value.is_empty() { "Game".into() } else { value.chars().take(120).collect() }
 }
 
-fn fixes_archive_name(title: &str, fallback: &str) -> String {
-    let base = steamtron_core::library::safe_folder(title).unwrap_or_else(|_| fallback.to_owned());
-    format!("{base}.tar")
+/// Fixes archives inside a game backup use the same name as the standalone
+/// "Export fixes TAR" action (`<game>.tar`), so both paths write the same
+/// component contract.
+fn fixes_archive_name(title: &str) -> String {
+    steamtron_core::fixes::export_name(title)
 }
 
 fn backup_component_name(manifest: &serde_json::Value, key: &str, fallback: &str) -> String {
@@ -4609,7 +4617,7 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
     let app_id = game.metadata_app_id;
     let persistent = app_id.and_then(|id| steamtron_library::persistent_bundle(&id.to_string()));
     let title = game.title.clone();
-    let fixes_name = fixes_archive_name(&game.title, &folder);
+    let fixes_name = fixes_archive_name(&game.title);
     let game_id_emit = game_id.clone();
     let emit_app = app.clone();
     let control = register_operation("backup", &game_id);
@@ -4825,10 +4833,179 @@ impl HashingReader {
     }
 }
 
+/// Where a backup component's entries are restored.
+#[derive(Clone, Copy)]
+enum TarComponentLayout<'a> {
+    /// Keep the archive's own paths below the component root.
+    Archive,
+    /// Replace the archive's outer folder with the installed folder.
+    ///
+    /// Older backups (and the metadata repair path) wrote the game title as the
+    /// outer folder, which can contain characters Windows cannot create. The
+    /// installed folder comes from the backup's `content_directory`.
+    Bundle(&'a str),
+}
+
+/// Why this platform cannot create `name` as a file or folder name.
+fn component_name_problem(name: &std::ffi::OsStr) -> Option<&'static str> {
+    let Some(text) = name.to_str() else {
+        return Some("a name that is not valid Unicode");
+    };
+    if text.is_empty() {
+        return Some("an empty name");
+    }
+    if text.contains('\0') {
+        return Some("a NUL character");
+    }
+    #[cfg(windows)]
+    {
+        if text.chars().any(|character| {
+            character.is_control()
+                || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        }) {
+            return Some("a character that Windows cannot use, such as ':'");
+        }
+        if text.ends_with(' ') || text.ends_with('.') {
+            return Some("a trailing space or dot");
+        }
+        let stem = text.split('.').next().unwrap_or(text).to_ascii_uppercase();
+        if matches!(
+            stem.as_str(),
+            "CON"
+                | "PRN"
+                | "AUX"
+                | "NUL"
+                | "COM1"
+                | "COM2"
+                | "COM3"
+                | "COM4"
+                | "COM5"
+                | "COM6"
+                | "COM7"
+                | "COM8"
+                | "COM9"
+                | "LPT1"
+                | "LPT2"
+                | "LPT3"
+                | "LPT4"
+                | "LPT5"
+                | "LPT6"
+                | "LPT7"
+                | "LPT8"
+                | "LPT9"
+        ) {
+            return Some("a reserved Windows device name");
+        }
+    }
+    None
+}
+
+/// Split a TAR entry path into plain names, rejecting roots and `..`.
+fn tar_entry_parts(path: &Path) -> Result<Vec<std::ffi::OsString>, String> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => parts.push(part.to_os_string()),
+            std::path::Component::CurDir => {}
+            _ => return Err("This backup contains an unsafe path.".into()),
+        }
+    }
+    Ok(parts)
+}
+
+/// Restore-relative names for one TAR entry, or `None` for the component root.
+fn restore_entry_names(
+    allowed_prefix: &str,
+    layout: TarComponentLayout<'_>,
+    entry_path: &Path,
+    is_dir: bool,
+) -> Result<Option<Vec<std::ffi::OsString>>, String> {
+    let root = allowed_prefix.trim_end_matches('/');
+    let parts = tar_entry_parts(entry_path)?;
+    if parts.first().and_then(|part| part.to_str()) != Some(root) {
+        return Err("This backup contains an unsafe path.".into());
+    }
+    let relative: Vec<std::ffi::OsString> = parts.into_iter().skip(1).collect();
+    let mut names = vec![std::ffi::OsString::from(root)];
+    match layout {
+        TarComponentLayout::Archive => names.extend(relative),
+        TarComponentLayout::Bundle(folder) => {
+            // Directory entries are not needed: every file creates its own
+            // parents, and legacy bundles carry wrapper directories (often the
+            // raw title) that must not be created as-is on Windows.
+            if is_dir || relative.is_empty() {
+                return Ok(None);
+            }
+            names.push(std::ffi::OsString::from(folder));
+            if relative.len() > 1 {
+                names.extend(relative.into_iter().skip(1));
+            } else {
+                names.extend(relative);
+            }
+        }
+    }
+    for name in &names {
+        if let Some(problem) = component_name_problem(name) {
+            return Err(format!(
+                "The backup contains a name this system cannot create ({problem}): {}",
+                entry_path.display()
+            ));
+        }
+    }
+    if names.len() == 1 {
+        return Ok(None);
+    }
+    Ok(Some(names))
+}
+
+/// Resolve one TAR entry to its path inside `destination`.
+fn resolve_restore_target(
+    destination: &Path,
+    allowed_prefix: &str,
+    layout: TarComponentLayout<'_>,
+    entry_path: &Path,
+    is_dir: bool,
+) -> Result<Option<PathBuf>, String> {
+    let Some(names) = restore_entry_names(allowed_prefix, layout, entry_path, is_dir)? else {
+        return Ok(None);
+    };
+    let mut target = destination.to_path_buf();
+    for name in names {
+        target.push(name);
+    }
+    if !target.starts_with(destination) {
+        return Err("This backup contains an unsafe path.".into());
+    }
+    Ok(Some(target))
+}
+
+/// Read a component's TAR headers before the game content is copied.
+///
+/// The metadata components are a few MiB, so a backup that cannot be restored
+/// fails in seconds instead of after the full multi-gigabyte extraction.
+/// `content.tar` is deliberately not pre-scanned (0046).
+fn validate_tar_component(
+    archive_path: &Path,
+    allowed_prefix: &str,
+    layout: TarComponentLayout<'_>,
+) -> Result<(), String> {
+    let file = std::fs::File::open(archive_path)
+        .map_err(|error| format!("{}: {error}", archive_path.display()))?;
+    let mut archive = tar::Archive::new(file);
+    for entry in archive.entries().map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| format!("{}: {error}", archive_path.display()))?;
+        let path = entry.path().map_err(|error| error.to_string())?.into_owned();
+        let is_dir = entry.header().entry_type().is_dir();
+        restore_entry_names(allowed_prefix, layout, &path, is_dir)?;
+    }
+    Ok(())
+}
+
 fn extract_tar_component(
     archive_path: &Path,
     destination: &Path,
     allowed_prefix: &str,
+    layout: TarComponentLayout<'_>,
     app: &tauri::AppHandle,
     operation: &str,
     game_id: &str,
@@ -4854,22 +5031,17 @@ fn extract_tar_component(
         operation_check(control)?;
         let mut entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path().map_err(|error| error.to_string())?.into_owned();
-        let text = path.to_string_lossy().replace('\\', "/");
-        if !text.starts_with(allowed_prefix) || text.split('/').any(|part| part == "..") {
-            return Err("Backup contains an unsafe path.".into());
-        }
-        let shown = text.strip_prefix(allowed_prefix).unwrap_or(&text);
-        let activity = format!("Restoring {shown}");
+        let is_dir = entry.header().entry_type().is_dir();
+        let Some(target) = resolve_restore_target(destination, allowed_prefix, layout, &path, is_dir)? else {
+            continue;
+        };
+        let activity = format!("Restoring {}", target.strip_prefix(destination).unwrap_or(&target).display());
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
             let fraction = if overall_total > 0 { *written as f64 / overall_total as f64 } else { 1.0 };
             emit_operation_stats(app, operation, game_id, stage, &activity, progress_base + fraction * progress_span, *written, overall_total, started);
             last_emit = std::time::Instant::now();
         }
-        let target = destination.join(&path);
-        if !target.starts_with(destination) {
-            return Err("Backup contains an unsafe path.".into());
-        }
-        if entry.header().entry_type().is_dir() {
+        if is_dir {
             std::fs::create_dir_all(&target).map_err(|error| error.to_string())?;
         } else {
             if let Some(parent) = target.parent() {
@@ -4937,6 +5109,11 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         return Err("Backup content path is invalid.".into());
     }
     let content_folder = content_parts[1].to_owned();
+    if let Some(problem) = component_name_problem(std::ffi::OsStr::new(&content_folder)) {
+        return Err(format!(
+            "This backup's game folder name cannot be created on this system ({problem}): {content_folder}. Restore it on the platform that created the backup."
+        ));
+    }
     let content_tar = folder.join("content.tar");
     if !content_tar.is_file() {
         return Err("Backup does not contain content.tar.".into());
@@ -4993,6 +5170,24 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let global_appid_worker = appid.map(|id| id.to_string());
     let target_game_worker = target_game.clone();
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        // The metadata components are small. Validate them before the game
+        // content is copied so an archive this system cannot restore fails in
+        // seconds instead of after the full multi-gigabyte extraction.
+        emit_operation_at(&emit_app, "restore", "", "read", "running", "Checking backup files…", 0.0);
+        if !fixes_directory.is_empty() {
+            validate_tar_component(
+                &restore_folder.join(&fixes_component),
+                "fixes/",
+                TarComponentLayout::Bundle(&content_folder_worker),
+            )?;
+        }
+        if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
+            validate_tar_component(
+                &restore_folder.join(&manifests_component),
+                "manifests/",
+                TarComponentLayout::Bundle(&content_folder_worker),
+            )?;
+        }
         // Use archive sizes as the progress denominator. Scanning every tar
         // header first made the UI sit at 10% for minutes on multi-gigabyte
         // backups; extraction already reads the same bytes.
@@ -5002,7 +5197,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
         let started = std::time::Instant::now();
-        let content_digest = extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", &emit_app, "restore", "", "extract", "Restoring game backup…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+        let content_digest = extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", TarComponentLayout::Archive, &emit_app, "restore", "", "extract", "Restoring game backup…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
         if let Some(expected) = expected_content_sha_worker.as_deref() {
             if content_digest != expected {
                 return Err("Backup content checksum does not match its manifest.".into());
@@ -5015,14 +5210,14 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         // Extract every component before touching the installed game. A cancel
         // or failure during extraction only discards the staging folder.
         let staged_fixes = if !fixes_directory.is_empty() {
-            let _ = extract_tar_component(&restore_folder.join(&fixes_component), &staging, "fixes/", &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join(&fixes_component), &staging, "fixes/", TarComponentLayout::Bundle(&content_folder_worker), &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
             let path = staging.join("fixes").join(&content_folder_worker);
             path.is_dir().then_some(path)
         } else {
             None
         };
         let staged_manifests = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
-            let _ = extract_tar_component(&restore_folder.join(&manifests_component), &staging, "manifests/", &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join(&manifests_component), &staging, "manifests/", TarComponentLayout::Bundle(&content_folder_worker), &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
             let path = staging.join("manifests").join(&content_folder_worker);
             path.is_dir().then_some(path)
         } else {
@@ -6864,13 +7059,158 @@ mod backup_manifest_tests {
     }
 
     #[test]
-    fn fixes_archive_name_uses_the_game_title() {
+    fn fixes_archive_name_matches_the_standalone_fixes_export() {
         assert_eq!(
-            fixes_archive_name("Assassin's Creed Origins", "fallback"),
+            fixes_archive_name("Assassin's Creed Origins"),
             "Assassin's Creed Origins.tar"
         );
-        assert_eq!(fixes_archive_name("A/B: C?", "fallback"), "A B C.tar");
-        assert_eq!(fixes_archive_name("", "fallback"), "fallback.tar");
+        assert_eq!(fixes_archive_name("A/B: C?"), "A B C.tar");
+        assert_eq!(fixes_archive_name(""), "Game.tar");
+    }
+
+    #[test]
+    fn legacy_bundle_wrapper_maps_to_the_installed_folder() {
+        let mapped = restore_entry_names(
+            "manifests/",
+            TarComponentLayout::Bundle("Marvel's Spider-Man Miles Morales"),
+            Path::new("manifests/Marvel's Spider-Man: Miles Morales/1817190.lua"),
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        let names: Vec<String> = mapped
+            .into_iter()
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            ["manifests", "Marvel's Spider-Man Miles Morales", "1817190.lua"]
+        );
+    }
+
+    #[test]
+    fn bundle_directories_and_root_files_use_the_installed_folder() {
+        // Wrapper and stray directories are skipped instead of being created.
+        assert!(restore_entry_names(
+            "fixes/",
+            TarComponentLayout::Bundle("Installed Folder"),
+            Path::new("fixes/Old: Wrapper"),
+            true,
+        )
+        .unwrap()
+        .is_none());
+        assert!(restore_entry_names(
+            "manifests/",
+            TarComponentLayout::Bundle("Installed Folder"),
+            Path::new("manifests/Installed Folder/Old: Wrapper"),
+            true,
+        )
+        .unwrap()
+        .is_none());
+        let nested = restore_entry_names(
+            "fixes/",
+            TarComponentLayout::Bundle("Installed Folder"),
+            Path::new("fixes/Old: Wrapper/steam_settings/steam_appid.txt"),
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            nested,
+            vec![
+                std::ffi::OsString::from("fixes"),
+                std::ffi::OsString::from("Installed Folder"),
+                std::ffi::OsString::from("steam_settings"),
+                std::ffi::OsString::from("steam_appid.txt"),
+            ]
+        );
+        let direct = restore_entry_names(
+            "fixes/",
+            TarComponentLayout::Bundle("Installed Folder"),
+            Path::new("fixes/steam_api64.dll"),
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(direct.len(), 3);
+        assert_eq!(direct.last(), Some(&std::ffi::OsString::from("steam_api64.dll")));
+        assert!(restore_entry_names(
+            "manifests/",
+            TarComponentLayout::Bundle("Installed Folder"),
+            Path::new("manifests/"),
+            true,
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn archive_layout_keeps_its_own_paths() {
+        let names = restore_entry_names(
+            "common/",
+            TarComponentLayout::Archive,
+            Path::new("common/Sample Game/bin/game.exe"),
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        let names: Vec<String> = names
+            .into_iter()
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["common", "Sample Game", "bin", "game.exe"]);
+        assert!(restore_entry_names(
+            "common/",
+            TarComponentLayout::Archive,
+            Path::new("common/"),
+            true,
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn unsafe_archive_paths_are_rejected() {
+        for path in ["../evil", "/etc/passwd", "other/file", ""] {
+            assert!(
+                restore_entry_names("common/", TarComponentLayout::Archive, Path::new(path), false).is_err(),
+                "{path}"
+            );
+        }
+        #[cfg(windows)]
+        assert!(restore_entry_names(
+            "common/",
+            TarComponentLayout::Archive,
+            Path::new("C:\\Windows\\system32\\drivers\\etc\\hosts"),
+            false,
+        )
+        .is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_invalid_names_are_reported_with_the_entry() {
+        let error = restore_entry_names(
+            "common/",
+            TarComponentLayout::Archive,
+            Path::new("common/Bad:Name/file.bin"),
+            false,
+        )
+        .unwrap_err();
+        assert!(error.contains("cannot create"), "{error}");
+        assert!(error.contains("Bad:Name"), "{error}");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_keeps_names_that_only_windows_rejects() {
+        assert!(restore_entry_names(
+            "common/",
+            TarComponentLayout::Archive,
+            Path::new("common/Bad:Name/file.bin"),
+            false,
+        )
+        .is_ok());
     }
 
     #[test]

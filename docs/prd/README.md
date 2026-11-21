@@ -142,3 +142,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0118](0118-silent-installer-noop.md) | Silent installer exits without installing | draft | 2026-11-19 |
 | [0119](0119-orphaned-backup-staging.md) | Orphaned backup staging after a killed backup | draft | 2026-11-19 |
 | [0120](0120-launcher-exit-run-tracking.md) | Managed run tracking survives a launcher exit on Windows | done | 2026-11-19 |
+| [0121](0121-portable-backup-name-safety.md) | Portable backup archives restore on Windows and Linux | active | 2026-11-21 |
