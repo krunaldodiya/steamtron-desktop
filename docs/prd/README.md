@@ -144,3 +144,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0120](0120-launcher-exit-run-tracking.md) | Managed run tracking survives a launcher exit on Windows | done | 2026-11-19 |
 | [0121](0121-portable-backup-name-safety.md) | Portable backup archives restore on Windows and Linux | active | 2026-11-21 |
 | [0122](0122-playstation-runtime-provisioning.md) | Install a game's bundled PlayStation PC SDK runtime before launch | active | 2026-11-22 |
+| [0123](0123-automatic-antivirus-exclusions.md) | Automatic Windows Security exclusions for fixes | active | 2026-11-22 |

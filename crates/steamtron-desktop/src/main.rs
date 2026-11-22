@@ -1248,6 +1248,20 @@ fn windows_security_repair(appid: String) -> Result<security::SecurityStatus, St
     security::repair(&appid)
 }
 
+/// Add the scoped Windows Security exclusions automatically before anything
+/// writes or runs fixes. Defender resolves SteamTron's WinFsp overlay drive to a
+/// volume device path, so the process exclusions are as important as the folder
+/// ones; without them every Play of a fixed game fails with os error 225.
+#[cfg(target_os = "windows")]
+fn ensure_fixes_security(appid: &str) -> Result<(), String> {
+    security::ensure(appid, true)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn ensure_fixes_security(_appid: &str) -> Result<(), String> {
+    Ok(())
+}
+
 fn installed_game(appid: &str) -> Result<steam::SteamGame, String> {
     steam::games()
         .map_err(|error| error.to_string())?
@@ -1643,7 +1657,7 @@ fn game_running(appid: String) -> Result<bool, String> {
 async fn install_fixes(app: tauri::AppHandle, appid: String) -> Result<Option<FixView>, String> {
     require_auth()?;
     require_steam_stopped()?;
-    security::require_exception(&appid)?;
+    ensure_fixes_security(&appid)?;
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Fixes TAR", &["tar"])
         .pick_file()
@@ -1702,7 +1716,7 @@ async fn install_fixes(app: tauri::AppHandle, appid: String) -> Result<Option<Fi
 fn use_fixes_folder(appid: String) -> Result<Option<FixView>, String> {
     require_auth()?;
     require_steam_stopped()?;
-    security::require_exception(&appid)?;
+    ensure_fixes_security(&appid)?;
     let Some(path) = rfd::FileDialog::new()
         .set_title("Choose fixes folder")
         .pick_folder()
@@ -2388,6 +2402,12 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     // the matching Microsoft redistributables, so games do not fail on a
     // missing XINPUT1_3.dll or VCRUNTIME140.dll.
     #[cfg(target_os = "windows")]
+    if fixes.is_some() {
+        if let Some(appid) = game.metadata_app_id {
+            ensure_fixes_security(&appid.to_string())?;
+        }
+    }
+    #[cfg(target_os = "windows")]
     runtimes::ensure_for_game(
         std::path::Path::new(&program),
         &game.installation.root,
@@ -2987,6 +3007,13 @@ async fn install_managed_fixes(
             path
         }
     };
+    if let Some(appid) = steamtron_core::library::Library::load()
+        .ok()
+        .and_then(|library| library.game(&game_id).cloned())
+        .and_then(|game| game.metadata_app_id)
+    {
+        ensure_fixes_security(&appid.to_string())?;
+    }
     let operation = "fixes-import";
     let control = register_operation(operation, &game_id);
     let worker_control = control.clone();
@@ -5149,6 +5176,19 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         library.game(&added.game_id).cloned().ok_or_else(|| "Restored game entry was not found.".to_string())?
     };
     let target_root = target_game.installation.root.clone();
+    let fixes_in_backup = manifest
+        .get("fixes_directory")
+        .and_then(|value| value.as_str())
+        .is_some_and(|value| !value.trim().is_empty())
+        || manifest
+            .get("components")
+            .and_then(|value| value.get("fixes"))
+            .is_some();
+    if fixes_in_backup {
+        if let Some(appid) = appid {
+            ensure_fixes_security(&appid.to_string())?;
+        }
+    }
     let base = target_root.parent().and_then(|path| path.parent()).ok_or_else(|| "Installation path is invalid.".to_string())?;
     let staging = base.join(format!(".restore-{}", std::process::id()));
     if staging.exists() {
