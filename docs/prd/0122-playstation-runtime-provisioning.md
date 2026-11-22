@@ -115,6 +115,15 @@ installer by hand.
   it.
 - Not run: the automatic path inside a Play (the runtime is installed on this
   host now) and declining the UAC prompt.
+- Release 0.1.41 (workflow run 44998445120, Linux and Windows builds green)
+  published
+  https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.41 with
+  `SteamTron_0.1.41_x64-setup.exe` (SHA-256
+  `2d54c0e2499d403a561d22fea2717ebf8c40af8deebe2489209ff9dfc0d3c499`, matching
+  the published `SHA256SUMS.txt`), `SteamTron_0.1.41_amd64.deb`,
+  `SteamTron-0.1.41-1.x86_64.rpm` and `SteamTron_0.1.41_amd64.AppImage`. The
+  installer was downloaded to `C:\Users\krunaldodiya\Downloads` and was not
+  installed in this session.
 
 ## Decisions and risks
 
