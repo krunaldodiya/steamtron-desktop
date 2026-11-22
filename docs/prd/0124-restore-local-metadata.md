@@ -53,6 +53,9 @@ existing "Import folder…" metadata action does.
   if `fixes_directory` is missing from the appmanifest. The backup's
   `fixes_enabled` value is applied before the commit, and the fixes archive is
   committed after the content (content, then fixes, then manifests).
+- R7: Fixes are optional. A backup without a fixes component (or with a stale
+  `fixes_directory` and no archive) restores without requiring fixes and leaves
+  any existing fixes folder untouched.
 
 ## Acceptance criteria
 
@@ -64,11 +67,16 @@ existing "Import folder…" metadata action does.
       the metadata import of the same folder.
 - [ ] A backup whose appmanifest has `components.fixes` but no
       `fixes_directory` still restores the fixes archive.
+- [ ] A backup without fixes restores successfully and keeps the game's existing
+      fixes folder.
 
 ## Verification
 
-- Code: `cargo test -p steamtron-library` — 33 passed, 0 failed, including
+- Code: `cargo test -p steamtron-library` — 34 passed, 0 failed, including
   `backup::import_tests::imports_a_backup_entry_without_content_or_network`.
+- Code: fixes replacement only runs when a fixes archive was staged, and a
+  stale `fixes_directory` without an archive is ignored; a backup without fixes
+  leaves the existing fixes folder untouched.
 - Code: the God of War fixes archive starts with `fixes/God of War/…`, matching
   the restore's `TarComponentLayout::Bundle(content_folder)` mapping; the commit
   runs content first, then fixes, then manifests, and sets `fixes_enabled` from
@@ -91,6 +99,9 @@ existing "Import folder…" metadata action does.
 - A backup with a missing or invalid appmanifest now fails at entry creation.
   Restore already rejected backups without `appmanifest_*.json`, so the visible
   behavior is unchanged apart from the error text.
+- Fixes replacement is conditional on a fixes archive actually being staged. A
+  backup without fixes leaves any existing fixes folder for that game intact;
+  the old code moved it aside even when there was nothing to replace it with.
 
 ## Links
 

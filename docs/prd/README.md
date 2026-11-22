@@ -146,3 +146,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0122](0122-playstation-runtime-provisioning.md) | Install a game's bundled PlayStation PC SDK runtime before launch | active | 2026-11-22 |
 | [0123](0123-automatic-antivirus-exclusions.md) | Automatic Windows Security exclusions for fixes | active | 2026-11-22 |
 | [0124](0124-restore-local-metadata.md) | Restore backups from their own metadata | active | 2026-11-22 |
+| [0125](0125-restore-appmanifest-not-cache.md) | Restore selects the appmanifest, not its cache sidecar | active | 2026-11-22 |

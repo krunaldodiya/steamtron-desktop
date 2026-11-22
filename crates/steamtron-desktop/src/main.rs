@@ -5167,14 +5167,18 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         .get("fixes_enabled")
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
+    let fixes_component = backup_component_name(&manifest, "fixes", "fixes.tar");
+    // Fixes are optional. The component entry is authoritative; a stale
+    // fixes_directory without an archive must not fail the restore.
     let fixes_in_backup = manifest
-        .get("fixes_directory")
-        .and_then(|value| value.as_str())
-        .is_some_and(|value| !value.trim().is_empty())
-        || manifest
-            .get("components")
-            .and_then(|value| value.get("fixes"))
-            .is_some();
+        .get("components")
+        .and_then(|value| value.get("fixes"))
+        .is_some()
+        || (manifest
+            .get("fixes_directory")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty())
+            && folder.join(&fixes_component).is_file());
     if fixes_in_backup {
         if let Some(appid) = appid {
             ensure_fixes_security(&appid.to_string())?;
@@ -5192,7 +5196,6 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let staging_cleanup = staging.clone();
     let target_root_worker = target_root.clone();
     let content_folder_worker = content_folder.clone();
-    let fixes_component = backup_component_name(&manifest, "fixes", "fixes.tar");
     let manifests_component = backup_component_name(&manifest, "manifest_bundle", "manifest-bundle.tar");
     let manifest_components = manifest.get("components").cloned().unwrap_or(serde_json::Value::Null);
     let manifest_worker = manifest.clone();
@@ -5265,7 +5268,11 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         if target_root_worker.exists() {
             std::fs::rename(&target_root_worker, &old_target).map_err(|error| error.to_string())?;
         }
-        let fixes_destination = managed_fixes_dir(&target_game_worker);
+        // Fixes are optional: when the backup has no fixes archive, leave any
+        // existing fixes folder untouched instead of replacing it with nothing.
+        let fixes_destination = staged_fixes
+            .as_ref()
+            .and_then(|_| managed_fixes_dir(&target_game_worker));
         let old_fixes = staging.join(".old-fixes");
         if let Some(destination) = &fixes_destination {
             if destination.exists() {

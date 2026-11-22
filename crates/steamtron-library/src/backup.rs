@@ -327,6 +327,27 @@ fn parse_manifest_tar(data: &[u8], game: &mut ImportedGame) -> Result<(), Librar
     Ok(())
 }
 
+/// Locate the game appmanifest in a backup folder.
+///
+/// A backup also carries `appmanifest_<id>.cache.json` next to the real
+/// appmanifest. Both match a naive `appmanifest_*.json` test, and NTFS lists
+/// the cache name first, so restore must exclude it explicitly.
+pub fn backup_appmanifest(folder: &Path) -> Option<PathBuf> {
+    fs::read_dir(folder)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("appmanifest_")
+                        && name.ends_with(".json")
+                        && !name.ends_with(".cache.json")
+                })
+        })
+}
+
 fn read_folder(path: &Path) -> Result<Option<ImportedGame>, LibraryError> {
     let mut appmanifest = None;
     let mut game = ImportedGame { source: path.display().to_string(), ..Default::default() };
@@ -655,6 +676,18 @@ mod import_tests {
             .launch_targets
             .iter()
             .any(|target| target.executable.ends_with("game.exe")));
+    }
+
+    #[test]
+    fn backup_appmanifest_skips_the_cache_sidecar() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("appmanifest_42.cache.json"), b"{}").unwrap();
+        fs::write(temp.path().join("appmanifest_42.json"), b"{}").unwrap();
+        let path = backup_appmanifest(temp.path()).expect("main appmanifest");
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("appmanifest_42.json")
+        );
     }
 
     #[test]
