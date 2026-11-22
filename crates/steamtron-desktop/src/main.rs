@@ -5112,13 +5112,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         return Ok(None);
     };
     emit_operation_at(&app, "restore", "", "read", "running", "Reading backup metadata…", 0.0);
-    let manifest_path = std::fs::read_dir(&folder)
-        .map_err(|error| error.to_string())?
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with("appmanifest_") && name.ends_with(".json"))
-        })
+    let manifest_path = steamtron_library::backup::backup_appmanifest(&folder)
         .ok_or_else(|| "This folder is not a SteamTron game backup (missing appmanifest_*.json).".to_string())?;
     let manifest: serde_json::Value = serde_json::from_slice(
         &std::fs::read(&manifest_path).map_err(|error| error.to_string())?

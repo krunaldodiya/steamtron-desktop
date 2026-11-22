@@ -23,6 +23,14 @@ Reproduced with
 appmanifest has `backup_format: 2` and the backup is complete. God of War worked
 because its folder has no cache sidecar.
 
+## Correction (0.1.44)
+
+0.1.44 shipped the `backup_appmanifest` helper and its unit test, but
+`restore_game_backup` still used the old inline finder. The same
+`Unsupported SteamTron backup format.` error persisted on the installed 0.1.44.
+0.1.45 replaces the call site itself; the verification below now checks the call
+site, not only the helper.
+
 ## Goal
 
 Restore always selects the game appmanifest and ignores the cache sidecar.
@@ -51,10 +59,13 @@ Restore always selects the game appmanifest and ignores the cache sidecar.
   `backup::import_tests::backup_appmanifest_skips_the_cache_sidecar`.
 - Code: `cargo check -p steamtron-desktop --bin steamtron-desktop` passes with
   the local GTK/WebKit pkg-config sysroot.
-- Not run yet: installed-build restore of the Witcher 3 backup (a backup was
-  running when this was written; do not interrupt it).
+- Code: 0.1.45 `restore_game_backup` calls
+  `steamtron_library::backup::backup_appmanifest(&folder)`; the inline finder is
+  gone (grep of the call site).
+- Not run yet: installed-build restore of the Witcher 3 backup. 0.1.44 did not
+  contain the call-site change, so its runtime acceptance is void.
 
-## Workaround on 0.1.43
+## Workaround on 0.1.43 / 0.1.44
 
 After the current backup finishes, rename the sidecar in the backup folder:
 
