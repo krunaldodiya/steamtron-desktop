@@ -143,3 +143,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0119](0119-orphaned-backup-staging.md) | Orphaned backup staging after a killed backup | draft | 2026-11-19 |
 | [0120](0120-launcher-exit-run-tracking.md) | Managed run tracking survives a launcher exit on Windows | done | 2026-11-19 |
 | [0121](0121-portable-backup-name-safety.md) | Portable backup archives restore on Windows and Linux | active | 2026-11-21 |
+| [0122](0122-playstation-runtime-provisioning.md) | Install a game's bundled PlayStation PC SDK runtime before launch | active | 2026-11-22 |

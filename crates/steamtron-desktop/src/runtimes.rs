@@ -180,6 +180,12 @@ pub(crate) fn ensure_for_game(
     fixes: Option<&Path>,
     log: &File,
 ) -> Result<Vec<String>, String> {
+    // Steam runs a game's install script at install time; managed downloads and
+    // restored backups never do. PlayStation PC ports ship the PSPC SDK
+    // runtime installer and their helper (`crs-video.exe`) reports it missing
+    // without it. The runtime is optional for gameplay, so this is best-effort
+    // and runs before the import scan can fail.
+    ensure_playstation_runtime(game_root, log);
     let Some((machine, imports)) = pe_imports(executable) else {
         note(log, format!("could not read imports from {}", executable.display()));
         return Ok(Vec::new());
@@ -229,6 +235,79 @@ pub(crate) fn ensure_for_game(
         installed.push(component.label());
     }
     Ok(installed)
+}
+
+/// Files Steam's install script runs for PlayStation PC ports. This is an
+/// allow-list: SteamTron never executes arbitrary install scripts from a game
+/// folder (0098 non-goal).
+const PSPC_INSTALL_SCRIPT: &str = "install_pspc_sdk_runtime.bat";
+const PSPC_MANAGER_MSI: &str = "PsPcSdkRuntimeManager.msi";
+const PSPC_RUNTIME_MSI: &str = "PsPcSdkRuntimeInstaller.msi";
+
+fn playstation_bundle_present(game_root: &Path) -> bool {
+    game_root.join(PSPC_INSTALL_SCRIPT).is_file()
+        && game_root.join(PSPC_MANAGER_MSI).is_file()
+        && game_root.join(PSPC_RUNTIME_MSI).is_file()
+}
+
+fn playstation_runtime_installed() -> bool {
+    let Some(program_data) = std::env::var_os("ProgramData") else {
+        return false;
+    };
+    playstation_runtime_in(Path::new(&program_data))
+}
+
+/// `%ProgramData%\Sony Interactive Entertainment Inc\PSPC_SDK\<family>\<version>\runtime.dll`
+fn playstation_runtime_in(program_data: &Path) -> bool {
+    let root = program_data
+        .join("Sony Interactive Entertainment Inc")
+        .join("PSPC_SDK");
+    let Ok(families) = fs::read_dir(&root) else {
+        return false;
+    };
+    for family in families.flatten() {
+        let Ok(versions) = fs::read_dir(family.path()) else {
+            continue;
+        };
+        for version in versions.flatten() {
+            if version.path().join("runtime.dll").is_file() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Install the PlayStation PC SDK runtime that Steam's install script would add.
+///
+/// Best-effort: the runtime only powers the game's PSN helpers, so a declined
+/// or failed install is logged and the game still launches. The batch file runs
+/// both MSIs, so the user sees one elevation prompt.
+fn ensure_playstation_runtime(game_root: &Path, log: &File) {
+    if !playstation_bundle_present(game_root) || playstation_runtime_installed() {
+        return;
+    }
+    note(
+        log,
+        "PlayStation PC SDK Runtime is missing; running the game's install script",
+    );
+    let script = game_root.join(PSPC_INSTALL_SCRIPT);
+    let command = format!("\"{}\" quiet", script.display());
+    let result = run_elevated(Path::new("cmd.exe"), &["/c", command.as_str()], log);
+    if playstation_runtime_installed() {
+        note(log, "installed PlayStation PC SDK Runtime");
+        return;
+    }
+    match result {
+        Ok(()) => note(
+            log,
+            "PlayStation PC SDK Runtime installer finished but the runtime was not found",
+        ),
+        Err(error) => note(
+            log,
+            format!("PlayStation PC SDK Runtime was not installed: {error}"),
+        ),
+    }
 }
 
 fn dll_present(
@@ -558,5 +637,35 @@ mod tests {
                 Component::VcRedist { version: VcVersion::V14, x86: false }
             ]
         );
+    }
+
+    #[test]
+    fn detects_the_playstation_runtime_bundle() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(!playstation_bundle_present(temp.path()));
+        fs::write(temp.path().join(PSPC_INSTALL_SCRIPT), b"").unwrap();
+        assert!(!playstation_bundle_present(temp.path()));
+        fs::write(temp.path().join(PSPC_MANAGER_MSI), b"").unwrap();
+        assert!(!playstation_bundle_present(temp.path()));
+        fs::write(temp.path().join(PSPC_RUNTIME_MSI), b"").unwrap();
+        assert!(playstation_bundle_present(temp.path()));
+    }
+
+    #[test]
+    fn detects_an_installed_playstation_runtime() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(!playstation_runtime_in(temp.path()));
+        let version = temp
+            .path()
+            .join("Sony Interactive Entertainment Inc")
+            .join("PSPC_SDK")
+            .join("S22")
+            .join("2.50.00.10");
+        fs::create_dir_all(&version).unwrap();
+        assert!(!playstation_runtime_in(temp.path()));
+        fs::write(version.join("runtime.dll"), b"").unwrap();
+        assert!(playstation_runtime_in(temp.path()));
+        fs::remove_file(version.join("runtime.dll")).unwrap();
+        assert!(!playstation_runtime_in(temp.path()));
     }
 }

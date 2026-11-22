@@ -102,9 +102,9 @@ installer by hand.
 - The UAC prompt is unavoidable without a privileged service; the user approves
   once per runtime and the cache makes later plays silent.
 - Residual gaps: VC++ 2008/2005, XNA, PhysX, and .NET have no provisioner yet;
-  they are logged. Games that ship their own redistributable folder still work
-  only if the runtime is already installed or the user runs the game's
-  installer.
+  they are logged. A game's own redistributable folder is still not run in
+  general; `0122-playstation-runtime-provisioning.md` adds the PlayStation PC
+  SDK runtime for PlayStation PC ports through an allow-list.
 - Play blocks while provisioning; the play log records progress but the UI
   shows only its normal launch state.
 
