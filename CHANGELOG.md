@@ -1,3 +1,15 @@
+## [0.1.44] - 2026-11-22
+
+### Fixed
+
+- Restore now selects the game's `appmanifest_*.json` instead of the
+  `appmanifest_*.cache.json` sidecar. NTFS lists the cache file first, so a
+  complete format-2 backup such as The Witcher 3 failed with
+  "Unsupported SteamTron backup format".
+- Fixes are optional during restore: a backup without a fixes archive no longer
+  removes an existing fixes folder, and a stale `fixes_directory` without an
+  archive is ignored.
+
 ## [0.1.43] - 2026-11-22
 
 ### Fixed
