@@ -5100,6 +5100,20 @@ fn extract_tar_component(
     reader.finish()
 }
 
+/// Turn storage read failures into an actionable restore error.
+///
+/// `ERROR_CRC` (23) means the drive returned a bad block, not that the backup
+/// format is wrong; the bytes cannot be recovered by code.
+fn backup_archive_error(component: &str, error: String) -> String {
+    if error.contains("os error 23") || error.to_ascii_lowercase().contains("cyclic redundancy check") {
+        format!(
+            "Backup component {component} is unreadable (cyclic redundancy check). The archive or the drive is damaged; re-export the backup to a healthy drive. ({error})"
+        )
+    } else {
+        error
+    }
+}
+
 #[tauri::command]
 async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::{LaunchTarget, Library};
@@ -5114,12 +5128,11 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     emit_operation_at(&app, "restore", "", "read", "running", "Reading backup metadata…", 0.0);
     let manifest_path = steamtron_library::backup::backup_appmanifest(&folder)
         .ok_or_else(|| "This folder is not a SteamTron game backup (missing appmanifest_*.json).".to_string())?;
-    let manifest: serde_json::Value = serde_json::from_slice(
+    let mut manifest: serde_json::Value = serde_json::from_slice(
         &std::fs::read(&manifest_path).map_err(|error| error.to_string())?
     ).map_err(|error| format!("Backup manifest is invalid: {error}"))?;
-    if manifest.get("backup_format").and_then(|value| value.as_u64()) != Some(2) {
-        return Err("Unsupported SteamTron backup format.".into());
-    }
+    steamtron_library::backup::normalize_backup_manifest(&mut manifest, &folder)
+        .map_err(|error| error.to_string())?;
     let game_id = manifest.get("game_id").and_then(|value| value.as_str()).unwrap_or("").to_owned();
     let title = manifest.get("title").and_then(|value| value.as_str()).unwrap_or("").to_owned();
     let appid = manifest.get("steam_app_id").and_then(|value| value.as_u64()).map(|value| value as u32);
@@ -5208,14 +5221,16 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
                 &restore_folder.join(&fixes_component),
                 "fixes/",
                 TarComponentLayout::Bundle(&content_folder_worker),
-            )?;
+            )
+            .map_err(|error| backup_archive_error(&fixes_component, error))?;
         }
         if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
             validate_tar_component(
                 &restore_folder.join(&manifests_component),
                 "manifests/",
                 TarComponentLayout::Bundle(&content_folder_worker),
-            )?;
+            )
+            .map_err(|error| backup_archive_error(&manifests_component, error))?;
         }
         // Use archive sizes as the progress denominator. Scanning every tar
         // header first made the UI sit at 10% for minutes on multi-gigabyte
@@ -5226,7 +5241,8 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
         let started = std::time::Instant::now();
-        let content_digest = extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", TarComponentLayout::Archive, &emit_app, "restore", "", "extract", "Restoring game backup…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+        let content_digest = extract_tar_component(&restore_folder.join("content.tar"), &staging, "common/", TarComponentLayout::Archive, &emit_app, "restore", "", "extract", "Restoring game backup…", &control, &mut written, overall_total, started, 0.0, 100.0)
+            .map_err(|error| backup_archive_error("content.tar", error))?;
         if let Some(expected) = expected_content_sha_worker.as_deref() {
             if content_digest != expected {
                 return Err("Backup content checksum does not match its manifest.".into());
@@ -5239,14 +5255,16 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         // Extract every component before touching the installed game. A cancel
         // or failure during extraction only discards the staging folder.
         let staged_fixes = if fixes_in_backup {
-            let _ = extract_tar_component(&restore_folder.join(&fixes_component), &staging, "fixes/", TarComponentLayout::Bundle(&content_folder_worker), &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join(&fixes_component), &staging, "fixes/", TarComponentLayout::Bundle(&content_folder_worker), &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)
+                .map_err(|error| backup_archive_error(&fixes_component, error))?;
             let path = staging.join("fixes").join(&content_folder_worker);
             path.is_dir().then_some(path)
         } else {
             None
         };
         let staged_manifests = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() {
-            let _ = extract_tar_component(&restore_folder.join(&manifests_component), &staging, "manifests/", TarComponentLayout::Bundle(&content_folder_worker), &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
+            let _ = extract_tar_component(&restore_folder.join(&manifests_component), &staging, "manifests/", TarComponentLayout::Bundle(&content_folder_worker), &emit_app, "restore", "", "manifests", "Restoring depot manifests…", &control, &mut written, overall_total, started, 0.0, 100.0)
+                .map_err(|error| backup_archive_error(&manifests_component, error))?;
             let path = staging.join("manifests").join(&content_folder_worker);
             path.is_dir().then_some(path)
         } else {

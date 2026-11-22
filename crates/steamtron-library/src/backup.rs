@@ -348,6 +348,120 @@ pub fn backup_appmanifest(folder: &Path) -> Option<PathBuf> {
         })
 }
 
+/// Normalize a backup appmanifest before restore.
+///
+/// Older backups carry `"format": 1` and no `backup_format`; their content
+/// archive, directory and optional fixes/manifest archives are the same shape
+/// as v2. Newer backups may omit `components` even when the archives exist.
+/// Fill those fields in memory so one restore path handles every backup.
+pub fn normalize_backup_manifest(
+    manifest: &mut Value,
+    folder: &Path,
+) -> Result<(), LibraryError> {
+    let marker = manifest.get("backup_format").and_then(Value::as_u64);
+    match marker {
+        Some(2) => {}
+        Some(1) | None => {
+            if !folder.join("content.tar").is_file() {
+                return Err(LibraryError::Archive(
+                    "Unsupported SteamTron backup format.".into(),
+                ));
+            }
+            manifest["backup_format"] = Value::from(2);
+        }
+        Some(_) => {
+            return Err(LibraryError::Archive(
+                "Unsupported SteamTron backup format.".into(),
+            ));
+        }
+    }
+    if !manifest.get("components").is_some_and(Value::is_object) {
+        manifest["components"] = serde_json::json!({});
+    }
+    let content_name = manifest
+        .pointer("/content_archive/name")
+        .and_then(Value::as_str)
+        .or_else(|| manifest.pointer("/components/content/name").and_then(Value::as_str))
+        .unwrap_or("content.tar")
+        .to_owned();
+    if manifest.pointer("/components/content").is_none() {
+        manifest["components"]["content"] = serde_json::json!({ "name": content_name });
+    }
+    if manifest.get("content_archive").is_none() {
+        manifest["content_archive"] = serde_json::json!({ "name": content_name });
+    }
+    if manifest
+        .get("content_directory")
+        .and_then(Value::as_str)
+        .map_or(true, |value| value.trim().is_empty())
+    {
+        if let Some(directory) = first_tar_directory(&folder.join(&content_name))? {
+            manifest["content_directory"] = Value::from(directory);
+        }
+    }
+    if manifest.pointer("/components/manifest_bundle").is_none()
+        && folder.join("manifest-bundle.tar").is_file()
+    {
+        manifest["components"]["manifest_bundle"] =
+            serde_json::json!({ "name": "manifest-bundle.tar" });
+    }
+    if manifest.pointer("/components/fixes").is_none() {
+        let fixes_directory = manifest
+            .get("fixes_directory")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if !fixes_directory.is_empty() {
+            let title_archive = manifest
+                .get("title")
+                .and_then(Value::as_str)
+                .map(|title| format!("{title}.tar"));
+            let candidates = [
+                manifest
+                    .pointer("/fixes_archive/name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                Some("fixes.tar".to_owned()),
+                title_archive,
+            ];
+            if let Some(name) = candidates
+                .into_iter()
+                .flatten()
+                .find(|name| folder.join(name).is_file())
+            {
+                manifest["components"]["fixes"] = serde_json::json!({ "name": name });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Read the first directory pair (`common/<folder>`) from a legacy content tar.
+fn first_tar_directory(path: &Path) -> Result<Option<String>, LibraryError> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let file = fs::File::open(path).map_err(|error| LibraryError::io(path, error))?;
+    let mut archive = tar::Archive::new(file);
+    let mut entries = archive
+        .entries()
+        .map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let Some(entry) = entries.next() else {
+        return Ok(None);
+    };
+    let entry = entry.map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let entry_path = entry
+        .path()
+        .map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let mut components = entry_path.components();
+    let first = components.next().and_then(|part| part.as_os_str().to_str());
+    let second = components.next().and_then(|part| part.as_os_str().to_str());
+    match (first, second) {
+        (Some("common"), Some(folder)) => Ok(Some(format!("common/{folder}"))),
+        _ => Ok(None),
+    }
+}
+
 fn read_folder(path: &Path) -> Result<Option<ImportedGame>, LibraryError> {
     let mut appmanifest = None;
     let mut game = ImportedGame { source: path.display().to_string(), ..Default::default() };
@@ -688,6 +802,68 @@ mod import_tests {
             path.file_name().and_then(|name| name.to_str()),
             Some("appmanifest_42.json")
         );
+    }
+
+    #[test]
+    fn normalizes_a_legacy_format_1_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(0);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "common/Sample/file.txt", std::io::empty())
+            .unwrap();
+        fs::write(dir.join("content.tar"), builder.into_inner().unwrap()).unwrap();
+        let mut manifests = BTreeMap::new();
+        manifests.insert("42_1.manifest".to_owned(), vec![1, 2, 3]);
+        write_manifest_tar(dir, "Sample", "42", "addappid(42)\n", &manifests).unwrap();
+
+        let mut manifest = serde_json::json!({
+            "format": 1,
+            "game_id": "42",
+            "title": "Sample",
+            "steam_app_id": 42,
+            "content_archive": {"name": "content.tar"}
+        });
+        normalize_backup_manifest(&mut manifest, dir).unwrap();
+        assert_eq!(manifest.get("backup_format").and_then(Value::as_u64), Some(2));
+        assert_eq!(
+            manifest.pointer("/components/content/name").and_then(Value::as_str),
+            Some("content.tar")
+        );
+        assert_eq!(
+            manifest.pointer("/components/manifest_bundle/name").and_then(Value::as_str),
+            Some("manifest-bundle.tar")
+        );
+        assert_eq!(
+            manifest.get("content_directory").and_then(Value::as_str),
+            Some("common/Sample")
+        );
+    }
+
+    #[test]
+    fn normalizes_legacy_fixes_and_rejects_unknown_formats() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        fs::write(dir.join("content.tar"), b"").unwrap();
+        fs::write(dir.join("Sample.tar"), b"").unwrap();
+        let mut manifest = serde_json::json!({
+            "format": 1,
+            "title": "Sample",
+            "steam_app_id": 42,
+            "fixes_directory": "fixes/Sample"
+        });
+        normalize_backup_manifest(&mut manifest, dir).unwrap();
+        assert_eq!(
+            manifest.pointer("/components/fixes/name").and_then(Value::as_str),
+            Some("Sample.tar")
+        );
+
+        let mut unknown = serde_json::json!({ "backup_format": 3, "content_archive": {"name": "content.tar"} });
+        assert!(normalize_backup_manifest(&mut unknown, dir).is_err());
     }
 
     #[test]
