@@ -1,3 +1,17 @@
+## [0.1.46] - 2026-11-22
+
+### Fixed
+
+- Restore accepts legacy format-1 backups (no `backup_format`, e.g.
+  Mafia: Definitive Edition) and incomplete format-2 manifests. It derives the
+  content archive/component, content directory, manifest bundle, and fixes
+  archive from the files actually present. The restored library appmanifest is
+  normalized; the backup folder is never rewritten.
+- A cyclic redundancy check (os error 23) now names the damaged backup component
+  and tells the user to re-export to healthy storage. Max Payne 3's
+  `content.tar` is damaged on the backup drive; its small components match
+  their checksums.
+
 ## [0.1.45] - 2026-11-22
 
 ### Fixed
