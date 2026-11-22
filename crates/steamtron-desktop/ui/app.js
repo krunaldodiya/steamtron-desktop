@@ -4621,7 +4621,9 @@ async function renderGeneralSettings(host) {
       ${settingsRow("Activity", activity, '<button id="setting-open-logs">Open logs folder</button>')}
       <button id="setting-clear-logs" class="danger-row">Clear all diagnostic logs</button>
     </div></section>
-    <p class="settings-version">SteamTron ${escape(version)}</p>`;
+    <section class="settings-section"><h2>About</h2><p>Installed SteamTron build.</p><div class="settings-card">
+      ${settingsRow("SteamTron", version ? "Version " + version : "Version unavailable")}
+    </div></section>`;
 
   host.querySelector("#setting-display-mode").onchange = async (event) => {
     try {
