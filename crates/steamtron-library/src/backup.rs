@@ -433,7 +433,7 @@ fn collect_imports(inputs: &[PathBuf], warnings: &mut Vec<String>) -> Vec<Import
     games
 }
 
-fn import_one(library: &mut Library, drive: &Path, imported: &ImportedGame) -> Result<bool, LibraryError> {
+fn import_one(library: &mut Library, drive: &Path, imported: &ImportedGame) -> Result<Game, LibraryError> {
     let manifest: Value = serde_json::from_slice(&imported.appmanifest)
         .map_err(|error| LibraryError::Archive(error.to_string()))?;
     let appid = manifest.get("steam_app_id").and_then(|value| value.as_u64()).map(|value| value as u32)
@@ -539,8 +539,21 @@ fn import_one(library: &mut Library, drive: &Path, imported: &ImportedGame) -> R
     game.setup_completed_at = setup_before.or_else(|| game.installation.confirmed.then_some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64));
     game.steam = steam_before;
     game.artwork = artwork_before;
-    library.upsert_game(game).map_err(|error| LibraryError::Archive(error.to_string()))?;
-    Ok(true)
+    library.upsert_game(game.clone()).map_err(|error| LibraryError::Archive(error.to_string()))?;
+    Ok(game)
+}
+
+/// Build (or refresh) one library entry from a backup folder's appmanifest and
+/// manifest bundle. The backup is self-contained, so this never touches the
+/// network: restore must not download a manifest bundle it already has.
+pub fn import_backup_entry(
+    library: &mut Library,
+    drive: &Path,
+    folder: &Path,
+) -> Result<Game, LibraryError> {
+    let imported = read_folder(folder)?
+        .ok_or_else(|| LibraryError::Archive("Backup has no appmanifest_*.json.".into()))?;
+    import_one(library, drive, &imported)
 }
 
 /// Import metadata folders, one or more ZIPs, or a folder containing ZIPs.
@@ -613,6 +626,35 @@ mod import_tests {
         let game = library.game_by_app_id(42).expect("imported game");
         assert_eq!(game.title, "Sample");
         assert_eq!(fs::read(&game.installation.manifest).unwrap(), appmanifest);
+    }
+
+    #[test]
+    fn imports_a_backup_entry_without_content_or_network() {
+        let temp = tempfile::tempdir().unwrap();
+        let drive = temp.path().join("drive");
+        fs::create_dir_all(&drive).unwrap();
+        let library_path = temp.path().join("library.json");
+        let mut library = Library::open(&library_path).unwrap();
+        library.add_drive(&drive, "test", true).unwrap();
+        library.save().unwrap();
+
+        let backup = temp.path().join("backup");
+        fs::create_dir_all(&backup).unwrap();
+        let appmanifest = br#"{"format":1,"game_id":"42","title":"Sample","steam_app_id":42,"content_directory":"common/Sample","launcher_targets":[{"executable":"game.exe","name":"Game","primary":true}]}"#;
+        fs::write(backup.join("appmanifest_42.json"), appmanifest).unwrap();
+        let mut manifests = BTreeMap::new();
+        manifests.insert("42_1.manifest".to_owned(), vec![1, 2, 3]);
+        write_manifest_tar(&backup, "Sample", "42", "addappid(42)\n", &manifests).unwrap();
+
+        let game = import_backup_entry(&mut library, &drive, &backup).unwrap();
+        assert_eq!(game.id, "42");
+        assert_eq!(game.title, "Sample");
+        assert_eq!(game.metadata_app_id, Some(42));
+        assert!(!game.installation.root.exists(), "the backup entry must not create game content");
+        assert!(game
+            .launch_targets
+            .iter()
+            .any(|target| target.executable.ends_with("game.exe")));
     }
 
     #[test]

@@ -5103,7 +5103,6 @@ fn extract_tar_component(
 #[tauri::command]
 async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json::Value>, String> {
     use steamtron_core::library::{LaunchTarget, Library};
-    use steamtron_library::managed::{add_managed_game, ManagedAddRequest, ManifestProvider};
 
     require_auth()?;
     let Some(folder) = rfd::FileDialog::new()
@@ -5152,30 +5151,22 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         .and_then(|appid| library.game_by_app_id(appid).cloned())
         .or_else(|| if game_id.is_empty() { None } else { library.game(&game_id).cloned() })
         .or_else(|| library.games().iter().find(|game| game.title == title).cloned());
-    let target_game = if let Some(game) = existing {
+    let mut target_game = if let Some(game) = existing {
         game
     } else {
-        let appid = appid.ok_or_else(|| "The backup has no Steam App ID and the game is not in the library.".to_string())?;
-        let title = if title.trim().is_empty() { format!("Steam App {appid}") } else { title.clone() };
+        appid.ok_or_else(|| "The backup has no Steam App ID and the game is not in the library.".to_string())?;
         let drive = library.default_drive().cloned().or_else(|| library.drives().first().cloned()).ok_or_else(|| "Register a drive before restoring a backup.".to_string())?;
-        let backend = platform_backend().ok();
-        let backend = backend.filter(|backend| backend.status().map(|status| status.ready).unwrap_or(false));
-        let added = add_managed_game(
-            ManagedAddRequest {
-                app_id: appid,
-                title,
-                drive_root: drive.root.clone(),
-                drive_label: drive.label.clone(),
-                provider: ManifestProvider::Api,
-                proton: String::new(),
-            },
-            backend.as_ref().map(|backend| backend as &dyn steamtron_register::RegistrationBackend),
-        )
-        .map_err(|error| error.to_string())?;
-        let mut library = Library::load().map_err(|error| error.to_string())?;
-        library.game(&added.game_id).cloned().ok_or_else(|| "Restored game entry was not found.".to_string())?
+        // The backup already carries the appmanifest, Lua and depot manifests.
+        // Build the entry from those files instead of downloading a bundle
+        // from the API only to replace it with the backup copy below.
+        steamtron_library::backup::import_backup_entry(&mut library, &drive.root, &folder)
+            .map_err(|error| error.to_string())?
     };
     let target_root = target_game.installation.root.clone();
+    target_game.fixes_enabled = manifest
+        .get("fixes_enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
     let fixes_in_backup = manifest
         .get("fixes_directory")
         .and_then(|value| value.as_str())
@@ -5201,7 +5192,6 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     let staging_cleanup = staging.clone();
     let target_root_worker = target_root.clone();
     let content_folder_worker = content_folder.clone();
-    let fixes_directory = manifest.get("fixes_directory").and_then(|value| value.as_str()).unwrap_or("").to_owned();
     let fixes_component = backup_component_name(&manifest, "fixes", "fixes.tar");
     let manifests_component = backup_component_name(&manifest, "manifest_bundle", "manifest-bundle.tar");
     let manifest_components = manifest.get("components").cloned().unwrap_or(serde_json::Value::Null);
@@ -5214,7 +5204,9 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         // content is copied so an archive this system cannot restore fails in
         // seconds instead of after the full multi-gigabyte extraction.
         emit_operation_at(&emit_app, "restore", "", "read", "running", "Checking backup files…", 0.0);
-        if !fixes_directory.is_empty() {
+        // The component entry is authoritative: legacy manifests sometimes omit
+        // fixes_directory even though the archive is present.
+        if fixes_in_backup {
             validate_tar_component(
                 &restore_folder.join(&fixes_component),
                 "fixes/",
@@ -5232,7 +5224,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         // header first made the UI sit at 10% for minutes on multi-gigabyte
         // backups; extraction already reads the same bytes.
         let content_total = std::fs::metadata(restore_folder.join("content.tar")).map(|metadata| metadata.len()).unwrap_or(0);
-        let fixes_total = if !fixes_directory.is_empty() { std::fs::metadata(restore_folder.join(&fixes_component)).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
+        let fixes_total = if fixes_in_backup { std::fs::metadata(restore_folder.join(&fixes_component)).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
         let manifests_total = if manifest_worker.get("components").and_then(|value| value.get("manifest_bundle")).is_some() { std::fs::metadata(restore_folder.join(&manifests_component)).map(|metadata| metadata.len()).unwrap_or(0) } else { 0 };
         let overall_total = content_total + fixes_total + manifests_total;
         let mut written = 0u64;
@@ -5249,7 +5241,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         }
         // Extract every component before touching the installed game. A cancel
         // or failure during extraction only discards the staging folder.
-        let staged_fixes = if !fixes_directory.is_empty() {
+        let staged_fixes = if fixes_in_backup {
             let _ = extract_tar_component(&restore_folder.join(&fixes_component), &staging, "fixes/", TarComponentLayout::Bundle(&content_folder_worker), &emit_app, "restore", "", "fixes", "Restoring fixes…", &control, &mut written, overall_total, started, 0.0, 100.0)?;
             let path = staging.join("fixes").join(&content_folder_worker);
             path.is_dir().then_some(path)
