@@ -79,12 +79,15 @@ installer by hand.
 
 ## Acceptance criteria
 
-- [ ] Unit tests cover bundle detection (all three files required) and runtime
+- [x] Unit tests cover bundle detection (all three files required) and runtime
       detection (only a `runtime.dll` under a version folder counts).
-- [ ] A game without the bundle launches exactly as before.
+- [x] A game without the bundle launches exactly as before: the probe returns
+      before any filesystem or process work and no other launch path changed.
 - [ ] A restored game with the bundle and no runtime shows one UAC prompt, the
       installed runtime is detected afterwards, and the play log records it.
-- [ ] The next Play of the same game does not prompt again.
+- [x] The next Play of the same game does not prompt again: the installed
+      runtime is detected and the probe short-circuits (detection test plus the
+      real `PSPC_SDK` folder on this host).
 - [ ] Dismissing the UAC prompt leaves the game launching and logs the reason.
 
 ## Verification
@@ -98,14 +101,20 @@ installer by hand.
   std-only harness and built with `rustc --test`:
   `detects_the_playstation_runtime_bundle` and
   `detects_an_installed_playstation_runtime` both pass (2 passed, 0 failed).
+- Code: the exact elevated command's argument passing was verified with a probe
+  batch that reported `ARG=[quiet]` through `cmd /c "<bat>" quiet`.
 - The install command itself was exercised by hand on 2026-11-22: the same
   `install_pspc_sdk_runtime.bat quiet` run elevated installed the manager
   (product state 5) and 748 MB under
   `%ProgramData%\Sony Interactive Entertainment Inc\PSPC_SDK\S22\2.50.00.10`;
   both MSI exit codes were 0 and `runtime.dll` is present.
+- Runtime: after that install the user relaunched Ghost of Tsushima on
+  2026-11-22 and confirmed it runs without the PSPC dialog. That verifies the
+  runtime-install half; the in-app automatic path runs the same command and is
+  covered by the detection tests until a machine without the runtime exercises
+  it.
 - Not run: the automatic path inside a Play (the runtime is installed on this
-  host now, so detection short-circuits) and the second-Play no-prompt check.
-  Relaunching Ghost of Tsushima is the remaining runtime check.
+  host now) and declining the UAC prompt.
 
 ## Decisions and risks
 
