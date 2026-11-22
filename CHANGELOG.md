@@ -1,3 +1,19 @@
+## [0.1.41] - 2026-11-22
+
+### Added
+
+- PlayStation PC ports that ship `install_pspc_sdk_runtime.bat` with the
+  PlayStation PC SDK runtime MSIs in the game folder now install that runtime
+  before the first launch, the way Steam's install script does. The check is
+  skipped when the runtime is already installed; a declined or failed install
+  is written to the play log and never blocks the game.
+
+### Fixed
+
+- Ghost of Tsushima no longer reports "PlayStation(R) PC SDK Runtime is
+  missing" from its `crs-video.exe` helper after the game was restored or
+  downloaded without Steam's install script running.
+
 ## [0.1.40] - 2026-11-21
 
 ### Fixed
