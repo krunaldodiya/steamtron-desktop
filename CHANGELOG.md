@@ -1,3 +1,17 @@
+## [0.1.43] - 2026-11-22
+
+### Fixed
+
+- Restoring a backup for a game that is not in the library no longer downloads
+  the manifest bundle from the API. Restore rebuilds the entry from the
+  backup's own appmanifest, Lua and depot manifests through the metadata import
+  path, so a complete backup restores without network access. The Add game flow
+  keeps its provider download.
+- Fixes archives are restored whenever the backup declares a fixes component,
+  even if the legacy `fixes_directory` field is absent. The backup's
+  `fixes_enabled` state is applied before the commit, and fixes are committed
+  after the game content.
+
 ## [0.1.42] - 2026-11-22
 
 ### Fixed
