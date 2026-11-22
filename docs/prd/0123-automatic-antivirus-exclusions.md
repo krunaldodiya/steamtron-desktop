@@ -114,3 +114,11 @@ game is not blocked by antivirus.
 - `0116-linked-fixes-managed-location.md` (managed fixes folder).
 - `0121-portable-backup-name-safety.md` (restore flow).
 - Ghost of Tsushima/PSPC (`0122`) unrelated; GTA V Enhanced appid 3240220.
+
+- Release 0.1.42 (workflow run 45014382261, Linux and Windows green) published
+  https://github.com/krunaldodiya/steamtron-desktop/releases/tag/v0.1.42 with
+  `SteamTron_0.1.42_x64-setup.exe` (SHA-256
+  `2600829141f4eab868a1e444fdb72c18f2c20f81def8476a3501e7447be3a1ed`, matching
+  the published `SHA256SUMS.txt`), plus the .deb, .rpm and AppImage. The
+  installer was downloaded to `C:\Users\krunaldodiya\Downloads` and was not
+  installed in this session.
