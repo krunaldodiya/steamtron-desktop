@@ -1,3 +1,17 @@
+## [0.1.45] - 2026-11-22
+
+### Fixed
+
+- Restore now actually calls the appmanifest finder introduced in 0.1.44. That
+  release added the helper and its test but kept the old inline finder, so a
+  backup with an `appmanifest_*.cache.json` sidecar (The Witcher 3) still failed
+  with "Unsupported SteamTron backup format".
+
+### Added
+
+- An About section at the bottom of Settings → General showing the installed
+  SteamTron version.
+
 ## [0.1.44] - 2026-11-22
 
 ### Fixed
