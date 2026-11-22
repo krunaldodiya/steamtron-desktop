@@ -85,8 +85,13 @@ game is not blocked by antivirus.
 - Detection history: `Trojan:Win32/Ravartar!rfn`, resource
   `\Device\Volume{…}\PLAYGTAV.EXE`, process
   `C:\Program Files (x86)\SteamTron\steamtron-desktop.exe`.
-- Code: `cargo check -p steamtron-desktop` and the new security unit tests
-  (to be recorded with the release).
+- Code: `cargo check -p steamtron-desktop` passes with the change (Linux, 2m36s;
+  the `ensure`/`require_exception` unused warnings on Linux are expected because
+  the calls are Windows-gated).
+- Not run here: the new security unit tests (the Linux test link needs GTK test
+  libraries this headless environment lacks) and the automatic path inside a
+  Play with a fresh marker. The manual run above covers the same commands; the
+  0.1.42 build is the first automatic verification.
 
 ## Decisions and risks
 

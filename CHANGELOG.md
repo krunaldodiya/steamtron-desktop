@@ -1,3 +1,15 @@
+## [0.1.42] - 2026-11-22
+
+### Fixed
+
+- Microsoft Defender no longer quarantines a game's fixes when they are
+  imported, restored or launched. SteamTron now adds the scoped exclusions
+  automatically, including process exclusions for the overlay wrapper and the
+  game executables (the only form that matches files opened through the WinFsp
+  overlay drive), and resolves the managed fixes folder instead of the legacy
+  app-data path. One elevation prompt per game; later launches are silent, and
+  the Security panel reflects the recorded exclusions.
+
 ## [0.1.41] - 2026-11-22
 
 ### Added
