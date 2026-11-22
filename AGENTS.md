@@ -1,5 +1,20 @@
 # Agent rules
 
+## Environment: WSL/Ubuntu for development, Windows for install/test — mandatory
+
+- Run every development action in WSL2/Ubuntu: source edits, `cargo`, tests,
+  builds, `git`, `gh`, Node/Tauri CLI, package managers, and helper scripts.
+- Windows is only for installing the built SteamTron package and exercising the
+  app and games end to end. Do not use Windows PowerShell, Windows package
+  managers, or Windows copies of `git`, `gh`, Rust, or Node for repository work,
+  diagnostics, or tool checks.
+- Do not install or verify development tooling on Windows. If a tool is missing,
+  set it up in WSL, not Windows.
+- Keep helper scripts and temporary files in WSL (`/tmp`, `~/.cache`), not under
+  `C:\...\Temp`.
+- Windows-only commands are limited to installers, the installed app, the game,
+  Windows Security, and the OS state needed for those tests.
+
 ## Never assume, bluff, or hallucinate — mandatory
 
 Every claim about behavior must be backed by evidence actually produced in the

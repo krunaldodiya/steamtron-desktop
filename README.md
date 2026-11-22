@@ -39,6 +39,18 @@ The Windows overlay requires
 [WinFsp](https://winfsp.dev/rel/). A Steam installation is required for Steam
 registration, launch-option management, and Steam library discovery.
 
+## Development environment
+
+All development happens in WSL2/Ubuntu. A Windows 11 machine is used only to
+install the built SteamTron package and test the app and games.
+
+- Run `cargo`, tests, builds, `git`, `gh`, Node/Tauri CLI, and helper scripts in
+  WSL/Ubuntu.
+- Do not install or check Rust, Node, GitHub CLI, or build tooling on Windows for
+  this repository.
+- The `Release` workflow builds both artifacts: Linux packages on Ubuntu and the
+  NSIS installer on its Windows runner.
+
 ## Install from a release
 
 Download the latest artifact from
@@ -246,10 +258,12 @@ delete its files unless the separate uninstall action is used.
 
 ### Common prerequisites
 
+Run these from WSL2/Ubuntu:
+
 - Rust stable (edition 2024)
 - Node.js 20 or newer
 - `npx --yes @tauri-apps/cli@2`
-- Tauri platform prerequisites:
+- Tauri Linux prerequisites:
   <https://v2.tauri.app/start/prerequisites/>
 
 ### Linux build
@@ -273,14 +287,14 @@ target/release/bundle/appimage/
 
 ### Windows build
 
-Install Visual Studio Build Tools with the **Desktop development with C++**
-workload, WebView2, and WinFsp. Then from a Developer PowerShell:
+The Windows NSIS installer is produced by the `Release` GitHub Actions workflow
+on its Windows runner. Maintainers and agents do not build it locally: all
+development and release commands run in WSL/Ubuntu, and Windows is used only to
+install the published installer and test SteamTron and games.
 
-```powershell
-npx --yes @tauri-apps/cli@2 build --bundles nsis
-```
-
-The installer is written to `target/release/bundle/nsis/`.
+Native Windows builds remain possible for contributors with Visual Studio Build
+Tools (Desktop development with C++), WebView2, and WinFsp, but they are outside
+the maintainer/agent workflow.
 
 ## Tests
 
