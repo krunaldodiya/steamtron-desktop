@@ -577,6 +577,7 @@ pub struct WindowsOverlay {
     game: OverlayGame,
     layout: OverlayLayout,
     mount_point: PathBuf,
+    explicit_mount_point: Option<PathBuf>,
     host: Option<FileSystemHost<UnionFs, CoarseGuard>>,
     init: Option<FspInit>,
 }
@@ -594,9 +595,22 @@ impl WindowsOverlay {
             game,
             layout,
             mount_point,
+            explicit_mount_point: None,
             host: None,
             init: None,
         }
+    }
+
+    /// Mount the union at a local directory instead of a free drive letter.
+    ///
+    /// Launchers such as Rockstar RGL, Uplay and EA validate the real install
+    /// path and reject an unrelated drive letter. A caller can mount the union
+    /// at a local empty directory, then expose that directory through a
+    /// normal junction at the game's real path. The original files remain in
+    /// the lower layer and are never modified.
+    pub fn with_mount_point(mut self, path: impl Into<PathBuf>) -> Self {
+        self.explicit_mount_point = Some(path.into());
+        self
     }
 
     pub fn game(&self) -> &OverlayGame {
@@ -624,21 +638,59 @@ impl WindowsOverlay {
         };
         let params = {
             let mut params = VolumeParams::new();
-            params.filesystem_name("SteamTron");
+            // Present a local NTFS-like volume. Launchers reject a volume with
+            // a custom filesystem name or case-sensitive lookup even when the
+            // path is otherwise valid.
+            params.filesystem_name("NTFS");
+            params.volume_serial_number(0x5354_524e);
+            params.case_sensitive_search(false);
+            params.case_preserved_names(true);
+            params.unicode_on_disk(true);
+            params.read_only_volume(false);
             params
         };
-        // WinFsp directory mounts fail on some hosts with
-        // STATUS_OBJECT_NAME_COLLISION (0xD0000035). Mounting on a free drive
-        // letter between S: and Z: is both the documented layout and the path
-        // WinFsp exercises most; the game then runs from the merged drive.
-        let (drive, root) = next_free_drive().ok_or_else(|| {
-            OverlayError::MountFailed("no free drive letter between S: and Z:".into())
-        })?;
+        // A directory mount keeps the caller's real path available; a free
+        // drive letter is still the default for games that do not need it.
+        let (mount, root) = if let Some(path) = self.explicit_mount_point.clone() {
+            fs::create_dir_all(&path).map_err(|error| {
+                OverlayError::MountFailed(format!(
+                    "could not create mountpoint {}: {error}",
+                    path.display()
+                ))
+            })?;
+            let empty = fs::read_dir(&path)
+                .map_err(|error| {
+                    OverlayError::MountFailed(format!(
+                        "could not inspect mountpoint {}: {error}",
+                        path.display()
+                    ))
+                })?
+                .next()
+                .is_none();
+            if !empty {
+                return Err(OverlayError::MountFailed(format!(
+                    "mountpoint is not empty: {}",
+                    path.display()
+                )));
+            }
+            (path.display().to_string(), path)
+        } else {
+            let (drive, root) = next_free_drive().ok_or_else(|| {
+                OverlayError::MountFailed("no free drive letter between S: and Z:".into())
+            })?;
+            (drive, root)
+        };
         self.mount_point = root;
         let mut host = FileSystemHost::<UnionFs, CoarseGuard>::new(params, fs)
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
-        host.mount(drive.as_str())
-            .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
+        let mut mounted = host.mount(mount.as_str());
+        if mounted.is_err() && self.explicit_mount_point.is_some() {
+            // Some WinFsp hosts require the extended-length form for a
+            // directory mountpoint. Retry only for directory mounts.
+            let extended = format!("\\\\?\\{mount}");
+            mounted = host.mount(extended.as_str());
+        }
+        mounted.map_err(|error| OverlayError::MountFailed(error.to_string()))?;
         host.start()
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
         self.host = Some(host);

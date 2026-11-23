@@ -1991,6 +1991,9 @@ fn try_overlay_wrapper() -> Option<i32> {
     let mut managed_cwd = None;
     let mut managed_steam_root = None;
     let mut managed = false;
+    let mut mountpoint = None;
+    let mut junction = None;
+    let mut base = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -2003,6 +2006,9 @@ fn try_overlay_wrapper() -> Option<i32> {
             "--compat" => { compat = args.get(index + 1).cloned(); index += 2; }
             "--cwd" => { managed_cwd = args.get(index + 1).cloned(); managed = true; index += 2; }
             "--steam-root" => { managed_steam_root = args.get(index + 1).cloned(); index += 2; }
+            "--mountpoint" => { mountpoint = args.get(index + 1).cloned(); index += 2; }
+            "--junction" => { junction = args.get(index + 1).cloned(); index += 2; }
+            "--base" => { base = args.get(index + 1).cloned(); index += 2; }
             "--" => { command.extend_from_slice(&args[index + 1..]); break; }
             value => { command.push(value.to_owned()); index += 1; }
         }
@@ -2017,9 +2023,34 @@ fn try_overlay_wrapper() -> Option<i32> {
         }
         let game = OverlayGame::new(common.clone(), fixes, Some(appid.clone()))
             .map_err(|error| error.to_string())?;
+        #[cfg(windows)]
+        let mut overlay = {
+            let overlay = PlatformOverlay::new(game);
+            if let Some(path) = mountpoint.as_deref() {
+                overlay.with_mount_point(PathBuf::from(path))
+            } else {
+                overlay
+            }
+        };
+        #[cfg(not(windows))]
         let mut overlay = PlatformOverlay::new(game);
+        #[cfg(not(windows))]
+        let _ = (&mountpoint, &junction, &base);
         let merged = overlay.mount().map_err(|error| error.to_string())?.to_path_buf();
         overlay_log(format!("merged={}", merged.display()));
+        #[cfg(windows)]
+        let mut junction_guard = match (junction.as_deref(), base.as_deref()) {
+            (Some(link), Some(base)) => {
+                retarget_junction(Path::new(link), &merged)?;
+                overlay_log(format!("junction={link} -> {}", merged.display()));
+                Some(JunctionGuard {
+                    link: PathBuf::from(link),
+                    base: PathBuf::from(base),
+                    active: true,
+                })
+            }
+            _ => None,
+        };
         // Only PlayTron launches pass --target-id. Steam launches must keep
         // using the command Steam prepared; otherwise a configured launcher
         // target silently overrides %command% for Steam Play.
@@ -2178,6 +2209,12 @@ fn try_overlay_wrapper() -> Option<i32> {
             }
             overlay_log("child processes finished");
         }
+        #[cfg(windows)]
+        if let Some(mut guard) = junction_guard.take() {
+            if let Err(error) = guard.restore() {
+                overlay_log(format!("junction restore failed: {error}"));
+            }
+        }
         overlay.unmount().map_err(|error| error.to_string())?;
         Ok(code)
     })();
@@ -2188,6 +2225,80 @@ fn try_overlay_wrapper() -> Option<i32> {
 }
 
 
+
+#[cfg(windows)]
+fn retarget_junction(link: &Path, target: &Path) -> Result<(), String> {
+    use std::os::windows::fs::MetadataExt;
+
+    if !target.is_dir() {
+        return Err(format!("junction target is not a directory: {}", target.display()));
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(link) {
+        // Junctions carry FILE_ATTRIBUTE_REPARSE_POINT but Rust's
+        // FileType::is_symlink is false for the mount-point reparse tag.
+        let reparse = metadata.file_attributes() & 0x0000_0400 != 0;
+        if !reparse {
+            return Err(format!("{} is not a junction", link.display()));
+        }
+        let status = hidden_command("cmd")
+            .arg("/c")
+            .arg("rmdir")
+            .arg(link.as_os_str())
+            .status()
+            .map_err(|error| format!("could not remove the junction: {error}"))?;
+        if !status.success() {
+            return Err(format!("could not remove the junction: {}", link.display()));
+        }
+    }
+    if let Some(parent) = link.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    }
+    let status = hidden_command("cmd")
+        .arg("/c")
+        .arg("mklink")
+        .arg("/J")
+        .arg(link.as_os_str())
+        .arg(target.as_os_str())
+        .status()
+        .map_err(|error| format!("could not create the junction: {error}"))?;
+    if !status.success() {
+        return Err(format!(
+            "could not point {} at {}",
+            link.display(),
+            target.display()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+struct JunctionGuard {
+    link: PathBuf,
+    base: PathBuf,
+    active: bool,
+}
+
+#[cfg(windows)]
+impl JunctionGuard {
+    fn restore(&mut self) -> Result<(), String> {
+        if !self.active {
+            return Ok(());
+        }
+        retarget_junction(&self.link, &self.base)?;
+        self.active = false;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JunctionGuard {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = retarget_junction(&self.link, &self.base);
+        }
+    }
+}
 
 #[tauri::command]
 fn managed_fixes_dir(game: &steamtron_core::library::Game) -> Option<std::path::PathBuf> {

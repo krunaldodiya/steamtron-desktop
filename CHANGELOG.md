@@ -1,3 +1,14 @@
+## [0.1.54] - 2026-11-23
+
+### Added
+
+- An experimental real-path WinFsp overlay for launcher-protected games
+  (Rockstar RGL, Ubisoft Connect, EA/Origin). The union can mount at a local
+  empty directory; the game's real path is a junction that normally points at
+  the pristine base and, during Play, at the overlay. The volume reports
+  NTFS-like metadata, and the junction is restored around the process tree.
+  The installed game files are still never overwritten.
+
 ## [0.1.53] - 2026-11-23
 
 ### Fixed

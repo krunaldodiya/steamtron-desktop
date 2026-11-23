@@ -156,3 +156,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0132](0132-bundled-runtime-redistributables.md) | Prefer game-bundled redistributables for runtime provisioning | done | 2026-11-23 |
 | [0133](0133-download-progress-aggregate.md) | Aggregate download progress across all depots | active | 2026-11-23 |
 | [0134](0134-bootstrapper-silent-pluginsdir.md) | Bootstrapper initializes the plugins directory before extracting the inner setup | active | 2026-11-23 |
+| [0135](0135-real-path-winfsp-overlay.md) | Real-path WinFsp overlay via a local directory mount and junction | active | 2026-11-23 |
