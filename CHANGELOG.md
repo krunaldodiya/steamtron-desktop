@@ -1,3 +1,12 @@
+## [0.1.48] - 2026-11-23
+
+### Fixed
+
+- Game-level launch options (stored as `launch_options` in the appmanifest) are
+  now passed to the game along with the selected target's arguments on native
+  Windows, Proton, and overlay launches. Previously they were saved but ignored,
+  so `-nolauncher` never reached Rise of the Tomb Raider.
+
 ## [0.1.47] - 2026-11-23
 
 ### Fixed
