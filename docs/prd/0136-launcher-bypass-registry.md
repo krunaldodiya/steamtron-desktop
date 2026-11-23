@@ -96,8 +96,16 @@ nothing.
   (`bin/WatchDogs2.exe`), GTA V Enhanced 3240220 (`PlayGTAV.exe`), Max Payne 3
   204100. It is a downloader/catalog, not a generic launcher engine; only the
   metadata idea is used.
-- Not run yet: Far Cry 5, GTA V.
-- Not implemented yet: modules, analyzer, auto-apply UI, real-path prepare UI.
+- 0.1.58: Far Cry 5 real-path auto-prepare verified; the fixed launcher then
+  required administrator elevation (PRD 0138) and exited without starting the
+  game. The fixes pack has a Uplay loader but no Steam emulator.
+- 0.1.59 code: Play auto-applies GoldBerg when the fixes folder contains a
+  launcher module, the game has a Steam API DLL, the fixes do not already ship
+  a Steam API DLL, and GoldBerg is not applied. This is a first slice of R1/R3,
+  not the full registry.
+- Not run yet: Far Cry 5 with automatic GoldBerg, GTA V.
+- Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,
+  per-appid catalog, real-path prepare UI.
 
 ## Decisions and risks
 

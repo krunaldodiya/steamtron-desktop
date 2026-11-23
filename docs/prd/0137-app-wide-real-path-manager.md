@@ -60,13 +60,15 @@ overlay. The user never creates a sidecar.
 ## Verification
 
 - 0.1.57: Max Payne 3 desktop Play with the manual layout record (PRD 0135).
-- 0.1.58 code: `ensure_real_path` / `needs_real_path`, auto-called from
-  `play_managed`; `restore_managed_real_path` command and Fixes-pane action;
-  uninstall and move call the restore helper first.
-- Not run yet: installed 0.1.58 Far Cry 5, Watch Dogs 2, restore, uninstall or
-  move. Only code inspection on Linux; Windows-only code is not compiled
-  locally.
-- No runtime evidence for 0.1.58 yet.
+- 0.1.58 installed from the published installer (SHA-256
+  `609dd001e470c22a18f8cf9511226433c9cde19ae83e39ddc7ee962f7969b94f`).
+- Far Cry 5 Play created `.steamtron-base/Far Cry 5`,
+  `.steamtron-mount/Far Cry 5`, the real-path junction and
+  `overlays/af1b96af-...json` automatically. The overlay log shows the mount
+  and junction, then the game launch was blocked by the fix launcher's
+  elevation manifest (`os error 740`), tracked separately in PRD 0138.
+- Not run yet: Watch Dogs 2, restore, uninstall or move after 0.1.58. Only code
+  inspection on Linux; Windows-only code is not compiled locally.
 
 ## Decisions and risks
 

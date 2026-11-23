@@ -1,3 +1,17 @@
+## [0.1.59] - 2026-11-23
+
+### Fixed
+
+- Games whose launcher executable requires administrator rights now start
+  through a single Windows UAC prompt instead of failing with
+  `ERROR_ELEVATION_REQUIRED` (os error 740). Managed Play keeps the real-path
+  overlay mounted while the elevated process tree runs, and the overlay
+  wrapper still restores the junction and unmounts if elevation is declined.
+  Normal games keep the direct launch path.
+- Play auto-applies GoldBerg for a launcher fix when the game has a Steam API
+  DLL and the fix does not already ship a Steam emulator. Imported fixes are
+  kept; GoldBerg uses its own manifest and can still be removed separately.
+
 ## [0.1.58] - 2026-11-23
 
 ### Added

@@ -201,6 +201,25 @@ fn find_steam_api(game: &Game) -> Result<(PathBuf, u16), String> {
     Err("No steam_api.dll or steam_api64.dll was found in this game.".into())
 }
 
+pub fn can_apply_goldberg(game: &Game) -> bool {
+    find_steam_api(game).is_ok()
+}
+
+pub fn fixes_have_steam_api(game: &Game) -> bool {
+    let Ok(fixes) = fixes_dir(game) else {
+        return false;
+    };
+    let Ok(files) = walk(&fixes, 0) else {
+        return false;
+    };
+    files.iter().any(|path| {
+        matches!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("steam_api64.dll") | Some("steam_api.dll")
+        )
+    })
+}
+
 pub fn goldberg_applied(game: &Game) -> bool {
     let Ok(fixes) = fixes_dir(game) else { return false };
     if !read_manifest(&fixes.join(GOLDBERG_MANIFEST)).is_empty() {

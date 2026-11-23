@@ -1972,6 +1972,111 @@ fn has_overlay_users(merged: &std::path::Path) -> bool {
     false
 }
 
+#[cfg(windows)]
+fn ps_quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Quote one argument using the Windows CommandLineToArgvW rules so
+/// Start-Process receives the same arguments as a direct spawn.
+#[cfg(windows)]
+fn windows_quote_argument(value: &str) -> String {
+    if !value.is_empty() && !value.chars().any(|ch| ch == ' ' || ch == '\t' || ch == '"') {
+        return value.to_owned();
+    }
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0usize;
+    for ch in value.chars() {
+        match ch {
+            '\\' => {
+                backslashes += 1;
+                quoted.push('\\');
+            }
+            '"' => {
+                quoted.push_str(&"\\".repeat(backslashes + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                quoted.push(ch);
+                backslashes = 0;
+            }
+        }
+    }
+    if backslashes > 0 {
+        quoted.push_str(&"\\".repeat(backslashes));
+    }
+    quoted.push('"');
+    quoted
+}
+
+#[cfg(windows)]
+fn elevated_game_command(
+    program: &Path,
+    arguments: &[String],
+    cwd: &Path,
+    template: &std::process::Command,
+) -> Result<std::process::Command, String> {
+    let arguments = arguments
+        .iter()
+        .map(|value| windows_quote_argument(value))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let argument_option = if arguments.is_empty() {
+        String::new()
+    } else {
+        format!(" -ArgumentList {}", ps_quote_literal(&arguments))
+    };
+    let script = format!(
+        "$p = Start-Process -FilePath {} -WorkingDirectory {} -Verb RunAs -Wait -PassThru{}; exit $p.ExitCode",
+        ps_quote_literal(&program.display().to_string()),
+        ps_quote_literal(&cwd.display().to_string()),
+        argument_option,
+    );
+    let mut command = hidden_command("powershell");
+    command
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null());
+    for (key, value) in template.get_envs() {
+        match value {
+            Some(value) => {
+                command.env(key, value);
+            }
+            None => {
+                command.env_remove(key);
+            }
+        }
+    }
+    Ok(command)
+}
+
+#[cfg(windows)]
+fn spawn_game(
+    command: &mut std::process::Command,
+    program: &Path,
+    arguments: &[String],
+    cwd: &Path,
+) -> Result<std::process::Child, String> {
+    match command.spawn() {
+        Ok(child) => Ok(child),
+        Err(error) if error.raw_os_error() == Some(740) => {
+            eprintln!("SteamTron: game requires elevation; waiting for the UAC prompt");
+            elevated_game_command(program, arguments, cwd, command)?
+                .spawn()
+                .map_err(|error| format!("could not launch the elevated game: {error}"))
+        }
+        Err(error) => Err(format!("could not launch game: {error}")),
+    }
+}
+
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn try_overlay_wrapper() -> Option<i32> {
     use steamtron_overlay::{OverlayGame, PlatformOverlay};
@@ -2173,6 +2278,14 @@ fn try_overlay_wrapper() -> Option<i32> {
         // until the whole tree is gone, otherwise the game loses the merged
         // drive halfway through loading and looks like it crashed.
         #[allow(unused_mut)]
+        #[cfg(windows)]
+        let mut child = spawn_game(
+            &mut process,
+            Path::new(&rewritten[0]),
+            &rewritten[1..],
+            &workdir,
+        )?;
+        #[cfg(not(windows))]
         let mut child = process
             .spawn()
             .map_err(|error| format!("could not launch game: {error}"))?;
@@ -2664,6 +2777,25 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         }
     }
     #[cfg(windows)]
+    if let Some(fixes) = managed_fixes_dir(&game) {
+        if dir_has_entries(&fixes)
+            && fixes_have_launcher(&fixes)
+            && !fix_tools::goldberg_applied(&game)
+            && !fix_tools::fixes_have_steam_api(&game)
+            && fix_tools::can_apply_goldberg(&game)
+        {
+            let title = game.title.clone();
+            eprintln!("SteamTron: applying GoldBerg for {title}");
+            fix_tools::apply_goldberg(&game.id, &|message| eprintln!("SteamTron: {message}"))
+                .map_err(|error| format!("Could not apply GoldBerg for {title}: {error}"))?;
+            let refreshed = Library::load().map_err(|error| error.to_string())?;
+            game = refreshed
+                .game(&game_id)
+                .cloned()
+                .ok_or_else(|| format!("Unknown game {game_id}"))?;
+        }
+    }
+    #[cfg(windows)]
     let real_path = ensure_real_path(&game)
         .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?;
     #[cfg(windows)]
@@ -2731,7 +2863,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .try_clone()
         .map_err(|error| format!("{}: {error}", log.display()))?;
 
-    let (mut command, mode, program, arguments, overlay, fixes) = {
+    let (mut command, mode, program, arguments, overlay, fixes, launch_cwd) = {
     let target = primary_target(&game)
         .cloned()
         .ok_or_else(|| "This game has no launch target yet.".to_string())?;
@@ -2843,6 +2975,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         plan.arguments,
         use_overlay,
         fixes,
+        plan.cwd,
     )
     };
 
@@ -2878,10 +3011,23 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     }
     command.env("STEAMTRON_GAME_ID", &game.id);
     steamtron_core::prelaunch::run(&game, std::path::Path::new(&program), &stdout)?;
-    let child = command
+    command
         .stdin(Stdio::null())
         .stdout(stdout)
-        .stderr(stderr)
+        .stderr(stderr);
+    #[cfg(not(windows))]
+    let _ = &launch_cwd;
+    #[cfg(windows)]
+    let child = if overlay {
+        command
+            .spawn()
+            .map_err(|error| format!("Could not start the game: {error}"))?
+    } else {
+        spawn_game(&mut command, Path::new(&program), &arguments, &launch_cwd)
+            .map_err(|error| format!("Could not start the game: {error}"))?
+    };
+    #[cfg(not(windows))]
+    let child = command
         .spawn()
         .map_err(|error| format!("Could not start the game: {error}"))?;
     let pid = child.id();
