@@ -652,26 +652,36 @@ impl WindowsOverlay {
         // A directory mount keeps the caller's real path available; a free
         // drive letter is still the default for games that do not need it.
         let (mount, root) = if let Some(path) = self.explicit_mount_point.clone() {
-            fs::create_dir_all(&path).map_err(|error| {
-                OverlayError::MountFailed(format!(
-                    "could not create mountpoint {}: {error}",
-                    path.display()
-                ))
-            })?;
-            let empty = fs::read_dir(&path)
-                .map_err(|error| {
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|error| {
                     OverlayError::MountFailed(format!(
-                        "could not inspect mountpoint {}: {error}",
-                        path.display()
+                        "could not create {}: {error}",
+                        parent.display()
                     ))
-                })?
-                .next()
-                .is_none();
-            if !empty {
-                return Err(OverlayError::MountFailed(format!(
-                    "mountpoint is not empty: {}",
-                    path.display()
-                )));
+                })?;
+            }
+            if let Ok(metadata) = fs::symlink_metadata(&path) {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err(OverlayError::MountFailed(format!(
+                        "mountpoint is not a plain directory: {}",
+                        path.display()
+                    )));
+                }
+                let empty = fs::read_dir(&path)
+                    .map_err(|error| {
+                        OverlayError::MountFailed(format!(
+                            "could not inspect mountpoint {}: {error}",
+                            path.display()
+                        ))
+                    })?
+                    .next()
+                    .is_none();
+                if !empty {
+                    return Err(OverlayError::MountFailed(format!(
+                        "mountpoint is not empty: {}",
+                        path.display()
+                    )));
+                }
             }
             (path.display().to_string(), path)
         } else {
@@ -684,9 +694,26 @@ impl WindowsOverlay {
         let mut host = FileSystemHost::<UnionFs, CoarseGuard>::new(params, fs)
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
         let mut mounted = host.mount(mount.as_str());
+        if mounted.is_err() {
+            if let Some(path) = self.explicit_mount_point.as_ref() {
+                // WinFsp creates the directory mountpoint itself on some
+                // hosts, so an existing empty directory returns
+                // STATUS_OBJECT_NAME_COLLISION. Remove it and retry; if it
+                // did not exist, create it and retry the other way around.
+                if path.is_dir() {
+                    let empty = fs::read_dir(path)
+                        .map(|mut entries| entries.next().is_none())
+                        .unwrap_or(false);
+                    if empty {
+                        let _ = fs::remove_dir(path);
+                    }
+                } else if !path.exists() {
+                    let _ = fs::create_dir_all(path);
+                }
+                mounted = host.mount(mount.as_str());
+            }
+        }
         if mounted.is_err() && self.explicit_mount_point.is_some() {
-            // Some WinFsp hosts require the extended-length form for a
-            // directory mountpoint. Retry only for directory mounts.
             let extended = format!("\\\\?\\{mount}");
             mounted = host.mount(extended.as_str());
         }

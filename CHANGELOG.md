@@ -1,3 +1,12 @@
+## [0.1.55] - 2026-11-23
+
+### Fixed
+
+- The real-path WinFsp directory mount now handles
+  `STATUS_OBJECT_NAME_COLLISION`: if the empty mountpoint already exists it is
+  removed and the mount is retried (and the extended path form is tried as a
+  final fallback). This fixes the 0.1.54 directory mount failure.
+
 ## [0.1.54] - 2026-11-23
 
 ### Added

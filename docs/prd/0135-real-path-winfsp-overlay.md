@@ -68,7 +68,12 @@ data is copied or overwritten.
 - Tested: `mklink /D` to `S:` fails without elevation.
 - Code: Windows backend gained `with_mount_point` and a directory mount path.
 - Code: overlay CLI gained `--mountpoint`, `--junction`, `--base`.
-- Not run yet: installed 0.1.54 real-path Max Payne 3 launch.
+- Installed 0.1.54: the directory mount failed with
+  `STATUS_OBJECT_NAME_COLLISION (0xD0000035)` because the empty mountpoint
+  already existed; the junction stayed on the base and no game launched.
+- 0.1.55: removes/recreates the mountpoint and retries, then tries the extended
+  path form.
+- Not run yet: installed 0.1.55 real-path Max Payne 3 launch.
 
 ## Decisions and risks
 
