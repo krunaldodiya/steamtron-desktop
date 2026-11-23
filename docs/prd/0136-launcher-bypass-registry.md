@@ -110,10 +110,22 @@ nothing.
 - 0.1.60 runtime: the same launch works from normal, non-elevated SteamTron;
   the wrapper performs the UAC relaunch. The imported fix pack now includes
   GoldBerg files and was exported as the updated fixes backup.
-- GTA V Enhanced fixes contain RUNE64.dll, version.dll, socialclub.dll and
-  socialclub_emu.ini. 0.1.61 detects the RUNE/Steam proxy files and skips
-  auto-GoldBerg rather than stacking emulators. Not yet launched.
-- Not run yet: GTA V.
+- GTA V Enhanced fixes contain RUNE64.dll, version.dll, socialclub.dll,
+  socialclub_emu.ini, and the source ZIP also has `steam_api64.dll` +
+  `steam_settings`. The imported folder initially lacked the last two; the ZIP
+  import gap is tracked in PRD 0139. 0.1.61 detects the RUNE/Steam proxy files
+  and skips auto-GoldBerg.
+- GTA V Enhanced launch attempts:
+  - `PlayGTAV.exe` (fix) loops: `PlayGTAV.exe` -> `GTA5_Enhanced.exe` ->
+    `PlayGTAV.exe` repeatedly, with no game window.
+  - Direct `GTA5_Enhanced.exe` exits with code 4919 (`0x1337`, the RUNE
+    emulator failure code).
+  - The fix's `PlayGTAV.exe` is unsigned version 1.0.0.111; the original is
+    signed 1.0.0.112. The game is 1.0.1158.16.
+  - Conclusion: the supplied RUNE pack is not compatible with this restored
+    build under the current launch path. Generic Goldberg/real-path layers
+    cannot synthesize the missing game-specific patch. Not playable.
+- Not run yet: an updated/matching GTA V Enhanced patch.
 - Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,
   per-appid catalog, real-path prepare UI.
 
