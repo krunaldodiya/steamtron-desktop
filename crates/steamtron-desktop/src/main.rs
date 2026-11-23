@@ -2227,28 +2227,38 @@ fn try_overlay_wrapper() -> Option<i32> {
 
 
 #[cfg(windows)]
-fn retarget_junction(link: &Path, target: &Path) -> Result<(), String> {
+fn remove_junction(link: &Path) -> Result<(), String> {
     use std::os::windows::fs::MetadataExt;
 
-    if !target.is_dir() {
-        return Err(format!("junction target is not a directory: {}", target.display()));
+    let metadata = std::fs::symlink_metadata(link)
+        .map_err(|error| format!("could not inspect {}: {error}", link.display()))?;
+    // Junctions carry FILE_ATTRIBUTE_REPARSE_POINT but Rust's
+    // FileType::is_symlink is false for the mount-point reparse tag.
+    if metadata.file_attributes() & 0x0000_0400 == 0 {
+        return Err(format!("{} is not a junction", link.display()));
     }
-    if let Ok(metadata) = std::fs::symlink_metadata(link) {
-        // Junctions carry FILE_ATTRIBUTE_REPARSE_POINT but Rust's
-        // FileType::is_symlink is false for the mount-point reparse tag.
-        let reparse = metadata.file_attributes() & 0x0000_0400 != 0;
-        if !reparse {
-            return Err(format!("{} is not a junction", link.display()));
-        }
-        let status = hidden_command("cmd")
-            .arg("/c")
-            .arg("rmdir")
-            .arg(link.as_os_str())
-            .status()
-            .map_err(|error| format!("could not remove the junction: {error}"))?;
-        if !status.success() {
-            return Err(format!("could not remove the junction: {}", link.display()));
-        }
+    let status = hidden_command("cmd")
+        .arg("/c")
+        .arg("rmdir")
+        .arg(link.as_os_str())
+        .status()
+        .map_err(|error| format!("could not remove the junction: {error}"))?;
+    if !status.success() {
+        return Err(format!("could not remove the junction: {}", link.display()));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn retarget_junction(link: &Path, target: &Path) -> Result<(), String> {
+    if !target.is_dir() {
+        return Err(format!(
+            "junction target is not a directory: {}",
+            target.display()
+        ));
+    }
+    if std::fs::symlink_metadata(link).is_ok() {
+        remove_junction(link)?;
     }
     if let Some(parent) = link.parent() {
         std::fs::create_dir_all(parent)
@@ -2270,6 +2280,49 @@ fn retarget_junction(link: &Path, target: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn restore_real_path_layout(
+    game_id: &str,
+    layout: &RealPathLayout,
+) -> Result<serde_json::Value, String> {
+    if !layout.base.is_dir() {
+        return Err(format!(
+            "the prepared game base is missing: {}",
+            layout.base.display()
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(&layout.real)
+        .map_err(|error| format!("could not inspect {}: {error}", layout.real.display()))?;
+    use std::os::windows::fs::MetadataExt;
+    if metadata.file_attributes() & 0x0000_0400 == 0 {
+        return Err(format!(
+            "{} is no longer a real-path junction; refusing to move the game folder",
+            layout.real.display()
+        ));
+    }
+    remove_junction(&layout.real)?;
+    if let Err(error) = std::fs::rename(&layout.base, &layout.real) {
+        let _ = retarget_junction(&layout.real, &layout.base);
+        return Err(format!(
+            "could not move the game back to {}: {error}",
+            layout.real.display()
+        ));
+    }
+    let mount_removed = std::fs::remove_dir(&layout.mount).is_ok();
+    if let Some(parent) = layout.mount.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+    if let Some(parent) = layout.base.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+    remove_real_path_record(game_id)?;
+    Ok(serde_json::json!({
+        "restored": true,
+        "real": layout.real.display().to_string(),
+        "mountRemoved": mount_removed,
+    }))
 }
 
 #[cfg(windows)]
@@ -2301,7 +2354,7 @@ impl Drop for JunctionGuard {
 }
 
 #[cfg(windows)]
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 struct RealPathLayout {
     real: PathBuf,
     base: PathBuf,
@@ -2309,17 +2362,234 @@ struct RealPathLayout {
 }
 
 #[cfg(windows)]
-fn real_path_layout(game_id: &str) -> Option<RealPathLayout> {
-    let path = steamtron_core::paths::layout()
+fn real_path_record_path(game_id: &str) -> PathBuf {
+    steamtron_core::paths::layout()
         .home()
         .join("overlays")
-        .join(format!("{game_id}.json"));
-    let bytes = std::fs::read(path).ok()?;
+        .join(format!("{game_id}.json"))
+}
+
+#[cfg(windows)]
+fn real_path_layout(game_id: &str) -> Option<RealPathLayout> {
+    let bytes = std::fs::read(real_path_record_path(game_id)).ok()?;
     let layout: RealPathLayout = serde_json::from_slice(&bytes).ok()?;
     if !layout.base.is_dir() {
         return None;
     }
     Some(layout)
+}
+
+#[cfg(windows)]
+fn remove_real_path_record(game_id: &str) -> Result<(), String> {
+    let path = real_path_record_path(game_id);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("could not remove {}: {error}", path.display())),
+    }
+}
+
+#[cfg(windows)]
+fn real_path_status(game: &steamtron_core::library::Game) -> serde_json::Value {
+    match real_path_layout(&game.id) {
+        Some(layout) => serde_json::json!({
+            "supported": true,
+            "prepared": true,
+            "real": layout.real.display().to_string(),
+            "base": layout.base.display().to_string(),
+            "mount": layout.mount.display().to_string(),
+        }),
+        None => serde_json::json!({ "supported": true, "prepared": false }),
+    }
+}
+
+#[cfg(windows)]
+fn normalized_windows_path(path: &Path) -> PathBuf {
+    let text = path.display().to_string();
+    PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
+}
+
+#[cfg(windows)]
+fn fixes_have_launcher(root: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+    let launcher_tokens = [
+        "uplay_r1_loader",
+        "uplay_r2_loader",
+        "ubisoftconnect",
+        "ubisoftgame",
+        "upc_",
+        "socialclub",
+        "launcher.dll",
+        "launc.dll",
+        "gsrld",
+        "originclient",
+        "originsdk",
+        "eacore",
+        "eaapp",
+        "eadesktop",
+    ];
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            if fixes_have_launcher(&path) {
+                return true;
+            }
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if launcher_tokens.iter().any(|token| name.contains(token)) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+fn needs_real_path(game: &steamtron_core::library::Game) -> bool {
+    if managed_fixes_dir(game).is_some_and(|fixes| fixes_have_launcher(&fixes)) {
+        return true;
+    }
+    if let Some(target) = steamtron_core::runtime::primary_target(game) {
+        if let Ok(bytes) = std::fs::read(&target.executable) {
+            if bytes.windows(6).any(|window| window == b".rkstr".as_slice())
+                || bytes.windows(4).any(|window| window == b".tbm".as_slice())
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(windows))]
+fn real_path_status(_game: &steamtron_core::library::Game) -> serde_json::Value {
+    serde_json::json!({ "supported": false, "prepared": false })
+}
+
+#[cfg(windows)]
+fn save_real_path_layout(game_id: &str, layout: &RealPathLayout) -> Result<(), String> {
+    let path = real_path_record_path(game_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    }
+    let bytes = serde_json::to_vec_pretty(layout).map_err(|error| error.to_string())?;
+    std::fs::write(&path, bytes)
+        .map_err(|error| format!("could not write {}: {error}", path.display()))
+}
+
+#[cfg(windows)]
+fn ensure_real_path(
+    game: &steamtron_core::library::Game,
+) -> Result<Option<RealPathLayout>, String> {
+    use std::os::windows::fs::MetadataExt;
+
+    if let Some(layout) = real_path_layout(&game.id) {
+        return Ok(Some(layout));
+    }
+    if !needs_real_path(game) {
+        return Ok(None);
+    }
+    let real = normalized_windows_path(&game.installation.root);
+    if !real.is_dir() {
+        return Ok(None);
+    }
+    let parent = real
+        .parent()
+        .ok_or_else(|| format!("game has no parent folder: {}", real.display()))?;
+    let name = real
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("game folder has no name: {}", real.display()))?;
+    let computed_base = parent.join(".steamtron-base").join(name);
+    let mount = parent.join(".steamtron-mount").join(name);
+    std::fs::create_dir_all(&mount)
+        .map_err(|error| format!("could not create {}: {error}", mount.display()))?;
+    let metadata = std::fs::symlink_metadata(&real)
+        .map_err(|error| format!("could not inspect {}: {error}", real.display()))?;
+    let reparse = metadata.file_attributes() & 0x0000_0400 != 0;
+    let base = if reparse {
+        let target = std::fs::read_link(&real)
+            .map_err(|error| format!("could not read junction {}: {error}", real.display()))?;
+        if target.is_dir() && target != mount {
+            target
+        } else {
+            computed_base
+        }
+    } else {
+        if computed_base.exists() {
+            return Err(format!(
+                "real-path base already exists: {}",
+                computed_base.display()
+            ));
+        }
+        if let Some(base_parent) = computed_base.parent() {
+            std::fs::create_dir_all(base_parent)
+                .map_err(|error| format!("could not create {}: {error}", base_parent.display()))?;
+        }
+        std::fs::rename(&real, &computed_base).map_err(|error| {
+            format!(
+                "could not move the game to {}: {error}",
+                computed_base.display()
+            )
+        })?;
+        if let Err(error) = retarget_junction(&real, &computed_base) {
+            // The game content is already in the base folder; put it back
+            // rather than leaving the real path missing.
+            let _ = std::fs::rename(&computed_base, &real);
+            return Err(format!(
+                "could not prepare the real-path junction for {}: {error}",
+                real.display()
+            ));
+        }
+        computed_base
+    };
+    let layout = RealPathLayout {
+        real,
+        base,
+        mount,
+    };
+    save_real_path_layout(&game.id, &layout)?;
+    Ok(Some(layout))
+}
+
+#[tauri::command]
+fn restore_managed_real_path(game_id: String) -> Result<serde_json::Value, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = game_id;
+        return Err("The real-path overlay is only available on Windows.".into());
+    }
+    #[cfg(windows)]
+    {
+        use steamtron_core::library::Library;
+
+        require_auth()?;
+        if managed_runs()
+            .lock()
+            .map_err(|_| "Game state lock failed.".to_string())?
+            .contains_key(&game_id)
+        {
+            return Err("Stop the game before restoring its game folder.".into());
+        }
+        let library = Library::load().map_err(|error| error.to_string())?;
+        let game = library
+            .game(&game_id)
+            .ok_or_else(|| format!("unknown game {game_id}"))?;
+        let layout = real_path_layout(&game.id).ok_or_else(|| {
+            "No real-path overlay is prepared for this game.".to_string()
+        })?;
+        restore_real_path_layout(&game.id, &layout)
+    }
 }
 
 #[tauri::command]
@@ -2394,7 +2664,8 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         }
     }
     #[cfg(windows)]
-    let real_path = real_path_layout(&game.id);
+    let real_path = ensure_real_path(&game)
+        .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?;
     #[cfg(windows)]
     if let Some(layout) = real_path.as_ref() {
         retarget_junction(&layout.real, &layout.base)
@@ -3011,6 +3282,7 @@ fn managed_fixes_status(game_id: String) -> Result<serde_json::Value, String> {
         "enabled": game.fixes_enabled,
         "goldberg": tools["goldberg"],
         "steamless": tools["steamless"],
+        "real_path": real_path_status(game),
     }))
 }
 
@@ -5619,6 +5891,11 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
     if layout.content.exists() {
         return Err("A game folder already exists on the target drive.".into());
     }
+    #[cfg(windows)]
+    if let Some(real_path) = real_path_layout(&game.id) {
+        restore_real_path_layout(&game.id, &real_path)
+            .map_err(|error| format!("Could not restore the real-path overlay: {error}"))?;
+    }
     if let Some(parent) = layout.content.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -5662,6 +5939,11 @@ fn uninstall_managed_game_at(
     let root = game.installation.root.clone();
     if root.as_os_str().is_empty() || root == std::path::Path::new("/") {
         return Err("Refusing to delete an unsafe game folder.".into());
+    }
+    #[cfg(windows)]
+    if let Some(real_path) = real_path_layout(&game.id) {
+        restore_real_path_layout(&game.id, &real_path)
+            .map_err(|error| format!("Could not restore the real-path overlay: {error}"))?;
     }
     let existed = root.exists();
     if existed {
@@ -7215,6 +7497,7 @@ fn main() {
             generate_managed_appmanifest,
             steam_download_size,
             remove_managed_game,
+            restore_managed_real_path,
             unlink_managed_game,
             detach_umutron_paths,
             update_managed_launch_settings,

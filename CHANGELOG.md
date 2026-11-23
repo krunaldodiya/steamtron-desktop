@@ -1,3 +1,17 @@
+## [0.1.58] - 2026-11-23
+
+### Added
+
+- Managed Play auto-prepares the real-path overlay for games whose fixes
+  contain a launcher module (Uplay, SocialClub, RGL, EA/Origin). It moves the
+  game to a base on the same volume, creates the mountpoint and real-path
+  junction, and records the layout internally. No manual per-game sidecar is
+  needed. Simple games keep the drive-letter overlay. Import/Export/Remove
+  fixes are unchanged and remain additive.
+- The Fixes pane shows the prepared real-path layout and offers Restore game
+  folder. Uninstall and Move restore the layout before touching the game
+  folder, so a junction is never mistaken for the game content.
+
 ## [0.1.57] - 2026-11-23
 
 ### Fixed

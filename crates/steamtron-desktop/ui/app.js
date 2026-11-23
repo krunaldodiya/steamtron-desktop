@@ -2296,6 +2296,8 @@ function openManagedGameOptions(game) {
         return;
       }
       const present = status.files > 0;
+      const realPath = status.real_path || { prepared: false };
+      const realPathSupported = realPath.supported !== false;
       pane.innerHTML = `<h3>Fixes</h3>
         <p class="pane-note">Import, export, or remove per-game fixes. Fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
         <div class="fix-action-row"><button class="primary" id="fix-import" data-operation-button="fixes-import">Import fixes TAR…</button><button id="fix-export" data-operation-button="fixes-export"${present ? "" : " disabled"}>Export fixes TAR…</button></div>
@@ -2312,6 +2314,12 @@ function openManagedGameOptions(game) {
           <p class="fix-meta">${present ? `${status.files} file${status.files === 1 ? "" : "s"} · ${formatBytes(status.bytes)}` : "No fixes installed."}</p>
           <div class="fix-action-row"><button id="fix-open"${present ? "" : " disabled"}>Open fixes folder</button><button id="fix-remove" class="danger"${present ? "" : " disabled"}>Remove fixes</button></div>
         </section>
+        ${realPathSupported ? `<section class="fix-section"><h4>Real-path overlay</h4>
+          <p class="pane-note">Launcher games use a real-path overlay: the installed folder moves to a hidden base on the same drive, and a junction at the original path switches to the merged view only while the game runs. The installed game files are never modified.</p>
+          <p class="fix-path">${realPath.prepared ? escape(realPath.real) : "Not prepared. Play prepares it automatically when a launcher fix is detected."}</p>
+          ${realPath.prepared ? `<p class="fix-meta">Base: ${escape(realPath.base)}<br>Mount: ${escape(realPath.mount)}</p>` : ""}
+          <div class="fix-action-row"><button id="fix-realpath-restore" class="danger"${realPath.prepared ? "" : " disabled"}>Restore game folder</button></div>
+        </section>` : ""}
         <section class="fix-section"><h4>GoldBerg emulator</h4>
           <p class="pane-note">Replaces this game's Steam library with the GoldBerg emulator. The emulator release is downloaded once and shared by every game; an existing steam_interfaces.txt is preserved and the installed game files are never changed.</p>
           <p class="fix-meta">${status.goldberg ? "GoldBerg is applied to this fixes folder." : "GoldBerg is not applied. Assets are downloaded and verified on first use."}</p>
@@ -2388,6 +2396,10 @@ function openManagedGameOptions(game) {
         if (!(await confirmDialog({ title: "Remove fixes", message: "Remove all fixes for this game? Files are deleted from the fixes folder; installed game files are unchanged.", confirmLabel: "Remove", danger: true }))) return;
         void run(event.currentTarget, () => invoke("remove_managed_fixes", { gameId: game.id }),
           (result) => `Removed ${result.files} fix file${result.files === 1 ? "" : "s"}`);
+      };
+      pane.querySelector("#fix-realpath-restore").onclick = async (event) => {
+        if (!(await confirmDialog({ title: "Restore game folder", message: "Move the game back from the hidden real-path base to its normal folder? Stop the game first. Fixes are not changed.", confirmLabel: "Restore", danger: true }))) return;
+        void run(event.currentTarget, () => invoke("restore_managed_real_path", { gameId: game.id }), "Game folder restored");
       };
       pane.querySelector("#fix-goldberg-apply").onclick = (event) => {
         showToast("Applying GoldBerg — first use downloads the emulator assets.");
