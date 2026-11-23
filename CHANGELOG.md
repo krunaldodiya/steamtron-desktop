@@ -1,3 +1,13 @@
+## [0.1.61] - 2026-11-23
+
+### Fixed
+
+- Auto-GoldBerg no longer stacks on a fix that already ships its own Steam
+  emulator. RUNE/`version.dll` proxies, Steam client DLLs, CreamAPI/SmartSteamEmu
+  configs and existing `steam_settings` are detected before applying GoldBerg.
+  This matters for GTA V Enhanced, whose RUNE fix supplies `RUNE64.dll` and
+  `version.dll` plus a SocialClub emulator.
+
 ## [0.1.60] - 2026-11-23
 
 ### Fixed

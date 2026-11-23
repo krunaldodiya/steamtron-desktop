@@ -2872,7 +2872,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         if dir_has_entries(&fixes)
             && fixes_have_launcher(&fixes)
             && !fix_tools::goldberg_applied(&game)
-            && !fix_tools::fixes_have_steam_api(&game)
+            && !fix_tools::fixes_have_steam_emulator(&game)
             && fix_tools::can_apply_goldberg(&game)
         {
             let title = game.title.clone();

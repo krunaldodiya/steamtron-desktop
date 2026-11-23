@@ -110,6 +110,9 @@ nothing.
 - 0.1.60 runtime: the same launch works from normal, non-elevated SteamTron;
   the wrapper performs the UAC relaunch. The imported fix pack now includes
   GoldBerg files and was exported as the updated fixes backup.
+- GTA V Enhanced fixes contain RUNE64.dll, version.dll, socialclub.dll and
+  socialclub_emu.ini. 0.1.61 detects the RUNE/Steam proxy files and skips
+  auto-GoldBerg rather than stacking emulators. Not yet launched.
 - Not run yet: GTA V.
 - Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,
   per-appid catalog, real-path prepare UI.

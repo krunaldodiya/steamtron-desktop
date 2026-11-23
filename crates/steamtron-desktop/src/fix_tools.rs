@@ -205,7 +205,7 @@ pub fn can_apply_goldberg(game: &Game) -> bool {
     find_steam_api(game).is_ok()
 }
 
-pub fn fixes_have_steam_api(game: &Game) -> bool {
+pub fn fixes_have_steam_emulator(game: &Game) -> bool {
     let Ok(fixes) = fixes_dir(game) else {
         return false;
     };
@@ -213,10 +213,29 @@ pub fn fixes_have_steam_api(game: &Game) -> bool {
         return false;
     };
     files.iter().any(|path| {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
         matches!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some("steam_api64.dll") | Some("steam_api.dll")
-        )
+            name.as_str(),
+            "steam_api64.dll"
+                | "steam_api.dll"
+                | "steamclient.dll"
+                | "steamclient64.dll"
+                | "rune64.dll"
+                | "version.dll"
+                | "steam_emu.ini"
+                | "cream_api.ini"
+                | "coldclientloader.ini"
+                | "smartsteamemu.ini"
+        ) || (name == "steam_appid.txt"
+            && path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                == Some("steam_settings"))
     })
 }
 
