@@ -133,7 +133,11 @@ nothing.
   - module status/`Apply recommended` for GoldBerg and Steamless, with
     detection-only statuses for Uplay/SocialClub/RGL/EA/EOS;
   - launcher-loop watchdog in the Windows overlay wrapper.
-- Not run yet: an updated/matching GTA V Enhanced patch; installed 0.1.62.
+- 0.1.62 installed. GTA V Play returned the catalog note
+  ("The imported RUNE PlayGTAV build is incompatible...") without creating a
+  play log or starting a process tree, so the known loop is blocked.
+- Not run yet: an updated/matching GTA V Enhanced patch; Watch Dogs 2 and Max
+  Payne 3 regression after the catalog change.
 - Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,
   per-appid catalog, real-path prepare UI.
 

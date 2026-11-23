@@ -79,8 +79,15 @@ overlay. The user never creates a sidecar.
   exercised in an installed build.
 - 0.1.60 with normal non-elevated SteamTron: the overlay wrapper logged the
   elevation relaunch and started Far Cry 5. The user confirmed it played.
-- Not run yet: Watch Dogs 2, restore, uninstall or move after 0.1.58. Only code
-  inspection on Linux; Windows-only code is not compiled locally.
+- 0.1.62 installed. The catalog path prepared FC5 and the wrapper reached its
+  elevation relaunch, but the test was stopped when the user left. The app was
+  closed, the junction restored to base and the mount removed; no game was left
+  running.
+- 0.1.62 GTA V Play is blocked by the catalog `requires_patch` entry before any
+  overlay or process tree starts.
+- Not run yet: Watch Dogs 2, Max Payne 3, restore, uninstall or move after
+  0.1.58. Only code inspection on Linux; Windows-only code is not compiled
+  locally.
 
 ## Decisions and risks
 
