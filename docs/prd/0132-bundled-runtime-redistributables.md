@@ -1,6 +1,6 @@
 # Prefer game-bundled redistributables for runtime provisioning
 
-- Status: active
+- Status: done
 - Date: 2026-11-23
 - Areas: `steamtron-desktop` runtime provisioning
 
@@ -49,7 +49,7 @@ as success.
 ## Acceptance criteria
 
 - [x] Unit test covers bundled name/version/architecture matching.
-- [ ] Watch Dogs 2 Play installs VC++ 2012 from `_Redist` without the signature
+- [x] Watch Dogs 2 Play installs VC++ 2012 from `_Redist` without the signature
       error.
 - [ ] A missing runtime with no bundled installer still downloads and verifies.
 - [ ] A runtime installer returning 3010 does not fail Play.
@@ -59,7 +59,17 @@ as success.
 - Data: both Watch Dogs 2 `_Redist` installers are valid Microsoft-signed.
 - Code: `cargo check -p steamtron-desktop --bin steamtron-desktop` passes.
 - Code: unit test added for `bundled_name_matches`.
-- Not run yet: installed-build Watch Dogs 2 Play (0.1.52).
+- Installed build: 0.1.52 on Windows 11, Watch Dogs 2 Play on 2026-11-23.
+  `diagnostics/21c25088-94fd-4581-b059-0d071aa66585/play-1795414424.log`:
+  ```text
+  [runtime] missing Visual C++ 2012 Redistributable (x64) for MSVCR110.dll
+  [runtime] using bundled D:\SteamTronLibrary\steamtronapps\common\Watch Dogs 2\_Redist\vcredist_x64_2012_x64.exe for Visual C++ 2012 Redistributable (x64)
+  [runtime] waiting for the Windows elevation prompt
+  [runtime] installed Visual C++ 2012 Redistributable (x64)
+  SteamTron overlay: merged=S:\
+  SteamTron overlay: exec=S:\bin\WatchDogs2.exe
+  ```
+  The user confirmed the game started and ran normally.
 
 ## Decisions and risks
 
