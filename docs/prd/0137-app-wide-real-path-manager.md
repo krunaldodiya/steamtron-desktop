@@ -39,7 +39,7 @@ overlay. The user never creates a sidecar.
 - R7: A prepared real-path layout exposes a restore action in the Fixes pane
   that moves the base back and removes the junction/mount/record.
 - R8: A stale junction left by a forced exit is repaired to the base on the
-  next Play.
+  next Play or library snapshot when no managed run owns it.
 - R9: No direct overwrite of the installed game files.
 - R10: Uninstall and move restore the real-path layout first, so they never
   delete or move only a junction and strand the hidden base.

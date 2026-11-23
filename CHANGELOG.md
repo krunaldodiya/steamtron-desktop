@@ -11,7 +11,8 @@
 - Overlay wrappers write diagnostics through `--log`, so a relaunched elevated
   wrapper keeps its play log.
 - An installed game no longer briefly shows Download while Play is swapping the
-  real-path junction; the recorded base counts as installed content.
+  real-path junction; the recorded base counts as installed content, and a
+  junction left pointing at an unmounted union is repaired when no game owns it.
 
 ## [0.1.59] - 2026-11-23
 

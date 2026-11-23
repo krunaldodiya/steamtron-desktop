@@ -2658,6 +2658,28 @@ fn real_path_has_content(_game_id: &str) -> bool {
 }
 
 #[cfg(windows)]
+fn repair_real_path_junction(game_id: &str) {
+    let running = managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(game_id))
+        .unwrap_or(true);
+    if running {
+        return;
+    }
+    let Some(layout) = real_path_layout(game_id) else {
+        return;
+    };
+    let target = std::fs::read_link(&layout.real).ok();
+    let points_at_mount = target.as_deref() == Some(layout.mount.as_path());
+    if points_at_mount || !layout.real.is_dir() {
+        let _ = retarget_junction(&layout.real, &layout.base);
+    }
+}
+
+#[cfg(not(windows))]
+fn repair_real_path_junction(_game_id: &str) {}
+
+#[cfg(windows)]
 fn save_real_path_layout(game_id: &str, layout: &RealPathLayout) -> Result<(), String> {
     let path = real_path_record_path(game_id);
     if let Some(parent) = path.parent() {
@@ -7595,6 +7617,10 @@ fn library_snapshot() -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
     let library = Library::load().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    for game in library.games() {
+        repair_real_path_junction(&game.id);
+    }
     // Use the enriched projection: raw Game structs do not carry the live
     // `installed` flag, prefix state, or recent-play order the UI depends on.
     Ok(library_json(&library))
