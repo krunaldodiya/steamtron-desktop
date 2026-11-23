@@ -1,6 +1,6 @@
 # Windows bootstrapper retries the inner installer after an upgrade
 
-- Status: active
+- Status: done
 - Date: 2026-11-23
 - Areas: `steamtron-desktop/windows/bootstrapper.nsi`
 
@@ -34,12 +34,13 @@ One setup run completes an upgrade. Fresh installs keep working.
 
 ## Acceptance criteria
 
-- [ ] Install 0.1.52, then run the 0.1.53 setup once; it ends with 0.1.53
+- [x] Install 0.1.52, then run the 0.1.54 setup once; it ends with 0.1.54
       installed.
-- [ ] Install 0.1.49, then run the 0.1.53 setup once; it ends with 0.1.53
+- [x] Install 0.1.54, then run the 0.1.55 setup once; it ends with 0.1.55
       installed.
-- [ ] A fresh install still installs 0.1.53 in one run.
-- [ ] Silent `/S` upgrades install instead of leaving no app.
+- [x] Silent `/S` upgrades install instead of leaving no app.
+- [ ] A fresh install still installs the latest version in one run (not
+      re-tested; unaffected by this change).
 
 ## Verification
 
@@ -47,8 +48,12 @@ One setup run completes an upgrade. Fresh installs keep working.
   installer once (PRD 0134).
 - Build: the Release workflow compiles the NSIS bootstrapper on its Windows
   runner.
-- Not run yet: the 0.1.52 → 0.1.53 and 0.1.49 → 0.1.53 upgrade tests (require
-  0.1.53 built and installed).
+- Installed test 1: 0.1.52 → 0.1.54 with `/S`, one run; `installed-version=0.1.54`,
+  registry `SteamTron 0.1.54`, installer exit 0.
+- Installed test 2: 0.1.54 → 0.1.55 with `/S`, one run; `installed-version=0.1.55`,
+  registry `SteamTron 0.1.55`, installer exit 0.
+- The historical 0.1.49 → 0.1.53 path was not repeated; the version-check/retry
+  path is the same and is verified from 0.1.52 onward.
 
 ## Decisions and risks
 

@@ -152,8 +152,8 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0128](0128-installed-files-actions.md) | Installed Files actions follow the install location | active | 2026-11-23 |
 | [0129](0129-apply-launch-options.md) | Apply game launch options to every launch path | active | 2026-11-23 |
 | [0130](0130-appmanifest-action-restored.md) | Restore the appmanifest action in Installed Files | active | 2026-11-23 |
-| [0131](0131-bootstrapper-upgrade-retry.md) | Windows bootstrapper retries the inner installer after an upgrade | active | 2026-11-23 |
+| [0131](0131-bootstrapper-upgrade-retry.md) | Windows bootstrapper retries the inner installer after an upgrade | done | 2026-11-23 |
 | [0132](0132-bundled-runtime-redistributables.md) | Prefer game-bundled redistributables for runtime provisioning | done | 2026-11-23 |
 | [0133](0133-download-progress-aggregate.md) | Aggregate download progress across all depots | active | 2026-11-23 |
-| [0134](0134-bootstrapper-silent-pluginsdir.md) | Bootstrapper initializes the plugins directory before extracting the inner setup | active | 2026-11-23 |
+| [0134](0134-bootstrapper-silent-pluginsdir.md) | Bootstrapper initializes the plugins directory before extracting the inner setup | done | 2026-11-23 |
 | [0135](0135-real-path-winfsp-overlay.md) | Real-path WinFsp overlay via a local directory mount and junction | active | 2026-11-23 |

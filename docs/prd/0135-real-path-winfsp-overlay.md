@@ -54,7 +54,7 @@ data is copied or overwritten.
       path.
 - [x] Overlay launcher accepts `--mountpoint`, `--junction`, `--base`, creates
       the junction after mount, and restores it before unmount.
-- [ ] Max Payne 3 launches through the real path with the Rockstar fix and no
+- [x] Max Payne 3 launches through the real path with the Rockstar fix and no
       “Rockstar required” message.
 - [ ] A launcher that spawns child processes keeps the junction/mount alive
       until the whole tree exits.
@@ -73,7 +73,11 @@ data is copied or overwritten.
   already existed; the junction stayed on the base and no game launched.
 - 0.1.55: removes/recreates the mountpoint and retries, then tries the extended
   path form.
-- Not run yet: installed 0.1.55 real-path Max Payne 3 launch.
+- Installed 0.1.55 on Windows 11: manual
+  `--mountpoint/.maxpayne3-mount --junction/…/Max Payne 3 --base/.maxpayne3-base`
+  launch. The game started through the real path with the injected fixes; the
+  user confirmed “game started hurray.” The junction was still pointing at the
+  base before the launch and was retargeted to the mountpoint for the game.
 
 ## Decisions and risks
 

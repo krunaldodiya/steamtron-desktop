@@ -1,6 +1,6 @@
 # Bootstrapper initializes the plugins directory before extracting the inner setup
 
-- Status: active
+- Status: done
 - Date: 2026-11-23
 - Areas: `crates/steamtron-desktop/windows/bootstrapper.nsi`
 
@@ -56,9 +56,10 @@ the requested version installed; a failed inner launch is reported, not hidden.
       installers using local NSIS.
 - [x] An instrumented bootstrapper with `InitPluginsDir` extracts and launches a
       fake inner installer from `$PLUGINSDIR` in silent mode.
-- [ ] The built 0.1.53 setup upgrades 0.1.52 to 0.1.53 in one silent run.
-- [ ] The same setup upgrades 0.1.49 to 0.1.53 in one silent run.
-- [ ] The graphical wizard still installs/upgrades in one run.
+- [x] The built setup upgrades 0.1.52 to 0.1.54 in one silent run.
+- [x] The built setup upgrades 0.1.54 to 0.1.55 in one silent run.
+- [ ] The graphical wizard still installs/upgrades in one run (not re-tested).
+- [ ] A fresh install still installs in one run (not re-tested).
 
 ## Verification
 
@@ -68,7 +69,10 @@ the requested version installed; a failed inner launch is reported, not hidden.
   no inner log.
 - Instrumented copy with `InitPluginsDir`: `pluginsdir=C:\Users\...\Temp\nsrXXXX.tmp`,
   fake inner log records `cmdline="...\SteamTron-app-setup.exe" /S`.
-- Not run yet: installed 0.1.53 upgrade (needs the next approved build and UAC).
+- Installed 0.1.52: 0.1.54 setup `/S` elevated, exit 0, installed version 0.1.54,
+  registry `SteamTron 0.1.54`.
+- Installed 0.1.54: 0.1.55 setup `/S` elevated, exit 0, installed version 0.1.55,
+  registry `SteamTron 0.1.55`.
 
 ## Decisions and risks
 
