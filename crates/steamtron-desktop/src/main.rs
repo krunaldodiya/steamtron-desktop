@@ -2925,6 +2925,10 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
                 .ok_or_else(|| format!("Unknown game {game_id}"))?;
         }
     }
+    if let Some(entry) = profile.as_ref() {
+        // GoldBerg reloads the game from disk; re-apply the catalog target.
+        catalog::apply_target(&mut game, entry)?;
+    }
     #[cfg(windows)]
     let real_path = {
         let drive = profile
