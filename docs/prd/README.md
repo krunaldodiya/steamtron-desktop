@@ -157,3 +157,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0133](0133-download-progress-aggregate.md) | Aggregate download progress across all depots | active | 2026-11-23 |
 | [0134](0134-bootstrapper-silent-pluginsdir.md) | Bootstrapper initializes the plugins directory before extracting the inner setup | done | 2026-11-23 |
 | [0135](0135-real-path-winfsp-overlay.md) | Real-path WinFsp overlay via a local directory mount and junction | active | 2026-11-23 |
+| [0136](0136-launcher-bypass-registry.md) | Launcher-bypass module registry and one-click auto-fix | active | 2026-11-23 |
