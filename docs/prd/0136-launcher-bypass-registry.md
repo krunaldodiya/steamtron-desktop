@@ -45,6 +45,15 @@ nothing.
   exe patch, unsupported.
 - R10: Never modify the installed game files; everything lands in the fixes
   overlay/base layout.
+- R11: A curated **per-appid catalog** supplies game-specific launch metadata:
+  `launch_steam`/`launch_exe`, target executable, prerequisites, AV exclusion,
+  known errors/instructions, fix/module hints, and a “needs game-specific exe”
+  flag. The catalog stores metadata only; it contains no external fix links.
+- R12: The existing **Import fixes / Export fixes / Remove fixes** flow is
+  preserved. Built-in modules are additive, tracked by their own manifests, and
+  auto-apply never deletes or overwrites user-imported fixes without an explicit
+  conflict confirmation. Export includes module files; removing a module removes
+  only module-owned files.
 
 ## Coverage target
 
@@ -71,12 +80,22 @@ nothing.
 - [ ] The UI shows module status and can remove each module.
 - [ ] Unsupported launchers are reported, not silently ignored.
 - [ ] Real-path layout can be prepared/removed for any game from the UI.
+- [ ] The per-appid catalog supplies the correct target/prerequisites for Far
+      Cry 5, Watch Dogs 2, GTA V Enhanced and Max Payne 3.
+- [ ] Import/Export/Remove fixes continue to work; auto-apply does not delete
+      imported fixes; module removal removes only module-owned files.
 
 ## Verification
 
 - Max Payne 3 real-path overlay: desktop Play verified in 0.1.57 (PRD 0135).
 - Tool research: Goldberg SocialClub Emu, Uplay R1/R2 unlockers (acidicoala /
   Mr_Goldberg), Anadius Origin Emulator/Unwrapper, EOS emulators.
+- Catalog research: Project Lightning `bypass.json` (C# viewer) is keyed by
+  Steam appid and records launch mode, target, prerequisites, exclusions,
+  instructions and a fix name. Examples: Far Cry 5 552520, Watch Dogs 2 447040
+  (`bin/WatchDogs2.exe`), GTA V Enhanced 3240220 (`PlayGTAV.exe`), Max Payne 3
+  204100. It is a downloader/catalog, not a generic launcher engine; only the
+  metadata idea is used.
 - Not run yet: Far Cry 5, GTA V.
 - Not implemented yet: modules, analyzer, auto-apply UI, real-path prepare UI.
 
