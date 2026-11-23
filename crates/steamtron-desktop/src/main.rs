@@ -1672,14 +1672,14 @@ async fn install_fixes(app: tauri::AppHandle, appid: String) -> Result<Option<Fi
     let emit_game = appid.clone();
     let started = std::time::Instant::now();
     let worker_appid = appid.clone();
-    emit_operation_stats(&app, operation, &appid, "extract", "Importing fixes TAR…", 0.0, 0, 0, started);
+    emit_operation_stats(&app, operation, &appid, "extract", "Importing fixes archive…", 0.0, 0, 0, started);
     let extracted = tauri::async_runtime::spawn_blocking(move || {
         let mut last_emit = std::time::Instant::now() - std::time::Duration::from_millis(250);
         install_tar_with_progress(&worker_appid, &path, &mut |done, total| {
             operation_check(&worker_control)?;
             if last_emit.elapsed() >= std::time::Duration::from_millis(120) || done >= total {
                 let percent = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
-                emit_operation_stats(&emit_app, operation, &emit_game, "extract", "Importing fixes TAR…", percent, done, total, started);
+                emit_operation_stats(&emit_app, operation, &emit_game, "extract", "Importing fixes archive…", percent, done, total, started);
                 last_emit = std::time::Instant::now();
             }
             Ok(())
@@ -3789,7 +3789,7 @@ async fn install_managed_fixes(
     let emit_app = app.clone();
     let emit_game = game_id.clone();
     let started = std::time::Instant::now();
-    emit_operation_stats(&app, operation, &game_id, "extract", "Importing fixes TAR…", 0.0, 0, 0, started);
+    emit_operation_stats(&app, operation, &game_id, "extract", "Importing fixes archive…", 0.0, 0, 0, started);
     let worker_path = path.clone();
     let worker_game = game_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -3806,7 +3806,7 @@ async fn install_managed_fixes(
                         operation,
                         &emit_game,
                         "extract",
-                        "Importing fixes TAR…",
+                        "Importing fixes archive…",
                         percent,
                         done,
                         total,
