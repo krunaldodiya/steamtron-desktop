@@ -64,23 +64,36 @@ error if the user declines.
 
 - 0.1.58 installed, real-path auto-prepare verified for Far Cry 5; launch failed
   with os error 740 (log above).
-- 0.1.59 code: `spawn_game` catches 740, `elevated_game_command` relaunches
-  through PowerShell `Start-Process -Verb RunAs -Wait`, preserving the
-  executable, quoted arguments, working directory and environment. The overlay
-  wrapper and direct managed Play both use it.
+- 0.1.59 with the app already elevated and GoldBerg applied: Far Cry 5 launched
+  through the real path (game PID 6428, wrapper PID 17088). This proves the game
+  and overlay are otherwise correct.
+- 0.1.59 with a normal (non-elevated) app: the game spawn failed with 740 and
+  the per-game `Start-Process -Verb RunAs` retry failed with
+  `The volume does not contain a recognized file system` because its working
+  directory was on the WinFsp union. The junction and mount were restored.
+- 0.1.60 code changes the retry design: the wrapper restores the junction,
+  unmounts, then relaunches **itself** elevated with the same args and a normal
+  working directory. The elevated wrapper mounts and starts the game directly.
+  `--log` keeps diagnostics across the relaunch, and
+  `STEAMTRON_OVERLAY_ELEVATED=1` prevents recursion.
 - Not yet installed or run; Windows-only code is not compiled locally.
 
 ## Decisions and risks
 
+- The first design (elevate the game after the union was mounted) does not work:
+  the elevated launcher cannot use a working directory on the WinFsp union.
+  Elevating the whole wrapper before the mount avoids that boundary.
 - Use PowerShell `Start-Process -Verb RunAs` rather than raw `ShellExecuteEx`
   because the project already relies on that pattern for runtimes and security,
   and it supports `-Wait` for the process tree.
 - The UAC prompt is user consent; it cannot be automated or hidden.
-- A medium-integrity app cannot assign an elevated game to its job object. The
-  wrapper waits on the PowerShell process, but the Stop action may not terminate
-  an already elevated game. Closing the game remains the fallback.
-- The elevated game inherits the wrapper's environment, including any
+- The medium wrapper waits for the elevated wrapper. The Stop action can stop
+  the medium wrapper, but Windows may keep the elevated game alive; closing the
+  game remains the fallback.
+- The elevated wrapper inherits the wrapper's environment, including any
   game-specific variables set by Play.
+- The overlay wrapper logs through `--log`, so an elevated process that cannot
+  inherit the app's stdout/stderr still writes diagnostics.
 
 ## Links
 

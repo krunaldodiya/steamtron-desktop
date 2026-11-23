@@ -1942,12 +1942,25 @@ fn proton_launcher(appid: &str) -> Option<(std::path::PathBuf, std::path::PathBu
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+static OVERLAY_LOG: OnceLock<PathBuf> = OnceLock::new();
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn overlay_log(message: impl AsRef<str>) {
     // Play redirects this process's stderr to the per-game diagnostic log, so
-    // wrapper progress is visible in Game Settings -> Debug. Windows games are
-    // GUI binaries and produce no stdout of their own, which left the log
-    // empty even though the launch succeeded.
-    eprintln!("SteamTron overlay: {}", message.as_ref());
+    // wrapper progress is visible in Game Settings -> Debug. An elevated
+    // relaunch cannot inherit those handles, so it also appends to --log.
+    let line = format!("SteamTron overlay: {}", message.as_ref());
+    eprintln!("{line}");
+    if let Some(path) = OVERLAY_LOG.get() {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(file, "{line}");
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -2099,6 +2112,7 @@ fn try_overlay_wrapper() -> Option<i32> {
     let mut mountpoint = None;
     let mut junction = None;
     let mut base = None;
+    let mut log = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -2114,9 +2128,13 @@ fn try_overlay_wrapper() -> Option<i32> {
             "--mountpoint" => { mountpoint = args.get(index + 1).cloned(); index += 2; }
             "--junction" => { junction = args.get(index + 1).cloned(); index += 2; }
             "--base" => { base = args.get(index + 1).cloned(); index += 2; }
+            "--log" => { log = args.get(index + 1).cloned(); index += 2; }
             "--" => { command.extend_from_slice(&args[index + 1..]); break; }
             value => { command.push(value.to_owned()); index += 1; }
         }
+    }
+    if let Some(path) = log {
+        let _ = OVERLAY_LOG.set(PathBuf::from(path));
     }
     let result = (|| -> Result<i32, String> {
         let appid = appid.ok_or("missing --appid")?;
@@ -2279,12 +2297,49 @@ fn try_overlay_wrapper() -> Option<i32> {
         // drive halfway through loading and looks like it crashed.
         #[allow(unused_mut)]
         #[cfg(windows)]
-        let mut child = spawn_game(
-            &mut process,
-            Path::new(&rewritten[0]),
-            &rewritten[1..],
-            &workdir,
-        )?;
+        let mut child = match process.spawn() {
+            Ok(child) => child,
+            Err(error) if error.raw_os_error() == Some(740) => {
+                if std::env::var_os("STEAMTRON_OVERLAY_ELEVATED").is_some() {
+                    return Err(
+                        "the game still requires elevation after the elevated relaunch".into(),
+                    );
+                }
+                // Start-Process cannot elevate a child whose working directory
+                // is on the WinFsp union. Relaunch the whole wrapper elevated:
+                // it mounts in the elevated session and then starts the game
+                // directly, with the correct cwd and no second mount.
+                overlay_log("game requires elevation; relaunching the overlay elevated");
+                if let Some(mut guard) = junction_guard.take() {
+                    guard.restore()?;
+                }
+                overlay.unmount().map_err(|error| error.to_string())?;
+                let exe = std::env::current_exe().map_err(|error| {
+                    format!("could not resolve the overlay executable: {error}")
+                })?;
+                let cwd = exe
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+                let mut template = hidden_command("cmd");
+                template.env("STEAMTRON_OVERLAY_ELEVATED", "1");
+                let mut elevated = elevated_game_command(&exe, &args, &cwd, &template)?;
+                elevated
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                let mut elevated_child = elevated.spawn().map_err(|error| {
+                    format!("could not start the elevated overlay: {error}")
+                })?;
+                let status = elevated_child.wait().map_err(|error| {
+                    format!("elevated overlay wait failed: {error}")
+                })?;
+                let code = status.code().unwrap_or(1);
+                overlay_log(format!("elevated wrapper exit={code}"));
+                return Ok(code);
+            }
+            Err(error) => return Err(format!("could not launch game: {error}")),
+        };
         #[cfg(not(windows))]
         let mut child = process
             .spawn()
@@ -2586,6 +2641,20 @@ fn needs_real_path(game: &steamtron_core::library::Game) -> bool {
 #[cfg(not(windows))]
 fn real_path_status(_game: &steamtron_core::library::Game) -> serde_json::Value {
     serde_json::json!({ "supported": false, "prepared": false })
+}
+
+#[cfg(windows)]
+fn real_path_has_content(game_id: &str) -> bool {
+    real_path_layout(game_id).is_some_and(|layout| {
+        std::fs::read_dir(&layout.base)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(not(windows))]
+fn real_path_has_content(_game_id: &str) -> bool {
+    false
 }
 
 #[cfg(windows)]
@@ -2925,7 +2994,12 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .arg("--cwd")
             .arg(&target_cwd)
             .arg("--steam-root")
-            .arg(&steam_root_display);
+            .arg(&steam_root_display)
+            .arg("--log")
+            .arg(&log)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         #[cfg(windows)]
         if let Some(layout) = real_path.as_ref() {
             command
@@ -3011,25 +3085,40 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     }
     command.env("STEAMTRON_GAME_ID", &game.id);
     steamtron_core::prelaunch::run(&game, std::path::Path::new(&program), &stdout)?;
-    command
-        .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr);
     #[cfg(not(windows))]
     let _ = &launch_cwd;
     #[cfg(windows)]
     let child = if overlay {
+        // The overlay command already writes through --log and has null stdio.
+        // Close the app's handles so the wrapper can append to the same file.
+        drop(stdout);
+        drop(stderr);
         command
             .spawn()
             .map_err(|error| format!("Could not start the game: {error}"))?
     } else {
+        command
+            .stdin(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr);
         spawn_game(&mut command, Path::new(&program), &arguments, &launch_cwd)
             .map_err(|error| format!("Could not start the game: {error}"))?
     };
     #[cfg(not(windows))]
-    let child = command
-        .spawn()
-        .map_err(|error| format!("Could not start the game: {error}"))?;
+    let child = if overlay {
+        drop(stdout);
+        drop(stderr);
+        command
+            .spawn()
+            .map_err(|error| format!("Could not start the game: {error}"))?
+    } else {
+        command
+            .stdin(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()
+            .map_err(|error| format!("Could not start the game: {error}"))?
+    };
     let pid = child.id();
     // Launchers often start the real game and exit (Witcher 3's
     // REDprelauncher, RDR2's Launcher.exe). Track the whole job so the run
@@ -3678,11 +3767,15 @@ fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value
         .map(|game| {
             let mut value = serde_json::to_value(game).unwrap_or(serde_json::Value::Null);
             let root = &game.installation.root;
-            let installed = game.installation.confirmed
-                && root.is_dir()
+            let root_has_content = root.is_dir()
                 && std::fs::read_dir(root)
                     .map(|mut entries| entries.next().is_some())
                     .unwrap_or(false);
+            // During Play the real path is briefly moved between the base and
+            // the mounted union. A snapshot taken in that window must not make
+            // an installed game look like a download.
+            let installed = game.installation.confirmed
+                && (root_has_content || real_path_has_content(&game.id));
             value["installed"] = serde_json::json!(installed);
             value["prefix_exists"] = serde_json::json!(game.installation.prefix.is_dir());
             value

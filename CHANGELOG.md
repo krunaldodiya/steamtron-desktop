@@ -1,3 +1,18 @@
+## [0.1.60] - 2026-11-23
+
+### Fixed
+
+- Games whose launcher requires administrator rights now work from a normal,
+  non-elevated SteamTron. When the game spawn returns `ERROR_ELEVATION_REQUIRED`
+  the overlay wrapper restores the junction, unmounts, and relaunches itself
+  elevated before mounting again. The elevated wrapper starts the game with the
+  correct merged working directory, so Windows no longer rejects the elevation
+  because the cwd is on the WinFsp union.
+- Overlay wrappers write diagnostics through `--log`, so a relaunched elevated
+  wrapper keeps its play log.
+- An installed game no longer briefly shows Download while Play is swapping the
+  real-path junction; the recorded base counts as installed content.
+
 ## [0.1.59] - 2026-11-23
 
 ### Fixed

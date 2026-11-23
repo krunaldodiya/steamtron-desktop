@@ -103,7 +103,11 @@ nothing.
   launcher module, the game has a Steam API DLL, the fixes do not already ship
   a Steam API DLL, and GoldBerg is not applied. This is a first slice of R1/R3,
   not the full registry.
-- Not run yet: Far Cry 5 with automatic GoldBerg, GTA V.
+- 0.1.59 runtime: Far Cry 5 launched through the real path with the imported
+  CODEX/Uplay fix plus auto-applied GoldBerg, with SteamTron elevated (game PID
+  6428). The imported Uplay loader and game-specific exe are still required;
+  built-in Uplay replacement is not implemented.
+- Not run yet: GTA V.
 - Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,
   per-appid catalog, real-path prepare UI.
 

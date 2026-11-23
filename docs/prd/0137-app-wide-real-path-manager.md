@@ -43,6 +43,9 @@ overlay. The user never creates a sidecar.
 - R9: No direct overwrite of the installed game files.
 - R10: Uninstall and move restore the real-path layout first, so they never
   delete or move only a junction and strand the hidden base.
+- R11: A library snapshot taken while Play is swapping the junction counts the
+  recorded base as installed content, so the UI does not flash Download for an
+  installed game.
 
 ## Acceptance criteria
 
@@ -51,7 +54,8 @@ overlay. The user never creates a sidecar.
       reuses an existing layout record.
 - [x] Simple games still use the drive-letter overlay.
 - [x] Max Payne 3 still uses its existing layout record.
-- [ ] Far Cry 5 Play auto-prepares and launches with the real path.
+- [x] Far Cry 5 Play auto-prepares and launches with the real path (verified with
+      the app running elevated; PRD 0138 tracks the normal-app path).
 - [ ] Watch Dogs 2 still launches with the real path.
 - [ ] Restore moves the base back and removes the junction/mount/record.
 - [ ] Uninstall and move restore the layout first.
@@ -64,9 +68,13 @@ overlay. The user never creates a sidecar.
   `609dd001e470c22a18f8cf9511226433c9cde19ae83e39ddc7ee962f7969b94f`).
 - Far Cry 5 Play created `.steamtron-base/Far Cry 5`,
   `.steamtron-mount/Far Cry 5`, the real-path junction and
-  `overlays/af1b96af-...json` automatically. The overlay log shows the mount
-  and junction, then the game launch was blocked by the fix launcher's
-  elevation manifest (`os error 740`), tracked separately in PRD 0138.
+  `overlays/af1b96af-...json` automatically.
+- 0.1.59 with the app running elevated and GoldBerg applied: Far Cry 5 launched
+  through the real path (game PID 6428, overlay wrapper PID 17088) and the log
+  `play-1795431669.log` shows the mount, junction, cwd and target.
+- After that Play the UI briefly showed Download for the running game because
+  the library snapshot ran while the junction was being swapped. 0.1.60 counts
+  the recorded base as installed (R11); not yet verified in an installed build.
 - Not run yet: Watch Dogs 2, restore, uninstall or move after 0.1.58. Only code
   inspection on Linux; Windows-only code is not compiled locally.
 
