@@ -1,3 +1,13 @@
+## [0.1.49] - 2026-11-23
+
+### Added
+
+- Restored **Generate app manifest** next to **Generate Lua/manifests** in
+  Game Settings → Installed Files. It rewrites the game's appmanifest from the
+  current library entry (launch options, targets, paths) and preserves extra
+  fields such as details, integrity and quicklook, without Steam or network
+  access.
+
 ## [0.1.48] - 2026-11-23
 
 ### Fixed
