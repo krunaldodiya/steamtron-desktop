@@ -53,9 +53,9 @@ error if the user declines.
 
 ## Acceptance criteria
 
-- [ ] Far Cry 5 Play on a non-elevated SteamTron shows a UAC prompt, then starts
+- [x] Far Cry 5 Play on a non-elevated SteamTron shows a UAC prompt, then starts
       the game with the real-path overlay mounted.
-- [ ] The journal records the elevation-required retry and the eventual exit.
+- [x] The journal records the elevation-required retry and the elevated relaunch.
 - [ ] Declining the UAC prompt restores the junction and unmounts the overlay.
 - [ ] A non-elevated game still starts without a prompt.
 - [ ] Direct Play (without fixes) supports the same elevation fallback.
@@ -76,7 +76,14 @@ error if the user declines.
   working directory. The elevated wrapper mounts and starts the game directly.
   `--log` keeps diagnostics across the relaunch, and
   `STEAMTRON_OVERLAY_ELEVATED=1` prevents recursion.
-- Not yet installed or run; Windows-only code is not compiled locally.
+- 0.1.60 installed from the verified installer (SHA-256
+  `81e5edbb6ed5a88d14550ca4c76d43a0f388ead7b42b6f0cebf302544a74dddd`).
+  Far Cry 5 Play from the normal non-elevated app produced
+  `play-1795434674.log`: the first wrapper found the game required elevation,
+  restored and unmounted, then the elevated wrapper logged a second `start`,
+  `merged`, `junction`, `cwd` and `exec`. The user confirmed the game played.
+- Not yet verified: declining UAC, direct Play, and a non-elevated game start on
+  0.1.60.
 
 ## Decisions and risks
 

@@ -107,6 +107,9 @@ nothing.
   CODEX/Uplay fix plus auto-applied GoldBerg, with SteamTron elevated (game PID
   6428). The imported Uplay loader and game-specific exe are still required;
   built-in Uplay replacement is not implemented.
+- 0.1.60 runtime: the same launch works from normal, non-elevated SteamTron;
+  the wrapper performs the UAC relaunch. The imported fix pack now includes
+  GoldBerg files and was exported as the updated fixes backup.
 - Not run yet: GTA V.
 - Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,
   per-appid catalog, real-path prepare UI.

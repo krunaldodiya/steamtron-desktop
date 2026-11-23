@@ -54,8 +54,8 @@ overlay. The user never creates a sidecar.
       reuses an existing layout record.
 - [x] Simple games still use the drive-letter overlay.
 - [x] Max Payne 3 still uses its existing layout record.
-- [x] Far Cry 5 Play auto-prepares and launches with the real path (verified with
-      the app running elevated; PRD 0138 tracks the normal-app path).
+- [x] Far Cry 5 Play auto-prepares and launches with the real path from a normal
+      non-elevated app (0.1.60; PRD 0138).
 - [ ] Watch Dogs 2 still launches with the real path.
 - [ ] Restore moves the base back and removes the junction/mount/record.
 - [ ] Uninstall and move restore the layout first.
@@ -73,8 +73,12 @@ overlay. The user never creates a sidecar.
   through the real path (game PID 6428, overlay wrapper PID 17088) and the log
   `play-1795431669.log` shows the mount, junction, cwd and target.
 - After that Play the UI briefly showed Download for the running game because
-  the library snapshot ran while the junction was being swapped. 0.1.60 counts
-  the recorded base as installed (R11); not yet verified in an installed build.
+  the library snapshot ran while the junction was being swapped or left on the
+  unmounted mount. 0.1.60 counts the recorded base as installed (R11) and
+  repairs stale junctions on refresh; code verified on Linux only, not yet
+  exercised in an installed build.
+- 0.1.60 with normal non-elevated SteamTron: the overlay wrapper logged the
+  elevation relaunch and started Far Cry 5. The user confirmed it played.
 - Not run yet: Watch Dogs 2, restore, uninstall or move after 0.1.58. Only code
   inspection on Linux; Windows-only code is not compiled locally.
 
