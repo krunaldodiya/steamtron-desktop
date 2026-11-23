@@ -33,9 +33,9 @@ One setup run completes an upgrade. Fresh installs keep working.
 
 ## Acceptance criteria
 
-- [ ] Install 0.1.49, then run the 0.1.51 setup once; it ends with 0.1.51
+- [ ] Install 0.1.49, then run the 0.1.52 setup once; it ends with 0.1.52
       installed.
-- [ ] A fresh install still installs 0.1.51 in one run.
+- [ ] A fresh install still installs 0.1.52 in one run.
 - [ ] Silent `/S` upgrades install instead of leaving no app.
 
 ## Verification
@@ -44,7 +44,7 @@ One setup run completes an upgrade. Fresh installs keep working.
   installer.
 - Build: the Release workflow compiles the NSIS bootstrapper on its Windows
   runner.
-- Not run yet: the 0.1.49 → 0.1.51 upgrade test (requires 0.1.49 installed).
+- Not run yet: the 0.1.49 → 0.1.52 upgrade test (requires 0.1.49 installed).
 
 ## Decisions and risks
 

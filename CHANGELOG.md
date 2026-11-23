@@ -1,15 +1,17 @@
-## [0.1.51] - 2026-11-23
+## [0.1.52] - 2026-11-23
 
 ### Fixed
 
-- Windows runtime provisioning now prefers the Microsoft-signed
-  redistributables shipped with the game (Watch Dogs 2 `_Redist` VC++ 2012)
-  before downloading. A stale or partial cached download no longer blocks Play;
-  downloads retry once and reboot-required installer exits are accepted.
-- The Windows bootstrapper now re-runs the inner installer when an upgrade's
-  first pass only removed the previous version. One setup run completes the
-  upgrade instead of leaving no app installed. The same fix applies to the
-  interactive wizard and `/S`.
+- Download progress now aggregates every depot and uses the real download size.
+  The total comes from the expected Steam size (or the appmanifest and merged
+  depot plans), never from a single `Downloaded` value, and 100% is held until
+  every content group completes. Max Payne 3 no longer shows 100 MiB/100% for a
+  32.5 GiB download.
+- Windows runtime provisioning prefers the Microsoft-signed redistributables
+  shipped with the game (Watch Dogs 2 `_Redist` VC++ 2012) before downloading.
+  Invalid cached downloads are retried, and reboot-required exits are accepted.
+- The Windows bootstrapper re-runs the inner installer when an upgrade's first
+  pass only removed the previous version, so one setup run completes upgrades.
 
 ## [0.1.49] - 2026-11-23
 
