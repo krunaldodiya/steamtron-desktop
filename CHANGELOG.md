@@ -1,3 +1,14 @@
+## [0.1.47] - 2026-11-23
+
+### Fixed
+
+- Restored games, and linked games moved onto a registered drive, are now
+  managed based on their actual content path under
+  `SteamTronLibrary/steamtronapps/common`. Installed Files shows Uninstall (not
+  Unlink) and the uninstall guard permits the deletion.
+- Installed Files now renders only the applicable action: Unlink for external
+  linked games, Uninstall for managed games.
+
 ## [0.1.46] - 2026-11-22
 
 ### Fixed
