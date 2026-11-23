@@ -1,3 +1,13 @@
+## [0.1.56] - 2026-11-23
+
+### Added
+
+- Managed Play can use a real-path WinFsp overlay layout (local mountpoint,
+  junction at the real game path, pristine base) from a per-game sidecar. The
+  overlay launcher receives `--mountpoint`, `--junction` and `--base`
+  automatically, so launcher-protected games can use their real install path
+  from the Play button. Sidecar creation/removal UI is a follow-up.
+
 ## [0.1.55] - 2026-11-23
 
 ### Fixed

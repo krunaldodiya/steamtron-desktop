@@ -45,6 +45,11 @@ data is copied or overwritten.
 - R7: No file copies of the game, no direct overwrite of the original folder.
 - R8: If the directory mount or launcher still fails, surface the error
   clearly; do not silently fall back to modifying game files.
+- R9: Managed Play reads a per-game real-path layout sidecar
+  (`<data home>/overlays/<game-id>.json` with real/base/mount) and passes
+  `--mountpoint`, `--junction` and `--base` to the overlay. The desktop Play
+  button therefore uses the proven real-path flow. Preparing and removing the
+  layout from the UI is a follow-up.
 
 ## Acceptance criteria
 
@@ -56,6 +61,8 @@ data is copied or overwritten.
       the junction after mount, and restores it before unmount.
 - [x] Max Payne 3 launches through the real path with the Rockstar fix and no
       “Rockstar required” message.
+- [ ] Desktop Play starts Max Payne 3 through the sidecar-driven real-path flow.
+- [ ] The UI can prepare/remove the real-path layout for other games.
 - [ ] A launcher that spawns child processes keeps the junction/mount alive
       until the whole tree exits.
 - [ ] Downloads/backups work while the junction points at the base.

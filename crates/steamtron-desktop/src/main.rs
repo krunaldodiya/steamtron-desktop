@@ -2300,6 +2300,28 @@ impl Drop for JunctionGuard {
     }
 }
 
+#[cfg(windows)]
+#[derive(serde::Deserialize)]
+struct RealPathLayout {
+    real: PathBuf,
+    base: PathBuf,
+    mount: PathBuf,
+}
+
+#[cfg(windows)]
+fn real_path_layout(game_id: &str) -> Option<RealPathLayout> {
+    let path = steamtron_core::paths::layout()
+        .home()
+        .join("overlays")
+        .join(format!("{game_id}.json"));
+    let bytes = std::fs::read(path).ok()?;
+    let layout: RealPathLayout = serde_json::from_slice(&bytes).ok()?;
+    if !layout.base.is_dir() {
+        return None;
+    }
+    Some(layout)
+}
+
 #[tauri::command]
 fn managed_fixes_dir(game: &steamtron_core::library::Game) -> Option<std::path::PathBuf> {
     steamtron_core::library::migrate_legacy_fixes(game).ok()
@@ -2370,6 +2392,13 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
                 );
             }
         }
+    }
+    #[cfg(windows)]
+    let real_path = real_path_layout(&game.id);
+    #[cfg(windows)]
+    if let Some(layout) = real_path.as_ref() {
+        retarget_junction(&layout.real, &layout.base)
+            .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?;
     }
     let steam_root = steam::steam_root().ok();
     #[cfg(target_os = "windows")]
@@ -2460,6 +2489,16 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .map(|id| id.to_string())
             .unwrap_or_else(|| game.id.clone());
         let common = game.installation.root.display().to_string();
+        #[cfg(windows)]
+        let (overlay_common, overlay_cwd) = match real_path.as_ref() {
+            Some(layout) => (
+                layout.base.display().to_string(),
+                layout.real.display().to_string(),
+            ),
+            None => (common.clone(), common.clone()),
+        };
+        #[cfg(not(windows))]
+        let (overlay_common, overlay_cwd) = (common.clone(), common.clone());
         let fixes_display = fixes_path.display().to_string();
         let steam_root_display = client_root.display().to_string();
         let exe = steamtron_executable()?;
@@ -2469,13 +2508,23 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .arg("--appid")
             .arg(&appid)
             .arg("--common")
-            .arg(&common)
+            .arg(&overlay_common)
             .arg("--fixes")
             .arg(&fixes_display)
             .arg("--cwd")
-            .arg(&common)
+            .arg(&overlay_cwd)
             .arg("--steam-root")
             .arg(&steam_root_display);
+        #[cfg(windows)]
+        if let Some(layout) = real_path.as_ref() {
+            command
+                .arg("--mountpoint")
+                .arg(&layout.mount)
+                .arg("--junction")
+                .arg(&layout.real)
+                .arg("--base")
+                .arg(&layout.base);
+        }
         // Linux hands the merged executable to Proton; Windows runs the
         // merged executable directly, so it must not pass --proton-path.
         #[cfg(not(target_os = "windows"))]
@@ -2486,7 +2535,12 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .arg(&game.installation.prefix);
         #[cfg(target_os = "windows")]
         {
-            command.arg("--").arg(&plan.program);
+            let target_text = plan.program.display().to_string();
+            let target_arg = target_text
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&target_text)
+                .to_string();
+            command.arg("--").arg(target_arg);
             command.args(&plan.arguments);
         }
         #[cfg(not(target_os = "windows"))]
