@@ -1316,7 +1316,7 @@ const OPERATION_LABELS = {
   verify: ["Verifying files integrity…", "Verify files integrity"],
   restore: ["Restoring game backup…", "Restore…"],
   "library-export": ["Exporting game backups…", "Export"],
-  "fixes-import": ["Importing fixes…", "Import fixes TAR…"],
+  "fixes-import": ["Importing fixes…", "Import fixes archive…"],
   "fixes-export": ["Exporting fixes…", "Export fixes TAR…"],
 };
 const operationInlineTimers = new WeakMap();
@@ -2298,9 +2298,13 @@ function openManagedGameOptions(game) {
       const present = status.files > 0;
       const realPath = status.real_path || { prepared: false };
       const realPathSupported = realPath.supported !== false;
+      const catalog = status.catalog || { catalog: false };
+      const catalogModules = (catalog.modules || [])
+        .map((module) => `${module.id} (${module.status})`)
+        .join(", ");
       pane.innerHTML = `<h3>Fixes</h3>
         <p class="pane-note">Import, export, or remove per-game fixes. Fixes are layered over the game only while SteamTron launches it; installed files and the Proton prefix are never changed.</p>
-        <div class="fix-action-row"><button class="primary" id="fix-import" data-operation-button="fixes-import">Import fixes TAR…</button><button id="fix-export" data-operation-button="fixes-export"${present ? "" : " disabled"}>Export fixes TAR…</button></div>
+        <div class="fix-action-row"><button class="primary" id="fix-import" data-operation-button="fixes-import">Import fixes archive…</button><button id="fix-export" data-operation-button="fixes-export"${present ? "" : " disabled"}>Export fixes TAR…</button></div>
         <div class="operation-inline hidden" data-operation-inline="fixes-import" data-operation-game="${game.id}">
           <div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="fixes-import" data-operation-game="${game.id}" title="Cancel import" aria-label="Cancel import"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
           <div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div>
@@ -2314,6 +2318,12 @@ function openManagedGameOptions(game) {
           <p class="fix-meta">${present ? `${status.files} file${status.files === 1 ? "" : "s"} · ${formatBytes(status.bytes)}` : "No fixes installed."}</p>
           <div class="fix-action-row"><button id="fix-open"${present ? "" : " disabled"}>Open fixes folder</button><button id="fix-remove" class="danger"${present ? "" : " disabled"}>Remove fixes</button></div>
         </section>
+        ${catalog.catalog ? `<section class="fix-section"><h4>Launcher profile</h4>
+          <p class="fix-path">${escape(catalog.target || "Launch target from game settings")}</p>
+          <p class="fix-meta">Overlay: ${escape(catalog.overlay || "auto")}${catalogModules ? ` · Modules: ${escape(catalogModules)}` : ""}</p>
+          ${catalog.note ? `<p class="pane-note">${escape(catalog.note)}</p>` : ""}
+          <div class="fix-action-row"><button id="fix-apply-recommended"${catalog.requires_patch ? " disabled" : ""}>Apply recommended</button></div>
+        </section>` : ""}
         ${realPathSupported ? `<section class="fix-section"><h4>Real-path overlay</h4>
           <p class="pane-note">Launcher games use a real-path overlay: the installed folder moves to a hidden base on the same drive, and a junction at the original path switches to the merged view only while the game runs. The installed game files are never modified.</p>
           <p class="fix-path">${realPath.prepared ? escape(realPath.real) : "Not prepared. Play prepares it automatically when a launcher fix is detected."}</p>
@@ -2397,6 +2407,14 @@ function openManagedGameOptions(game) {
         void run(event.currentTarget, () => invoke("remove_managed_fixes", { gameId: game.id }),
           (result) => `Removed ${result.files} fix file${result.files === 1 ? "" : "s"}`);
       };
+      const applyRecommended = pane.querySelector("#fix-apply-recommended");
+      if (applyRecommended) {
+        applyRecommended.onclick = (event) => {
+          showToast("Applying recommended modules…");
+          void run(event.currentTarget, () => invoke("apply_recommended_modules", { gameId: game.id }),
+            (result) => `Applied ${result.applied?.length || 0} module${result.applied?.length === 1 ? "" : "s"}`);
+        };
+      }
       pane.querySelector("#fix-realpath-restore").onclick = async (event) => {
         if (!(await confirmDialog({ title: "Restore game folder", message: "Move the game back from the hidden real-path base to its normal folder? Stop the game first. Fixes are not changed.", confirmLabel: "Restore", danger: true }))) return;
         void run(event.currentTarget, () => invoke("restore_managed_real_path", { gameId: game.id }), "Game folder restored");
@@ -4040,7 +4058,7 @@ function renderFixesPanel(panel, game, current) {
     <div class="fixes-separator"></div>
     <div class="fixes-section">
       <div class="actions">
-        <button class="primary" id="install" data-operation-button="fixes-import">Import fixes TAR</button>
+        <button class="primary" id="install" data-operation-button="fixes-import">Import fixes archive</button>
         <button id="export" data-operation-button="fixes-export" ${hasFixes ? "" : "disabled"}>Export fixes TAR</button>
       </div>
       <div class="operation-inline hidden" data-operation-inline="fixes-import" data-operation-game="${game.appid}">
@@ -4137,7 +4155,7 @@ function renderFixesPanel(panel, game, current) {
     if (!await ensureSecurity()) return;
     beginOperation("fixes-import", game.appid);
     try {
-      status("Choose a fixes TAR…");
+      status("Choose a fixes archive…");
       const result = await invoke("install_fixes", { appid: game.appid });
       if (result) {
         fixes.set(game.appid, result);
@@ -4185,7 +4203,7 @@ function renderFixesPanel(panel, game, current) {
     if (!await ensureSteamClosed("export fixes")) return;
     beginOperation("fixes-export", game.appid);
     try {
-      status("Preparing fixes TAR…");
+      status("Preparing fixes archive…");
       const result = await invoke("export_fixes", { appid: game.appid, title: game.name });
       if (result) {
         finishOperation("fixes-export", game.appid, "Export complete");

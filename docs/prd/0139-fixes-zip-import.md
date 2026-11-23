@@ -36,14 +36,18 @@ pack.
 
 - [ ] Importing `Grand Theft Auto V Enhanced.zip` produces all 13 files,
       including `steam_api64.dll` and `steam_settings/steam_appid.txt`.
-- [ ] Importing a malicious ZIP with absolute/`..` entries fails safely.
+- [x] Importing a malicious ZIP with absolute/`..` entries fails safely.
 - [ ] Existing TAR import/export/remove tests still pass.
 - [ ] The Fixes status reports the complete file count and size.
 
 ## Verification
 
-- Not implemented.
-- Evidence: current GTA V fixes folder has 5 files; the source ZIP has 13.
+- 0.1.62 added ZIP dispatch and `install_zip_into_with_progress`.
+- Unit test `zip_import_keeps_nested_files_and_rejects_unsafe_paths` passed:
+  nested `steam_settings/steam_appid.txt` extracted, `../evil.txt` rejected.
+- Not yet imported through the installed app; not yet run against the actual
+  GTA V ZIP.
+- Evidence: current GTA V fixes folder had 5 files; the source ZIP has 13.
 
 ## Decisions and risks
 

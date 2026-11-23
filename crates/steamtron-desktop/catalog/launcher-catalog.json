@@ -1,0 +1,43 @@
+{
+  "entries": [
+    {
+      "appid": 552520,
+      "title": "Far Cry 5",
+      "target": "bin/FarCry5.exe",
+      "arguments": [],
+      "overlay": "auto",
+      "modules": ["uplay", "goldberg"],
+      "requires_patch": false,
+      "note": "Uses the imported CODEX/Uplay patch plus automatic GoldBerg for the Steam layer."
+    },
+    {
+      "appid": 447040,
+      "title": "Watch Dogs 2",
+      "target": "bin/WatchDogs2.exe",
+      "arguments": [],
+      "overlay": "auto",
+      "modules": ["uplay"],
+      "requires_patch": false,
+      "note": "The imported fix supplies the Uplay loader; the real game target is bin/WatchDogs2.exe."
+    },
+    {
+      "appid": 204100,
+      "title": "Max Payne 3",
+      "arguments": [],
+      "overlay": "auto",
+      "modules": [],
+      "requires_patch": false,
+      "note": "The imported RGL patch supplies the unprotected launcher."
+    },
+    {
+      "appid": 3240220,
+      "title": "Grand Theft Auto V Enhanced",
+      "target": "PlayGTAV.exe",
+      "arguments": [],
+      "overlay": "auto",
+      "modules": ["socialclub", "goldberg"],
+      "requires_patch": true,
+      "note": "The imported RUNE PlayGTAV build is incompatible with this restored game build (launcher 1.0.0.111 vs original 1.0.0.112; direct GTA5_Enhanced exits 0x1337). Replace the fix with a matching game patch before launching."
+    }
+  ]
+}

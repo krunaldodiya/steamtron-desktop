@@ -1,3 +1,18 @@
+## [0.1.62] - 2026-11-23
+
+### Added
+
+- Fixes import now accepts ZIP as well as TAR, extracts nested directories and
+  rejects unsafe archive paths. The GTA V ZIP's `steam_api64.dll` and
+  `steam_settings/` are no longer lost.
+- A data-driven launcher catalog supplies the target executable, arguments,
+  overlay mode and module hints per App ID. The catalog can mark a game as
+  needing a matching game-specific patch instead of starting a known loop.
+- The Fixes pane shows the launcher profile and module statuses, with an
+  `Apply recommended` action for GoldBerg/Steamless.
+- A Windows launch watchdog aborts a launcher that repeatedly respawns its
+  process tree instead of leaving the app on Stop indefinitely.
+
 ## [0.1.61] - 2026-11-23
 
 ### Fixed

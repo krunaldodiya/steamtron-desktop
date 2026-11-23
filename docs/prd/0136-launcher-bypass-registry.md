@@ -125,7 +125,15 @@ nothing.
   - Conclusion: the supplied RUNE pack is not compatible with this restored
     build under the current launch path. Generic Goldberg/real-path layers
     cannot synthesize the missing game-specific patch. Not playable.
-- Not run yet: an updated/matching GTA V Enhanced patch.
+- 0.1.62 adds the first global engine slice:
+  - embedded + app-data-overridable launcher catalog with target, arguments,
+    overlay mode and modules;
+  - catalog entry for GTA V marks it `requires_patch` with the observed reason,
+    so Play refuses instead of looping;
+  - module status/`Apply recommended` for GoldBerg and Steamless, with
+    detection-only statuses for Uplay/SocialClub/RGL/EA/EOS;
+  - launcher-loop watchdog in the Windows overlay wrapper.
+- Not run yet: an updated/matching GTA V Enhanced patch; installed 0.1.62.
 - Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,
   per-appid catalog, real-path prepare UI.
 

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod artwork;
+mod catalog;
 mod dlc;
 mod download;
 mod fix_tools;
@@ -2363,8 +2364,34 @@ fn try_overlay_wrapper() -> Option<i32> {
         if let Some(tree) = tree.as_ref() {
             if tree.active() > 0 {
                 overlay_log("launcher exited; keeping the overlay mounted for child processes");
+                let mut last_total = tree.total();
+                let mut spawned = 0u32;
+                let mut window = std::time::Instant::now();
                 while tree.active() > 0 {
                     std::thread::sleep(std::time::Duration::from_millis(250));
+                    let total = tree.total();
+                    if total > last_total {
+                        spawned = spawned.saturating_add(total - last_total);
+                        last_total = total;
+                    }
+                    if window.elapsed() >= std::time::Duration::from_secs(15) {
+                        if spawned >= 60 {
+                            overlay_log(format!(
+                                "launcher restart loop detected ({spawned} processes in 15s); stopping"
+                            ));
+                            let _ = tree.terminate();
+                            if let Some(mut guard) = junction_guard.take() {
+                                let _ = guard.restore();
+                            }
+                            let _ = overlay.unmount();
+                            return Err(
+                                "The launcher is restarting repeatedly; the game-specific patch is incompatible."
+                                    .into(),
+                            );
+                        }
+                        spawned = 0;
+                        window = std::time::Instant::now();
+                    }
                 }
                 overlay_log("child processes finished");
             }
@@ -2694,13 +2721,14 @@ fn save_real_path_layout(game_id: &str, layout: &RealPathLayout) -> Result<(), S
 #[cfg(windows)]
 fn ensure_real_path(
     game: &steamtron_core::library::Game,
+    force: bool,
 ) -> Result<Option<RealPathLayout>, String> {
     use std::os::windows::fs::MetadataExt;
 
     if let Some(layout) = real_path_layout(&game.id) {
         return Ok(Some(layout));
     }
-    if !needs_real_path(game) {
+    if !force && !needs_real_path(game) {
         return Ok(None);
     }
     let real = normalized_windows_path(&game.installation.root);
@@ -2867,9 +2895,20 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             }
         }
     }
+    let profile = catalog::entry(&game).cloned();
+    if let Some(entry) = profile.as_ref() {
+        if entry.requires_patch {
+            return Err(entry.note.clone());
+        }
+        catalog::apply_target(&mut game, entry)?;
+    }
     #[cfg(windows)]
     if let Some(fixes) = managed_fixes_dir(&game) {
-        if dir_has_entries(&fixes)
+        if profile
+            .as_ref()
+            .map(|entry| entry.has_module("goldberg"))
+            .unwrap_or(true)
+            && dir_has_entries(&fixes)
             && fixes_have_launcher(&fixes)
             && !fix_tools::goldberg_applied(&game)
             && !fix_tools::fixes_have_steam_emulator(&game)
@@ -2887,8 +2926,20 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         }
     }
     #[cfg(windows)]
-    let real_path = ensure_real_path(&game)
-        .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?;
+    let real_path = {
+        let drive = profile
+            .as_ref()
+            .is_some_and(|entry| entry.overlay_mode() == catalog::OverlayMode::Drive);
+        let force = profile
+            .as_ref()
+            .is_some_and(|entry| entry.overlay_mode() == catalog::OverlayMode::Real);
+        if drive {
+            None
+        } else {
+            ensure_real_path(&game, force)
+                .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?
+        }
+    };
     #[cfg(windows)]
     if let Some(layout) = real_path.as_ref() {
         retarget_junction(&layout.real, &layout.base)
@@ -3521,6 +3572,12 @@ fn set_managed_launch_target(
 }
 
 #[tauri::command]
+fn apply_recommended_modules(game_id: String) -> Result<serde_json::Value, String> {
+    require_auth()?;
+    catalog::apply_recommended(&game_id, &|message| eprintln!("SteamTron: {message}"))
+}
+
+#[tauri::command]
 fn managed_fixes_status(game_id: String) -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
@@ -3540,6 +3597,7 @@ fn managed_fixes_status(game_id: String) -> Result<serde_json::Value, String> {
         "goldberg": tools["goldberg"],
         "steamless": tools["steamless"],
         "real_path": real_path_status(game),
+        "catalog": catalog::status(game),
     }))
 }
 
@@ -3705,8 +3763,8 @@ async fn install_managed_fixes(
         Some(path) => std::path::PathBuf::from(path),
         None => {
             let Some(path) = rfd::FileDialog::new()
-                .set_title("Choose a fixes TAR")
-                .add_filter("Fixes TAR", &["tar"])
+                .set_title("Choose a fixes archive")
+                .add_filter("Fixes archive", &["tar", "zip"])
                 .pick_file()
             else {
                 return Ok(None);
@@ -7823,6 +7881,7 @@ fn main() {
             managed_fixes_status,
             export_managed_fixes,
             apply_managed_goldberg,
+            apply_recommended_modules,
             remove_managed_goldberg,
             apply_managed_steamless,
             remove_managed_steamless,

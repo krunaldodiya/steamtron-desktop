@@ -192,6 +192,54 @@ pub fn install_fixes_at(
     install_fixes_at_with_progress(game_id, tar_path, library_path, &mut |_, _| Ok(()))
 }
 
+fn install_zip_into_with_progress(
+    archive_path: &Path,
+    destination: &Path,
+    progress: &mut dyn FnMut(u64, u64) -> Result<(), String>,
+) -> Result<(), LibraryError> {
+    let file = fs::File::open(archive_path).map_err(|error| LibraryError::io(archive_path, error))?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let mut total = 0u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        total = total.saturating_add(entry.size());
+    }
+    fs::create_dir_all(destination).map_err(|error| LibraryError::io(destination, error))?;
+    let mut done = 0u64;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index)?;
+        let Some(relative) = entry.enclosed_name() else {
+            return Err(LibraryError::Invalid(format!(
+                "fixes archive contains an unsafe path: {}",
+                entry.name()
+            )));
+        };
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170_000 == 0o120_000)
+        {
+            return Err(LibraryError::Invalid(format!(
+                "fixes archive contains a symlink: {}",
+                entry.name()
+            )));
+        }
+        let output = destination.join(relative);
+        if entry.is_dir() {
+            fs::create_dir_all(&output).map_err(|error| LibraryError::io(&output, error))?;
+            continue;
+        }
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
+        }
+        let mut target =
+            fs::File::create(&output).map_err(|error| LibraryError::io(&output, error))?;
+        std::io::copy(&mut entry, &mut target).map_err(|error| LibraryError::io(&output, error))?;
+        done = done.saturating_add(entry.size());
+        progress(done, total).map_err(LibraryError::Invalid)?;
+    }
+    Ok(())
+}
+
 pub fn install_fixes_at_with_progress(
     game_id: &str,
     tar_path: &Path,
@@ -204,13 +252,21 @@ pub fn install_fixes_at_with_progress(
         .game(game_id)
         .ok_or_else(|| LibraryError::Invalid(format!("unknown game {game_id}")))?;
     let dir = fixes_dir_for(game)?;
-    steamtron_core::fixes::install_tar_into_with_progress(
-        &app_id_for(game),
-        tar_path,
-        &dir,
-        progress,
-    )
-    .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    let is_zip = tar_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"));
+    if is_zip {
+        install_zip_into_with_progress(tar_path, &dir, progress)?;
+    } else {
+        steamtron_core::fixes::install_tar_into_with_progress(
+            &app_id_for(game),
+            tar_path,
+            &dir,
+            progress,
+        )
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    }
     fixes_view_at(game_id, library_path)
 }
 
@@ -1613,6 +1669,56 @@ mod tests {
             .steam
             .as_ref()
             .is_some_and(|registration| registration.registered));
+    }
+
+    #[test]
+    fn zip_import_keeps_nested_files_and_rejects_unsafe_paths() {
+        use std::io::Write;
+
+        let temp = tempfile::tempdir().unwrap();
+        let zip_path = temp.path().join("fixes.zip");
+        let file = fs::File::create(&zip_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("steam_api64.dll", options).unwrap();
+        writer.write_all(b"goldberg").unwrap();
+        writer.add_directory("steam_settings/", options).unwrap();
+        writer
+            .start_file("steam_settings/steam_appid.txt", options)
+            .unwrap();
+        writer.write_all(b"3240220").unwrap();
+        writer.finish().unwrap();
+
+        let output = temp.path().join("out");
+        let mut last = (0u64, 0u64);
+        install_zip_into_with_progress(&zip_path, &output, &mut |done, total| {
+            last = (done, total);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read(output.join("steam_api64.dll")).unwrap(),
+            b"goldberg"
+        );
+        assert_eq!(
+            fs::read(output.join("steam_settings/steam_appid.txt")).unwrap(),
+            b"3240220"
+        );
+        assert_eq!(last.0, 15);
+        assert_eq!(last.1, 15);
+
+        let unsafe_zip = temp.path().join("unsafe.zip");
+        let file = fs::File::create(&unsafe_zip).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        writer.start_file("../evil.txt", options).unwrap();
+        writer.write_all(b"no").unwrap();
+        writer.finish().unwrap();
+        assert!(
+            install_zip_into_with_progress(&unsafe_zip, &temp.path().join("unsafe"), &mut |_, _| {
+                Ok(())
+            })
+            .is_err()
+        );
     }
 
     #[test]

@@ -160,4 +160,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0136](0136-launcher-bypass-registry.md) | Launcher-bypass module registry and one-click auto-fix | active | 2026-11-23 |
 | [0137](0137-app-wide-real-path-manager.md) | App-wide real-path overlay manager | active | 2026-11-23 |
 | [0138](0138-elevated-game-launchers.md) | Elevation-required game launchers | active | 2026-11-23 |
-| [0139](0139-fixes-zip-import.md) | Fixes ZIP import and complete extraction | draft | 2026-11-23 |
+| [0139](0139-fixes-zip-import.md) | Fixes ZIP import and complete extraction | active | 2026-11-23 |
+| [0140](0140-launcher-loop-watchdog.md) | Launcher restart-loop watchdog | active | 2026-11-23 |

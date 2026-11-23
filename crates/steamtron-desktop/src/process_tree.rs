@@ -78,6 +78,28 @@ impl ProcessTree {
         }
     }
 
+    /// Total processes created in the job (not only the currently active ones).
+    pub fn total(&self) -> u32 {
+        if !self.assigned {
+            return 0;
+        }
+        unsafe {
+            let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = std::mem::zeroed();
+            let ok = QueryInformationJobObject(
+                self.job,
+                JobObjectBasicAccountingInformation,
+                &mut info as *mut _ as *mut std::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            );
+            if ok != 0 {
+                info.TotalProcesses
+            } else {
+                0
+            }
+        }
+    }
+
     /// Kill every process in the job.
     pub fn terminate(&self) -> bool {
         unsafe { TerminateJobObject(self.job, 1) != 0 }
