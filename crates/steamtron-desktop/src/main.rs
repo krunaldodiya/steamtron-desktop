@@ -2374,10 +2374,15 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .arg("--compat")
             .arg(&game.installation.prefix);
         #[cfg(target_os = "windows")]
-        command.arg("--").arg(&plan.program);
+        {
+            command.arg("--").arg(&plan.program);
+            command.args(&plan.arguments);
+        }
         #[cfg(not(target_os = "windows"))]
-        command.arg("--").arg(&plan.arguments[1]);
-        command.args(&target.arguments);
+        {
+            command.arg("--").arg(&plan.arguments[1]);
+            command.args(&plan.arguments[2..]);
+        }
         // The overlay wrapper builds its own Proton command. Carry the game's
         // launch environment across, otherwise a GoldBerg fixes pack loses
         // WINEDLLOVERRIDES=steam_api64=n,b and PROTON_DISABLE_LSTEAMCLIENT and

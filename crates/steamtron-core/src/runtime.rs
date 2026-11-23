@@ -111,6 +111,16 @@ fn proton_runner(game: &Game) -> Option<&Path> {
     None
 }
 
+/// Launch options saved on the game plus the selected target's arguments.
+///
+/// `launch_options` in the appmanifest is the game-level list edited in Game
+/// Settings; it must reach the process, not only the library file.
+fn combined_launch_arguments(game: &Game, target: &LaunchTarget) -> Vec<String> {
+    let mut arguments = game.launch.arguments.clone();
+    arguments.extend(target.arguments.iter().cloned());
+    arguments
+}
+
 /// Plan a native Windows launch for one managed game.
 #[cfg(target_os = "windows")]
 pub fn managed_launch_plan(
@@ -127,7 +137,7 @@ pub fn managed_launch_plan(
     let environment = game.launch.environment.clone();
     Ok(LaunchPlan {
         program: executable,
-        arguments: target.arguments.clone(),
+        arguments: combined_launch_arguments(game, target),
         environment,
         cwd: root.clone(),
     })
@@ -180,7 +190,7 @@ pub fn managed_launch_plan(
         "waitforexitandrun".to_owned(),
         executable.display().to_string(),
     ];
-    arguments.extend(target.arguments.iter().cloned());
+    arguments.extend(combined_launch_arguments(game, target));
 
     let mut environment = BTreeMap::new();
     environment.insert(
@@ -292,6 +302,21 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn combines_game_and_target_launch_arguments() {
+        let mut sample = game(
+            Path::new("/tmp"),
+            Path::new("/tmp/proton"),
+            Path::new("/tmp/prefix"),
+        );
+        sample.launch.arguments = vec!["-nolauncher".into()];
+        let target = primary_target(&sample).unwrap().clone();
+        assert_eq!(
+            combined_launch_arguments(&sample, &target),
+            vec!["-nolauncher".to_owned(), "-windowed".to_owned()]
+        );
+    }
 
     #[test]
     fn default_proton_fills_an_unset_game() {
