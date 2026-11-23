@@ -2499,6 +2499,14 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         };
         #[cfg(not(windows))]
         let (overlay_common, overlay_cwd) = (common.clone(), common.clone());
+        let target_cwd = {
+            let text = target
+                .executable
+                .parent()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| overlay_cwd.clone());
+            text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+        };
         let fixes_display = fixes_path.display().to_string();
         let steam_root_display = client_root.display().to_string();
         let exe = steamtron_executable()?;
@@ -2512,7 +2520,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .arg("--fixes")
             .arg(&fixes_display)
             .arg("--cwd")
-            .arg(&overlay_cwd)
+            .arg(&target_cwd)
             .arg("--steam-root")
             .arg(&steam_root_display);
         #[cfg(windows)]

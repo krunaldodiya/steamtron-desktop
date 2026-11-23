@@ -85,6 +85,12 @@ data is copied or overwritten.
   launch. The game started through the real path with the injected fixes; the
   user confirmed “game started hurray.” The junction was still pointing at the
   base before the launch and was retargeted to the mountpoint for the game.
+- Installed 0.1.56: desktop Play used the sidecar, mounted the real-path view
+  and retargeted the junction, but passed the game **root** as `--cwd`. Max
+  Payne 3 exited with `0xC0000005`; the overlay log shows
+  `cwd=D:\…\common\Max Payne 3` instead of the launcher directory.
+- 0.1.57: passes the target executable’s parent (`…\Max Payne 3\Max Payne 3`)
+  as `--cwd`; desktop Play retest pending.
 
 ## Decisions and risks
 

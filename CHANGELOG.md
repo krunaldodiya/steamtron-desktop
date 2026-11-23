@@ -1,3 +1,12 @@
+## [0.1.57] - 2026-11-23
+
+### Fixed
+
+- Managed Play now passes the launch target’s own directory as the overlay
+  working directory instead of the game root. Max Payne 3’s unprotected
+  launcher crashed with `0xC0000005` when started from the root; the working
+  manual launch ran it from `…\Max Payne 3\Max Payne 3`.
+
 ## [0.1.56] - 2026-11-23
 
 ### Added
