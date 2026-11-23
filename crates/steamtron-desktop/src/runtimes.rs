@@ -221,7 +221,7 @@ pub(crate) fn ensure_for_game(
             log,
             format!("missing {} for {}", component.label(), dlls.join(", ")),
         );
-        install(component, log)?;
+        install(component, game_root, log)?;
         for dll in &dlls {
             if !dll_present(dll, x86, executable, game_root, fixes) {
                 return Err(format!(
@@ -363,6 +363,25 @@ fn download(url: &str, target: &Path, log: &File) -> Result<(), String> {
         }
         fs::remove_file(target).map_err(|error| error.to_string())?;
     }
+    let mut last_error = String::new();
+    for attempt in 0..2 {
+        match download_once(url, target, log) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error;
+                let _ = fs::remove_file(target);
+                let _ = fs::remove_file(target.with_extension("part"));
+                if attempt == 0 {
+                    note(log, "runtime download failed; retrying once");
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            }
+        }
+    }
+    Err(last_error)
+}
+
+fn download_once(url: &str, target: &Path, log: &File) -> Result<(), String> {
     note(log, format!("downloading {url}"));
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(1800))
@@ -379,6 +398,7 @@ fn download(url: &str, target: &Path, log: &File) -> Result<(), String> {
         .copy_to(&mut file)
         .map_err(|error| format!("download failed: {error}"))?;
     file.flush().map_err(|error| error.to_string())?;
+    drop(file);
     fs::rename(&part, target).map_err(|error| error.to_string())?;
     if !signature_ok(target) {
         let _ = fs::remove_file(target);
@@ -402,7 +422,130 @@ fn signature_ok(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn install(component: Component, log: &File) -> Result<(), String> {
+fn bundled_name_matches(name: &str, version: VcVersion, x86: bool) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if !lower.ends_with(".exe") || !(lower.contains("vcredist") || lower.starts_with("vc_redist")) {
+        return false;
+    }
+    let arch = if x86 {
+        lower.contains("x86") || lower.contains("win32")
+    } else {
+        lower.contains("x64") || lower.contains("amd64")
+    };
+    if !arch {
+        return false;
+    }
+    let year = ["2010", "2012", "2013", "2015", "2017", "2019", "2022"]
+        .into_iter()
+        .find(|year| lower.contains(year));
+    match (version, year) {
+        (VcVersion::V10, Some("2010")) => true,
+        (VcVersion::V11, Some("2012")) => true,
+        (VcVersion::V12, Some("2013")) => true,
+        (VcVersion::V14, Some("2015" | "2017" | "2019" | "2022")) => true,
+        (VcVersion::V14, None) if lower.starts_with("vc_redist") => true,
+        _ => false,
+    }
+}
+
+/// Directories Steam repacks and Steam install scripts use for redistributables.
+const REDIST_DIRS: &[(&str, usize)] = &[
+    ("", 1),
+    ("_Redist", 3),
+    ("_CommonRedist", 3),
+    ("Redist", 3),
+    ("Redistributables", 3),
+    ("Support", 3),
+    ("_Support", 3),
+    ("Installers", 3),
+    ("__Installer", 3),
+    ("_Installer", 3),
+    ("Install", 3),
+    ("Runtime", 3),
+    ("Runtimes", 3),
+];
+
+fn bundled_installer(root: &Path, component: Component, log: &File) -> Option<PathBuf> {
+    let (version, x86) = match component {
+        Component::VcRedist { version, x86 } => (version, x86),
+        Component::DirectX => return None,
+    };
+    for &(relative, max_depth) in REDIST_DIRS {
+        let base = if relative.is_empty() {
+            root.to_path_buf()
+        } else {
+            root.join(relative)
+        };
+        if !base.is_dir() {
+            continue;
+        }
+        if let Some(path) = find_bundled_in(&base, 0, max_depth, version, x86, log) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn find_bundled_in(
+    dir: &Path,
+    depth: usize,
+    max_depth: usize,
+    version: VcVersion,
+    x86: bool,
+    log: &File,
+) -> Option<PathBuf> {
+    if depth > max_depth {
+        return None;
+    }
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if depth < max_depth {
+                if let Some(found) =
+                    find_bundled_in(&path, depth + 1, max_depth, version, x86, log)
+                {
+                    return Some(found);
+                }
+            }
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !bundled_name_matches(name, version, x86) {
+            continue;
+        }
+        if !signature_ok(&path) {
+            note(
+                log,
+                format!(
+                    "ignoring bundled runtime without a Microsoft signature: {}",
+                    path.display()
+                ),
+            );
+            continue;
+        }
+        return Some(path);
+    }
+    None
+}
+
+fn install(component: Component, game_root: &Path, log: &File) -> Result<(), String> {
+    // Steam's install script runs the redistributables the game already ships.
+    // Prefer those signed Microsoft installers over a network download; some
+    // older packages are no longer reliably downloadable.
+    if let Some(path) = bundled_installer(game_root, component, log) {
+        note(
+            log,
+            format!(
+                "using bundled {} for {}",
+                path.display(),
+                component.label()
+            ),
+        );
+        return run_elevated(&path, component.args(), log);
+    }
     let cache = cache_dir()?;
     match component {
         Component::DirectX => {
@@ -465,12 +608,14 @@ fn run_elevated(program: &Path, args: &[&str], log: &File) -> Result<(), String>
     loop {
         match child.try_wait().map_err(|error| error.to_string())? {
             Some(status) => {
-                if status.success() {
+                let code = status.code().unwrap_or(-1);
+                // 3010/1641 mean success with a pending restart.
+                if code == 0 || code == 3010 || code == 1641 {
                     return Ok(());
                 }
                 return Err(format!(
                     "runtime installation failed (exit {}{}). Approve the elevation prompt to continue.",
-                    status.code().unwrap_or(-1),
+                    code,
                     if started.elapsed() > INSTALL_TIMEOUT { ", timed out" } else { "" }
                 ));
             }
@@ -557,6 +702,42 @@ fn pe_imports(path: &Path) -> Option<(u16, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_runtime_names_match_version_and_architecture() {
+        assert!(bundled_name_matches(
+            "vcredist_x64_2012_x64.exe",
+            VcVersion::V11,
+            false
+        ));
+        assert!(bundled_name_matches(
+            "vcredist_x86_2012_x86.exe",
+            VcVersion::V11,
+            true
+        ));
+        assert!(!bundled_name_matches(
+            "vcredist_x86_2012_x86.exe",
+            VcVersion::V11,
+            false
+        ));
+        assert!(!bundled_name_matches(
+            "vcredist_x64_2012_x64.exe",
+            VcVersion::V11,
+            true
+        ));
+        assert!(bundled_name_matches("vc_redist.x64.exe", VcVersion::V14, false));
+        assert!(!bundled_name_matches("vc_redist.x64.exe", VcVersion::V11, false));
+        assert!(bundled_name_matches(
+            "vcredist_x64_2013_x64.exe",
+            VcVersion::V12,
+            false
+        ));
+        assert!(!bundled_name_matches(
+            "vcredist_x64_2013_x64.exe",
+            VcVersion::V11,
+            false
+        ));
+    }
 
     #[test]
     fn maps_directx_and_vc_imports() {
