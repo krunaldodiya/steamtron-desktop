@@ -66,6 +66,8 @@ struct ActiveDownload {
     pid: u32,
     log: PathBuf,
     root: PathBuf,
+    #[serde(default)]
+    expected_total: u64,
 }
 
 fn active_path(game_id: &str) -> PathBuf {
@@ -345,8 +347,7 @@ fn monitor(
     let mut depot_finished: Vec<String> = Vec::new();
     let mut current_depot: Option<String> = None;
     let mut download_dir: Option<PathBuf> = None;
-    let mut plan_total: u64 = 0;
-    let mut total: u64 = 0;
+    let mut total: u64 = state.total;
     let mut last_emit = Instant::now();
     let mut last_event = Instant::now();
     let mut depots_total = 0u32;
@@ -409,15 +410,22 @@ fn monitor(
         match value.get("type").and_then(|kind| kind.as_str()) {
             Some("plan") => {
                 if let Some(depots) = value.get("depots").and_then(|d| d.as_array()) {
-                    plan_total = depots
-                        .iter()
-                        .map(|depot| depot.get("sizeBytes").and_then(|size| size.as_u64()).unwrap_or(0))
-                        .sum();
-                    depots_total = depots.len() as u32;
-                    depot_order = depots
-                        .iter()
-                        .filter_map(|depot| depot.get("depotId").and_then(|id| id.as_str()).map(str::to_owned))
-                        .collect();
+                    depots_total = depots_total.max(depots.len() as u32);
+                    for depot in depots {
+                        let Some(depot_id) = depot.get("depotId").and_then(|id| id.as_str()) else {
+                            continue;
+                        };
+                        if !depot_order.iter().any(|id| id == depot_id) {
+                            depot_order.push(depot_id.to_owned());
+                        }
+                        if let Some(size) = depot.get("sizeBytes").and_then(|size| size.as_u64()) {
+                            if size > 0 {
+                                let entry = depot_totals.entry(depot_id.to_owned()).or_insert(0);
+                                *entry = (*entry).max(size);
+                            }
+                        }
+                    }
+                    total = total.max(depot_totals.values().sum::<u64>());
                 }
                 stage_message = "Preparing depot downloads…".into();
             }
@@ -474,8 +482,6 @@ fn monitor(
                                 .and_then(|value| value.parse::<u64>().ok())
                             {
                                 depot_bytes.insert(depot.to_owned(), bytes);
-                                depot_totals.insert(depot.to_owned(), bytes);
-                                total = depot_totals.values().sum();
                             }
                         }
                     }
@@ -551,14 +557,19 @@ fn monitor(
                     depot_totals.insert(depot.to_owned(), depot_total);
                 }
             }
-            total = if plan_total > 0 { plan_total } else { depot_totals.values().sum() };
+            total = total.max(depot_totals.values().sum::<u64>());
         }
         let completed: u64 = depot_bytes.values().sum();
-        let percent = if total > 0 {
+        let mut percent = if total > 0 {
             (completed as f64 / total as f64 * 100.0).min(100.0)
         } else {
             0.0
         };
+        // Never show 100% while a depot is still downloading, even if the
+        // known byte total is incomplete.
+        if depots_total > 0 && depots_done < depots_total && percent >= 100.0 {
+            percent = 99.9;
+        }
         let now = Instant::now();
         if now.duration_since(last_time) >= Duration::from_millis(500) {
             speed = (completed.saturating_sub(last_bytes)) as f64
@@ -792,7 +803,7 @@ pub fn restore(app: &AppHandle) {
             status: if paused { "paused" } else { "downloading" }.into(),
             percent: 0.0,
             completed: 0,
-            total: 0,
+            total: meta.expected_total,
             speed: 0.0,
             average_speed: 0.0,
             depots_total: 0,
@@ -819,7 +830,24 @@ pub fn restore(app: &AppHandle) {
     }
 }
 
-pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
+fn appmanifest_download_size(game: &steamtron_core::library::Game) -> u64 {
+    let path = &game.installation.manifest;
+    if path.as_os_str().is_empty() {
+        return 0;
+    }
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| {
+            value
+                .get("details")
+                .and_then(|details| details.get("size_bytes"))
+                .and_then(|size| size.as_u64())
+        })
+        .unwrap_or(0)
+}
+
+pub fn start(app: AppHandle, game_id: String, expected_total: Option<u64>) -> Result<DownloadState, String> {
     use steamtron_core::library::Library;
 
     {
@@ -842,6 +870,9 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         .metadata_app_id
         .ok_or_else(|| "this game has no Steam App ID".to_string())?;
     let root = game.installation.root.clone();
+    let expected_total = expected_total
+        .unwrap_or(0)
+        .max(appmanifest_download_size(game));
     let cache = steamtron_core::paths::layout().cache_dir().join("smd");
     let local_lua = steamtron_core::library::managed_lua_path(game)
         .filter(|path| path.is_file());
@@ -909,6 +940,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         pid,
         log: log_path.clone(),
         root: root.clone(),
+        expected_total,
     };
     if let Ok(payload) = serde_json::to_vec_pretty(&active_meta) {
         std::fs::write(active_path(&game_id), payload).map_err(|error| error.to_string())?;
@@ -920,7 +952,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         status: "queued".into(),
         percent: 0.0,
         completed: 0,
-        total: 0,
+        total: expected_total,
         speed: 0.0,
         average_speed: 0.0,
         depots_total: 0,
@@ -950,7 +982,7 @@ pub fn start(app: AppHandle, game_id: String) -> Result<DownloadState, String> {
         status: "queued".into(),
         percent: 0.0,
         completed: 0,
-        total: 0,
+        total: expected_total,
         speed: 0.0,
         average_speed: 0.0,
         depots_total: 0,

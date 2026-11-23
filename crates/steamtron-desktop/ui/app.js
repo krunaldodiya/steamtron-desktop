@@ -1043,6 +1043,7 @@ async function chooseDownloadDrive(game) {
   backdrop.querySelector("#download-drive-close").onclick = close;
   backdrop.querySelector("#download-drive-cancel").onclick = close;
   let drives = [];
+  let expectedSize = 0;
   try {
     const snapshot = await invoke("library_snapshot");
     drives = snapshot?.drives || [];
@@ -1067,6 +1068,7 @@ async function chooseDownloadDrive(game) {
   meta.textContent = "Checking download size…";
   if (game.metadata_app_id) {
     void invoke("steam_download_size", { appid: game.metadata_app_id }).then((size) => {
+      expectedSize = Number(size) || 0;
       meta.textContent = size > 0 ? `Download size: ${formatBytes(size)}` : "Download size: unknown";
     }).catch(() => { meta.textContent = "Download size: unknown"; });
   } else {
@@ -1088,10 +1090,10 @@ async function chooseDownloadDrive(game) {
     try {
       const snapshot = await invoke("prepare_managed_download", { gameId: game.id, driveId });
       managedLibrary = snapshot;
-      managedDownloads.set(game.id, { gameId: game.id, status: "starting", percent: 0, completed: 0, total: 0, speed: 0, message: "Contacting depot sources…" });
+      managedDownloads.set(game.id, { gameId: game.id, status: "starting", percent: 0, completed: 0, total: expectedSize, speed: 0, message: "Contacting depot sources…" });
       close();
       renderManagedMode();
-      await invoke("start_managed_download", { gameId: game.id });
+      await invoke("start_managed_download", { gameId: game.id, expectedSize });
       watchManagedDownload(game.id);
       openDownloadManager(game);
     } catch (error) {

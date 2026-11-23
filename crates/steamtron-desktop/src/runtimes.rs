@@ -97,6 +97,13 @@ impl Component {
             ),
         }
     }
+
+    fn args(self) -> &'static [&'static str] {
+        match self {
+            Component::DirectX => &["/silent"],
+            Component::VcRedist { version, .. } => version.args(),
+        }
+    }
 }
 
 /// Import names that belong to a runtime Steam would install from the game's

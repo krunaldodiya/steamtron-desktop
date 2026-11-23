@@ -154,3 +154,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0130](0130-appmanifest-action-restored.md) | Restore the appmanifest action in Installed Files | active | 2026-11-23 |
 | [0131](0131-bootstrapper-upgrade-retry.md) | Windows bootstrapper retries the inner installer after an upgrade | active | 2026-11-23 |
 | [0132](0132-bundled-runtime-redistributables.md) | Prefer game-bundled redistributables for runtime provisioning | active | 2026-11-23 |
+| [0133](0133-download-progress-aggregate.md) | Aggregate download progress across all depots | active | 2026-11-23 |

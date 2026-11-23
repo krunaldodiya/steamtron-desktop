@@ -59,7 +59,7 @@ as success.
 - Data: both Watch Dogs 2 `_Redist` installers are valid Microsoft-signed.
 - Code: `cargo check -p steamtron-desktop --bin steamtron-desktop` passes.
 - Code: unit test added for `bundled_name_matches`.
-- Not run yet: installed-build Watch Dogs 2 Play (0.1.51).
+- Not run yet: installed-build Watch Dogs 2 Play (0.1.52).
 
 ## Decisions and risks
 

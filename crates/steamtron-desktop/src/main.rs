@@ -6685,8 +6685,8 @@ fn prepare_managed_download(game_id: String, drive_id: String) -> Result<serde_j
 }
 
 #[tauri::command]
-async fn start_managed_download(app: tauri::AppHandle, game_id: String) -> Result<download::DownloadState, String> {
-    tauri::async_runtime::spawn_blocking(move || download::start(app, game_id))
+async fn start_managed_download(app: tauri::AppHandle, game_id: String, expected_size: Option<u64>) -> Result<download::DownloadState, String> {
+    tauri::async_runtime::spawn_blocking(move || download::start(app, game_id, expected_size))
         .await
         .map_err(|error| format!("download task failed: {error}"))?
 }
