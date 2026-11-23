@@ -5541,6 +5541,63 @@ async fn regenerate_managed_manifests(game_id: String) -> Result<serde_json::Val
 }
 
 #[tauri::command]
+async fn generate_managed_appmanifest(game_id: String) -> Result<serde_json::Value, String> {
+    use steamtron_core::library::Library;
+
+    require_auth()?;
+    let library = Library::load().map_err(|error| error.to_string())?;
+    let game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| "unknown game".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = if !game.installation.manifest.as_os_str().is_empty() {
+            game.installation.manifest.clone()
+        } else {
+            let base = game
+                .installation
+                .root
+                .parent()
+                .and_then(|path| path.parent())
+                .ok_or_else(|| "The managed library folder is invalid.".to_string())?;
+            base.join(format!(
+                "appmanifest_{}.json",
+                game.metadata_app_id
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| game.id.clone())
+            ))
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let generated = steamtron_library::backup::game_appmanifest(&game);
+        // Keep fields the backup builder does not own (details, integrity,
+        // quicklook) and overwrite the core manifest fields.
+        let mut payload = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .filter(|value| value.is_object())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let (Some(target), Some(source)) = (payload.as_object_mut(), generated.as_object()) {
+            for (key, value) in source {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+        let encoded = serde_json::to_vec_pretty(&payload).map_err(|error| error.to_string())?;
+        let temporary = path.with_extension("json.steamtron.tmp");
+        std::fs::write(&temporary, &encoded).map_err(|error| error.to_string())?;
+        std::fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+        Ok::<_, String>(serde_json::json!({
+            "appid": game.metadata_app_id,
+            "appmanifest": path.display().to_string(),
+            "created": true,
+        }))
+    })
+    .await
+    .map_err(|error| format!("app manifest task failed: {error}"))?
+}
+
+#[tauri::command]
 fn export_managed_saves(game_id: String) -> Result<Option<String>, String> {
     use std::io::Write;
     use steamtron_core::library::Library;
@@ -6982,6 +7039,7 @@ fn main() {
             uninstall_managed_game,
             cancel_operation,
             regenerate_managed_manifests,
+            generate_managed_appmanifest,
             steam_download_size,
             remove_managed_game,
             unlink_managed_game,

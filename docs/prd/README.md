@@ -151,3 +151,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0127](0127-restore-legacy-backups.md) | Restore legacy and incomplete backups | active | 2026-11-22 |
 | [0128](0128-installed-files-actions.md) | Installed Files actions follow the install location | active | 2026-11-23 |
 | [0129](0129-apply-launch-options.md) | Apply game launch options to every launch path | active | 2026-11-23 |
+| [0130](0130-appmanifest-action-restored.md) | Restore the appmanifest action in Installed Files | active | 2026-11-23 |

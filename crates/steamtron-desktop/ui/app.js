@@ -2113,7 +2113,7 @@ function openManagedGameOptions(game) {
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
           ${filesActionCard}
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
-          <div class="files-card"><p class="pane-note">Restore the game's Lua manifest and every depot manifest from SteamTron's persistent bundle store. The API is used only when the bundle is missing.</p><button class="files-wide" id="files-regenerate">Generate Lua/manifests</button></div>`;
+          <div class="files-card"><p class="pane-note">Generate the local SteamTron appmanifest metadata, or restore the game's Lua and depot manifests from the persistent bundle store. Neither action requires Steam.</p><div class="files-pair"><button id="files-appmanifest">Generate app manifest</button><button id="files-regenerate">Generate Lua/manifests</button></div></div>`;
 
         const status = pane.querySelector("#files-status");
         const refreshGameAndTab = async () => {
@@ -2274,6 +2274,9 @@ function openManagedGameOptions(game) {
           if (!result) throw new Error("Import cancelled.");
           return result;
         }, (result) => `Imported ${result.files} save file${result.files === 1 ? "" : "s"}`, async () => {});
+        pane.querySelector("#files-appmanifest").onclick = (event) => run(event.currentTarget,
+          () => invoke("generate_managed_appmanifest", { gameId: game.id }),
+          (result) => `Generated ${result.appmanifest}`);
         pane.querySelector("#files-regenerate").onclick = (event) => run(event.currentTarget,
           () => invoke("regenerate_managed_manifests", { gameId: game.id }),
           (result) => `Generated Lua manifest and ${result.manifests} depot manifest${result.manifests === 1 ? "" : "s"}`);
