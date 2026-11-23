@@ -209,6 +209,22 @@ Section "Install"
     MessageBox MB_ICONSTOP "SteamTron installation failed with exit code $0."
     Abort
   ${EndIf}
+  ; On an upgrade the inner installer's first pass uninstalls the previous
+  ; version and exits after that step. If the app is still absent, run it
+  ; again so one setup run completes the upgrade instead of leaving nothing.
+  ${IfNot} ${FileExists} "$INSTDIR\steamtron-desktop.exe"
+    DetailPrint "Previous version removed; completing the installation..."
+    Sleep 3000
+    ExecWait '"$PLUGINSDIR\SteamTron-app-setup.exe" /S' $0
+    ${If} $0 != 0
+      MessageBox MB_ICONSTOP "SteamTron installation failed with exit code $0."
+      Abort
+    ${EndIf}
+  ${EndIf}
+  ${IfNot} ${FileExists} "$INSTDIR\steamtron-desktop.exe"
+    MessageBox MB_ICONSTOP "SteamTron installation did not complete. Run the installer again."
+    Abort
+  ${EndIf}
   DetailPrint "Installation complete."
   ${If} $RebootRequired == "1"
     MessageBox MB_ICONINFORMATION "A restart is required to finish installing the prerequisites."
