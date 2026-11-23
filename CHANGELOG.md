@@ -1,7 +1,11 @@
-## [0.1.50] - 2026-11-23
+## [0.1.51] - 2026-11-23
 
 ### Fixed
 
+- Windows runtime provisioning now prefers the Microsoft-signed
+  redistributables shipped with the game (Watch Dogs 2 `_Redist` VC++ 2012)
+  before downloading. A stale or partial cached download no longer blocks Play;
+  downloads retry once and reboot-required installer exits are accepted.
 - The Windows bootstrapper now re-runs the inner installer when an upgrade's
   first pass only removed the previous version. One setup run completes the
   upgrade instead of leaving no app installed. The same fix applies to the
