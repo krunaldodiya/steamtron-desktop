@@ -335,11 +335,15 @@ impl Library {
             )));
         }
         validate(&document.settings, &document.drives, &document.games)?;
+        let mut games = document.games;
+        for game in &mut games {
+            normalize_install_mode(&document.drives, game);
+        }
         Ok(Self {
             path,
             settings: document.settings,
             drives: document.drives,
-            games: document.games,
+            games,
         })
     }
 
@@ -666,6 +670,28 @@ pub fn safe_folder(title: &str) -> Result<String, LibraryError> {
 /// sharing the folders, so both applications can own the same drive.
 pub fn steamtronapps_root(drive_root: &Path) -> PathBuf {
     drive_root.join("SteamTronLibrary").join("steamtronapps")
+}
+
+/// Derive managed vs linked from where the content actually lives.
+///
+/// A restored or moved game has its content under
+/// `<drive>/SteamTronLibrary/steamtronapps/common`, so a stale `linked` mode
+/// must not hide Uninstall or block the uninstall guard.
+fn normalize_install_mode(drives: &[Drive], game: &mut Game) {
+    if game.installation.root.as_os_str().is_empty() {
+        return;
+    }
+    let managed = drives.iter().any(|drive| {
+        crate::paths::path_within(
+            &game.installation.root,
+            &steamtronapps_root(&drive.root).join("common"),
+        )
+    });
+    game.installation.mode = if managed {
+        InstallMode::Managed
+    } else {
+        InstallMode::Linked
+    };
 }
 
 /// Drive root that owns a managed or imported library folder.
@@ -1038,6 +1064,28 @@ mod tests {
             artwork: Artwork::default(),
             setup_completed_at: None,
         }
+    }
+
+    #[test]
+    fn derives_managed_mode_from_the_content_root() {
+        let drive = Drive {
+            id: "d1".into(),
+            root: PathBuf::from("/mnt/drive"),
+            label: String::new(),
+            default: true,
+        };
+        let managed_root = steamtronapps_root(&drive.root)
+            .join("common")
+            .join("Game");
+        let mut game = sample_game("g1", "Game", managed_root);
+        game.installation.mode = InstallMode::Linked;
+        normalize_install_mode(std::slice::from_ref(&drive), &mut game);
+        assert_eq!(game.installation.mode, InstallMode::Managed);
+
+        let mut external = sample_game("g2", "External", PathBuf::from("/mnt/external/Game"));
+        external.installation.mode = InstallMode::Managed;
+        normalize_install_mode(std::slice::from_ref(&drive), &mut external);
+        assert_eq!(external.installation.mode, InstallMode::Linked);
     }
 
     #[test]

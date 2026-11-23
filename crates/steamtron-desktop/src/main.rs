@@ -5355,6 +5355,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
 
     let mut game = target_game;
     game.installation.root = target_root.clone();
+    game.installation.mode = steamtron_core::library::InstallMode::Managed;
     game.installation.confirmed = true;
     game.fixes_enabled = manifest.get("fixes_enabled").and_then(|value| value.as_bool()).unwrap_or(true);
     if let Some(settings) = manifest.get("launch_settings") {

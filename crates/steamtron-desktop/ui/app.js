@@ -2103,12 +2103,15 @@ function openManagedGameOptions(game) {
         try { size = await invoke("managed_game_size", { gameId: game.id }); } catch (_error) { size = 0; }
         const name = game.installation?.root?.split(/[\\/]/).filter(Boolean).pop() || game.title;
         const linked = latestGame.installation?.mode === "linked";
+        const filesActionCard = linked
+          ? `<div class="files-card"><p class="pane-note">Unlink removes this external game's launchers and Steam registration while keeping the library entry and all files on disk. Use Remove from library on the game page to delete the entry.</p><button class="danger files-wide" id="files-unlink">Unlink</button></div>`
+          : `<div class="files-card"><p class="pane-note">Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry.</p><button class="danger files-wide" id="files-uninstall">Uninstall</button></div>`;
         pane.innerHTML = `<h3>Installed Files</h3>
           <div class="files-card files-size-card"><strong>Size of installation: ${formatBytes(size)} (${escape(name)})</strong><button id="files-browse">Browse…</button></div>
           <div class="files-card"><p class="pane-note">Create a portable backup folder with content.tar, <game>.tar fixes, depot manifests and appmanifest metadata.</p><button class="files-wide" id="files-backup" data-operation-button="backup">Back up game files…</button><div class="operation-inline hidden" data-operation-inline="backup" data-operation-game="${game.id}"><div class="download-inline-track"><span></span></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div></div>
           <div class="files-card"><p class="pane-note">Verify this game's files are installed correctly. SteamTron checks the installation against its depot manifests and downloads only missing or damaged files; intact files are left untouched.</p><button class="primary files-wide" id="files-verify" data-operation-button="verify">Verify files integrity</button><div class="operation-inline hidden" data-operation-inline="verify" data-operation-game="${game.id}"><div class="operation-inline-progress"><div class="download-inline-track"><span></span></div><button class="game-icon-button download-cancel-icon" data-operation-cancel="verify" data-operation-game="${game.id}" title="Cancel verification" aria-label="Cancel verification"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div><div class="download-inline-meta"><span class="operation-inline-text">Starting…</span></div></div><p class="files-status" id="files-status"></p></div>
           <div class="files-card"><p class="pane-note">Move this game's content to another registered drive.</p><button class="files-wide" id="files-move">Move install folder…</button></div>
-          <div class="files-card"><p class="pane-note">${linked ? "Unlink removes this external game's launchers and Steam registration while keeping the library entry and all files on disk. Use Remove from library on the game page to delete the entry." : "Uninstall permanently deletes this game's installed files. The game stays in your library so you can download it again; use Remove from library on the game page to remove the entry."}</p><div class="files-pair"><button class="danger" id="files-unlink"${linked ? "" : " disabled title=\"Unlink is only available for external linked games.\""}>Unlink</button><button class="danger" id="files-uninstall"${linked ? " disabled title=\"External folders must be unlinked, not deleted.\"" : ""}>Uninstall</button></div></div>
+          ${filesActionCard}
           <div class="files-card"><p class="pane-note">Export or restore campaign saves and checkpoints from this game's prefix.</p><div class="files-pair"><button id="files-export-saves">Export saves…</button><button id="files-import-saves">Import saves…</button></div></div>
           <div class="files-card"><p class="pane-note">Restore the game's Lua manifest and every depot manifest from SteamTron's persistent bundle store. The API is used only when the bundle is missing.</p><button class="files-wide" id="files-regenerate">Generate Lua/manifests</button></div>`;
 
@@ -2234,7 +2237,8 @@ function openManagedGameOptions(game) {
             } catch (error) { stop(); showToast(String(error), true); }
           };
         };
-        pane.querySelector("#files-unlink").onclick = async () => {
+        const unlinkButton = pane.querySelector("#files-unlink");
+        if (unlinkButton) unlinkButton.onclick = async () => {
           if (!(await confirmDialog({ title: "Unlink game", message: "Unlink this game? Its launchers and Steam registration are removed. The library entry and all game files stay on disk.", confirmLabel: "Unlink", danger: true }))) return;
           try {
             const result = await invoke("unlink_managed_game", { gameId: game.id });
@@ -2244,14 +2248,15 @@ function openManagedGameOptions(game) {
             showToast(result.unregistered ? "Game unlinked; library entry and files were kept" : "Game unlinked; library entry and files were kept");
           } catch (error) { showToast(String(error), true); }
         };
-        pane.querySelector("#files-uninstall").onclick = async () => {
+        const uninstallButton = pane.querySelector("#files-uninstall");
+        if (uninstallButton) uninstallButton.onclick = async () => {
           if (!(await confirmDialog({
             title: "Uninstall game",
             message: `Uninstall ${latestGame.title}? The installed game files are permanently deleted. The game stays in your library so you can download it again.`,
             confirmLabel: "Uninstall",
             danger: true,
           }))) return;
-          const stop = busy(pane.querySelector("#files-uninstall"), "Uninstalling…");
+          const stop = busy(uninstallButton, "Uninstalling…");
           try {
             await invoke("uninstall_managed_game", { gameId: game.id });
             await refreshGame();

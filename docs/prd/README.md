@@ -149,3 +149,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0125](0125-restore-appmanifest-not-cache.md) | Restore selects the appmanifest, not its cache sidecar | active | 2026-11-22 |
 | [0126](0126-about-section.md) | About section in General settings | active | 2026-11-22 |
 | [0127](0127-restore-legacy-backups.md) | Restore legacy and incomplete backups | active | 2026-11-22 |
+| [0128](0128-installed-files-actions.md) | Installed Files actions follow the install location | active | 2026-11-23 |
