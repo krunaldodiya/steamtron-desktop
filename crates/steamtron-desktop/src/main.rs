@@ -2247,7 +2247,7 @@ fn try_overlay_wrapper() -> Option<i32> {
                 .unwrap_or_else(|| merged.clone())
         };
         overlay_log(format!("cwd={}", workdir.display()));
-        process.args(&rewritten[1..]).current_dir(workdir);
+        process.args(&rewritten[1..]).current_dir(&workdir);
         if let Some(appid) = overlay.game().appid() {
             process.env("SteamAppId", appid);
             process.env("SteamGameId", appid);
