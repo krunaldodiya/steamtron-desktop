@@ -1,3 +1,14 @@
+## [0.1.53] - 2026-11-23
+
+### Fixed
+
+- The Windows bootstrapper initializes its temporary plugins directory before
+  extracting the inner setup. Silent installs and upgrades (`/S`) no longer
+  report success while installing nothing, and a leftover older executable is
+  detected by comparing the installed version instead of only checking that the
+  executable exists. A failed inner launch is now reported, and a single retry
+  completes the upgrade.
+
 ## [0.1.52] - 2026-11-23
 
 ### Fixed

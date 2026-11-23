@@ -47,8 +47,13 @@ Var WinFspStatus
 Var InstallButton
 Var StatusText
 Var RebootRequired
+Var InstalledVersion
 
 Function .onInit
+  ; Initialize $PLUGINSDIR before any page or section uses it. Silent installs
+  ; skip the pages (and their plugin/dialog calls), so without this the
+  ; directory is empty and the extracted inner installer cannot be launched.
+  InitPluginsDir
   SetShellVarContext all
   StrCpy $RebootRequired "0"
 FunctionEnd
@@ -142,7 +147,14 @@ Function PrereqPageLeave
   ; Nothing to validate here: the progress section installs only missing items.
 FunctionEnd
 
+; Reads the installed version from the per-machine Add/Remove Programs entry.
+Function CheckInstalledVersion
+  SetRegView 64
+  ReadRegStr $InstalledVersion HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\SteamTron" "DisplayVersion"
+FunctionEnd
+
 Section "Install"
+  InitPluginsDir
   SetDetailsPrint both
   SetOutPath "$PLUGINSDIR"
 
@@ -204,24 +216,36 @@ Section "Install"
   ${EndIf}
 
   DetailPrint "Installing SteamTron..."
+  ClearErrors
   ExecWait '"$PLUGINSDIR\SteamTron-app-setup.exe" /S' $0
+  ${If} ${Errors}
+    MessageBox MB_ICONSTOP "SteamTron setup could not be started."
+    Abort
+  ${EndIf}
   ${If} $0 != 0
     MessageBox MB_ICONSTOP "SteamTron installation failed with exit code $0."
     Abort
   ${EndIf}
   ; On an upgrade the inner installer's first pass uninstalls the previous
-  ; version and exits after that step. If the app is still absent, run it
-  ; again so one setup run completes the upgrade instead of leaving nothing.
-  ${IfNot} ${FileExists} "$INSTDIR\steamtron-desktop.exe"
+  ; version and exits after that step. Check the installed version, not only
+  ; the executable, so the retry also runs when an old executable remains.
+  Call CheckInstalledVersion
+  ${If} $InstalledVersion != "${VERSION}"
     DetailPrint "Previous version removed; completing the installation..."
     Sleep 3000
+    ClearErrors
     ExecWait '"$PLUGINSDIR\SteamTron-app-setup.exe" /S' $0
+    ${If} ${Errors}
+      MessageBox MB_ICONSTOP "SteamTron setup could not be started."
+      Abort
+    ${EndIf}
     ${If} $0 != 0
       MessageBox MB_ICONSTOP "SteamTron installation failed with exit code $0."
       Abort
     ${EndIf}
+    Call CheckInstalledVersion
   ${EndIf}
-  ${IfNot} ${FileExists} "$INSTDIR\steamtron-desktop.exe"
+  ${If} $InstalledVersion != "${VERSION}"
     MessageBox MB_ICONSTOP "SteamTron installation did not complete. Run the installer again."
     Abort
   ${EndIf}

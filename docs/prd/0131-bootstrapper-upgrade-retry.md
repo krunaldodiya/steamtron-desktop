@@ -21,11 +21,12 @@ One setup run completes an upgrade. Fresh installs keep working.
 
 ## Requirements
 
-- R1: After the inner installer exits 0, check
-  `$INSTDIR\steamtron-desktop.exe`.
-- R2: If missing, wait for the old uninstaller to release locks and run the
-  inner installer again.
-- R3: If the second run fails or the exe is still missing, abort with a clear
+- R1: After the inner installer exits 0, read the installed `DisplayVersion`
+  from Add/Remove Programs (not only `$INSTDIR\steamtron-desktop.exe`, which can
+  be the old executable left behind by a failed silent run; see PRD 0134).
+- R2: If the version does not match, wait for the old uninstaller to release
+  locks and run the inner installer again.
+- R3: If the second run fails or the version is still wrong, abort with a clear
   message instead of reporting success.
 - R4: Applies to both the interactive wizard and `/S`.
 - R5: No change to the prerequisite checks, install directory, or fresh
@@ -33,18 +34,21 @@ One setup run completes an upgrade. Fresh installs keep working.
 
 ## Acceptance criteria
 
-- [ ] Install 0.1.49, then run the 0.1.52 setup once; it ends with 0.1.52
+- [ ] Install 0.1.52, then run the 0.1.53 setup once; it ends with 0.1.53
       installed.
-- [ ] A fresh install still installs 0.1.52 in one run.
+- [ ] Install 0.1.49, then run the 0.1.53 setup once; it ends with 0.1.53
+      installed.
+- [ ] A fresh install still installs 0.1.53 in one run.
 - [ ] Silent `/S` upgrades install instead of leaving no app.
 
 ## Verification
 
-- Code: `bootstrapper.nsi` checks the installed exe and retries the embedded
-  installer.
+- Code: `bootstrapper.nsi` checks the installed version and retries the embedded
+  installer once (PRD 0134).
 - Build: the Release workflow compiles the NSIS bootstrapper on its Windows
   runner.
-- Not run yet: the 0.1.49 → 0.1.52 upgrade test (requires 0.1.49 installed).
+- Not run yet: the 0.1.52 → 0.1.53 and 0.1.49 → 0.1.53 upgrade tests (require
+  0.1.53 built and installed).
 
 ## Decisions and risks
 
