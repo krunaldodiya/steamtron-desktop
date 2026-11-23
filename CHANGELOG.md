@@ -1,3 +1,12 @@
+## [0.1.50] - 2026-11-23
+
+### Fixed
+
+- The Windows bootstrapper now re-runs the inner installer when an upgrade's
+  first pass only removed the previous version. One setup run completes the
+  upgrade instead of leaving no app installed. The same fix applies to the
+  interactive wizard and `/S`.
+
 ## [0.1.49] - 2026-11-23
 
 ### Added
