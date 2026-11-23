@@ -61,7 +61,7 @@ data is copied or overwritten.
       the junction after mount, and restores it before unmount.
 - [x] Max Payne 3 launches through the real path with the Rockstar fix and no
       “Rockstar required” message.
-- [ ] Desktop Play starts Max Payne 3 through the sidecar-driven real-path flow.
+- [x] Desktop Play starts Max Payne 3 through the sidecar-driven real-path flow.
 - [ ] The UI can prepare/remove the real-path layout for other games.
 - [ ] A launcher that spawns child processes keeps the junction/mount alive
       until the whole tree exits.
@@ -91,6 +91,12 @@ data is copied or overwritten.
   `cwd=D:\…\common\Max Payne 3` instead of the launcher directory.
 - 0.1.57: passes the target executable’s parent (`…\Max Payne 3\Max Payne 3`)
   as `--cwd`; desktop Play retest pending.
+- Installed 0.1.57: desktop Play through the sidecar. The log records
+  `common=…\.maxpayne3-base`, `merged=…\.maxpayne3-mount`,
+  `junction=…\Max Payne 3 -> …\.maxpayne3-mount`,
+  `cwd=…\Max Payne 3\Max Payne 3`, and
+  `exec=…\Max Payne 3\Max Payne 3\PlayMaxPayne3.exe`. The user confirmed
+  “working perfect, game started.”
 
 ## Decisions and risks
 
