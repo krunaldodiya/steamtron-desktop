@@ -1,6 +1,6 @@
 # Non-elevated GUI launch
 
-- Status: active
+- Status: done
 - Date: 2026-11-24
 - Areas: `steamtron-desktop` startup, installer Finish page
 
@@ -40,15 +40,21 @@ their existing elevation.
 
 - [x] Elevated GUI detection and Explorer relaunch are implemented.
 - [x] Overlay/runtime child dispatch happens first.
-- [ ] Runtime: installer Finish page ends with a non-elevated process and one
-      tray icon.
-- [ ] Runtime: per-game overlay still works after the relaunch.
+- [x] Runtime: after installing 0.1.70, the GUI process (PID 15872) had
+      `elevated=0`; a second launch left only that process.
+- [x] Runtime: Little Nightmares II launched from the non-elevated app
+      (PID 19340) with `cwd=S:\Helios\Binaries\Win64`, then stopped with no
+      leftover `S:` mount.
 
 ## Verification
 
 - `cargo check --workspace` passes.
-- Windows build must compile the `windows-sys` token calls.
-- Runtime verification is pending until 0.1.70 is installed.
+- Windows build compiled the `windows-sys` token calls.
+- 0.1.70 installed with the pinned WinFsp workflow fix. The installed app
+  relaunched from the elevated installer launch to a non-elevated process:
+  PID 15872, `elevated=0`, one window. A second launch left only PID 15872.
+- Little Nightmares II launched from that non-elevated app (PID 19340) with
+  `cwd=S:\Helios\Binaries\Win64`; stop removed the game/overlay and `S:`.
 
 ## Decisions and risks
 
