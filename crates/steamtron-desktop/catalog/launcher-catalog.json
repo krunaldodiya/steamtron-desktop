@@ -36,8 +36,8 @@
       "arguments": [],
       "overlay": "auto",
       "modules": ["socialclub", "goldberg"],
-      "requires_patch": true,
-      "note": "The imported RUNE PlayGTAV build is incompatible with this restored game build (launcher 1.0.0.111 vs original 1.0.0.112; direct GTA5_Enhanced exits 0x1337). Replace the fix with a matching game patch before launching."
+      "requires_patch": false,
+      "note": "Uses the real-path overlay with WinFsp Mount Manager volume identity; the imported RUNE fix supplies the launcher and Social Club layer."
     }
   ]
 }

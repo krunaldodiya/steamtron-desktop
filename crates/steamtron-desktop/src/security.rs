@@ -235,6 +235,28 @@ fn planned_paths(appid: &str, include_game: bool) -> Result<Vec<SecurityPath>, S
                 path: game.display().to_string(),
                 excluded: false,
             });
+            // The real-path overlay keeps pristine content in a sibling base
+            // folder and mounts the union at a sibling mount folder. Defender
+            // resolves files served through that mount to these paths, so both
+            // must be excluded or the fix executables are quarantined.
+            if let (Some(parent), Some(name)) = (game.parent(), game.file_name()) {
+                let base = parent.join(".steamtron-base").join(name);
+                if base.is_dir() {
+                    paths.push(SecurityPath {
+                        label: "Game base".into(),
+                        exists: true,
+                        path: base.display().to_string(),
+                        excluded: false,
+                    });
+                    let mount = parent.join(".steamtron-mount").join(name);
+                    paths.push(SecurityPath {
+                        label: "Game mount".into(),
+                        exists: mount.exists(),
+                        path: mount.display().to_string(),
+                        excluded: false,
+                    });
+                }
+            }
         }
     }
     Ok(paths)

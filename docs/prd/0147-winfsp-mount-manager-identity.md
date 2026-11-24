@@ -63,15 +63,23 @@ remains non-elevated and the overlay layout is unchanged.
 - R5: Overlay writes continue to copy up into the upper layer; the base stays
   pristine.
 - R6: The non-elevated GUI and the normal Play flow remain non-elevated.
+- R7: When a real-path layout is present, mount the union at the game's real
+  folder for the run, not at `.steamtron-mount`; the real path is restored as a
+  junction to `.steamtron-base` after unmount.
+- R8: Add the game's `.steamtron-base` and real `.steamtron-mount` folders to
+  the Defender exclusions so fix executables are not quarantined.
+- R9: Remove GTA V Enhanced's obsolete `requires_patch` gate.
 
 ## Acceptance criteria
 
 - [ ] A fresh install sets `MountUseMountmgrFromFSD=1` only when absent.
 - [ ] GTA V starts from normal Play with 2 processes and the game window.
-- [ ] The overlay log reports `mount_mode=mount-manager` for the real-path
-      overlay.
+- [ ] The overlay log reports `mount_mode=mount-manager` and
+      `mounted_at=<real path>` for the real-path overlay.
 - [ ] Base hashes are unchanged after Play; the upper layer contains any
       game-written overlay files and no base file is modified.
+- [ ] Defender logs no new detection for `PlayGTAV.exe`, `version.dll`, or
+      `RUNE64.dll` during Play.
 - [ ] Far Cry 5, Max Payne 3, Watch Dogs 2, Assassin's Creed Origins and Little
       Nightmares II still launch.
 - [ ] If the Mount Manager mount is unavailable, the legacy mount still works.
@@ -85,13 +93,27 @@ remains non-elevated and the overlay layout is unchanged.
 - 2026-11-24 non-elevated FSD test (`MountUseMountmgrFromFSD=1`):
   `merged=\\.\D:\…\Grand Theft Auto V Enhanced`, 2 processes, game window,
   base hashes unchanged, upper layer empty, junction restored.
-- Code and installer verification are pending the 0.1.71 build.
+- 2026-11-24 0.1.71 normal Play still mounted at `.steamtron-mount` + junction
+  and looped (`mount_mode=mount-manager`, 8+ PlayGTAV processes). Defender
+  detected `PLAYGTAV.EXE`, `VERSION.DLL` and `RUNE64.DLL` under
+  `.steamtron-mount`; adding that folder and `.steamtron-base` to the
+  exclusions stopped new detections but the loop remained.
+- 2026-11-24 direct real-path Mount Manager tests (elevated and non-elevated
+  FSD) both produced 2 processes and the game window. This established that
+  Mount Manager alone was not enough; the union must also be mounted at the
+  real path.
+- Code and installer verification are pending the 0.1.72 build.
 
 ## Decisions and risks
 
 - Mount Manager fixes volume/path identity only; it does not make `S:\` look
   like the real install path. The real-path layout remains required for RGL,
   Uplay and other path-sensitive launchers.
+- Mount Manager at `.steamtron-mount` still exposes that path to
+  `GetFinalPathNameByHandle`. RUNE compares it with the real install path, so
+  real-path layouts mount at the real folder for the run.
+- `.steamtron-mount` remains on disk as the legacy fallback; Stop/unmount
+  restores the real-path junction to `.steamtron-base`.
 - `MountUseMountmgrFromFSD` is a global WinFsp setting and WinFsp documents it
   as not recommended for general use. It is set only when absent, and the
   overlay falls back to the legacy mount when it is unavailable.

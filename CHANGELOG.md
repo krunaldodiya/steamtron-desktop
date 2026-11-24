@@ -1,3 +1,19 @@
+## [0.1.72] - 2026-11-24
+
+### Fixed
+
+- Normal Play now mounts the real-path overlay directly at the game's real
+  folder when WinFsp Mount Manager is available, instead of mounting at
+  `.steamtron-mount` and adding a second junction. Launchers that compare the
+  final path with the install path (Grand Theft Auto V Enhanced's RUNE build)
+  no longer restart in a loop. The real path is restored as a junction to
+  `.steamtron-base` after the run.
+- Defender exclusions now include the game's `.steamtron-base` and
+  `.steamtron-mount` paths, so fix executables served through the overlay are
+  not quarantined.
+- Grand Theft Auto V Enhanced is no longer blocked by `requires_patch`; the
+  imported RUNE fix runs through the overlay.
+
 ## [0.1.71] - 2026-11-24
 
 ### Fixed

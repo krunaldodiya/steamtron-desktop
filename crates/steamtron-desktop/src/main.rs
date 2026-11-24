@@ -2148,10 +2148,35 @@ fn try_overlay_wrapper() -> Option<i32> {
         let game = OverlayGame::new(common.clone(), fixes, Some(appid.clone()))
             .map_err(|error| error.to_string())?;
         #[cfg(windows)]
+        let real_mount = match (junction.as_deref(), base.as_deref()) {
+            (Some(link), Some(base)) if Path::new(base).is_dir() => {
+                Some((PathBuf::from(link), PathBuf::from(base)))
+            }
+            _ => None,
+        };
+        #[cfg(windows)]
+        let mut real_path_guard: Option<JunctionGuard> = real_mount
+            .as_ref()
+            .map(|(link, base)| {
+                if std::fs::symlink_metadata(link).is_ok() {
+                    remove_junction(link)?;
+                }
+                Ok::<_, String>(JunctionGuard {
+                    link: link.clone(),
+                    base: base.clone(),
+                    active: true,
+                })
+            })
+            .transpose()?;
+        #[cfg(windows)]
         let mut overlay = {
             let overlay = PlatformOverlay::new(game);
-            if let Some(path) = mountpoint.as_deref() {
-                overlay.with_mount_point(PathBuf::from(path))
+            let selected = real_mount
+                .as_ref()
+                .map(|(link, _)| link.clone())
+                .or_else(|| mountpoint.as_deref().map(PathBuf::from));
+            if let Some(path) = selected {
+                overlay.with_mount_point(path)
             } else {
                 overlay
             }
@@ -2160,8 +2185,21 @@ fn try_overlay_wrapper() -> Option<i32> {
         let mut overlay = PlatformOverlay::new(game);
         #[cfg(not(windows))]
         let _ = (&mountpoint, &junction, &base);
-        let merged = overlay.mount().map_err(|error| error.to_string())?.to_path_buf();
+        let merged = match overlay.mount() {
+            Ok(path) => path.to_path_buf(),
+            Err(error) => {
+                #[cfg(windows)]
+                if let Some(mut guard) = real_path_guard.take() {
+                    let _ = guard.restore();
+                }
+                return Err(error.to_string());
+            }
+        };
         overlay_log(format!("merged={}", merged.display()));
+        #[cfg(windows)]
+        if real_mount.is_some() {
+            overlay_log(format!("mounted_at={}", merged.display()));
+        }
         #[cfg(windows)]
         overlay_log(format!(
             "mount_mode={}",
@@ -2172,17 +2210,23 @@ fn try_overlay_wrapper() -> Option<i32> {
             }
         ));
         #[cfg(windows)]
-        let mut junction_guard = match (junction.as_deref(), base.as_deref()) {
-            (Some(link), Some(base)) => {
-                retarget_junction(Path::new(link), &merged)?;
-                overlay_log(format!("junction={link} -> {}", merged.display()));
-                Some(JunctionGuard {
-                    link: PathBuf::from(link),
-                    base: PathBuf::from(base),
-                    active: true,
-                })
+        let mut junction_guard = if real_mount.is_some() {
+            // The real path is the mount point for this run; it will be
+            // recreated as a junction to the base after unmount.
+            None
+        } else {
+            match (junction.as_deref(), base.as_deref()) {
+                (Some(link), Some(base)) => {
+                    retarget_junction(Path::new(link), &merged)?;
+                    overlay_log(format!("junction={link} -> {}", merged.display()));
+                    Some(JunctionGuard {
+                        link: PathBuf::from(link),
+                        base: PathBuf::from(base),
+                        active: true,
+                    })
+                }
+                _ => None,
             }
-            _ => None,
         };
         // Only PlayTron launches pass --target-id. Steam launches must keep
         // using the command Steam prepared; otherwise a configured launcher
@@ -2320,10 +2364,18 @@ fn try_overlay_wrapper() -> Option<i32> {
                 // it mounts in the elevated session and then starts the game
                 // directly, with the correct cwd and no second mount.
                 overlay_log("game requires elevation; relaunching the overlay elevated");
-                if let Some(mut guard) = junction_guard.take() {
-                    guard.restore()?;
+                #[cfg(windows)]
+                if real_mount.is_some() {
+                    overlay.unmount().map_err(|error| error.to_string())?;
+                    if let Some(mut guard) = real_path_guard.take() {
+                        guard.restore()?;
+                    }
+                } else {
+                    if let Some(mut guard) = junction_guard.take() {
+                        guard.restore()?;
+                    }
+                    overlay.unmount().map_err(|error| error.to_string())?;
                 }
-                overlay.unmount().map_err(|error| error.to_string())?;
                 let exe = std::env::current_exe().map_err(|error| {
                     format!("could not resolve the overlay executable: {error}")
                 })?;
@@ -2389,10 +2441,17 @@ fn try_overlay_wrapper() -> Option<i32> {
                                 "launcher restart loop detected ({spawned} processes in 15s); stopping"
                             ));
                             let _ = tree.terminate();
-                            if let Some(mut guard) = junction_guard.take() {
-                                let _ = guard.restore();
+                            if real_mount.is_some() {
+                                let _ = overlay.unmount();
+                                if let Some(mut guard) = real_path_guard.take() {
+                                    let _ = guard.restore();
+                                }
+                            } else {
+                                if let Some(mut guard) = junction_guard.take() {
+                                    let _ = guard.restore();
+                                }
+                                let _ = overlay.unmount();
                             }
-                            let _ = overlay.unmount();
                             return Err(
                                 "The launcher is restarting repeatedly; the game-specific patch is incompatible."
                                     .into(),
@@ -2412,6 +2471,16 @@ fn try_overlay_wrapper() -> Option<i32> {
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
             overlay_log("child processes finished");
+        }
+        #[cfg(windows)]
+        if real_mount.is_some() {
+            overlay.unmount().map_err(|error| error.to_string())?;
+            if let Some(mut guard) = real_path_guard.take() {
+                if let Err(error) = guard.restore() {
+                    overlay_log(format!("junction restore failed: {error}"));
+                }
+            }
+            return Ok(code);
         }
         #[cfg(windows)]
         if let Some(mut guard) = junction_guard.take() {
