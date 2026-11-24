@@ -248,13 +248,6 @@ fn planned_paths(appid: &str, include_game: bool) -> Result<Vec<SecurityPath>, S
                         path: base.display().to_string(),
                         excluded: false,
                     });
-                    let mount = parent.join(".steamtron-mount").join(name);
-                    paths.push(SecurityPath {
-                        label: "Game mount".into(),
-                        exists: mount.exists(),
-                        path: mount.display().to_string(),
-                        excluded: false,
-                    });
                 }
             }
         }

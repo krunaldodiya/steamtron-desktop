@@ -1,3 +1,11 @@
+## [0.1.76] - 2026-11-24
+
+### Changed
+
+- The unified layout no longer creates an unused `.steamtron-mount/<Game>`
+  directory for every game. Startup removes leftover empty mount directories;
+  only `.steamtron-base`, the real-path junction and the sidecar remain.
+
 ## [0.1.75] - 2026-11-24
 
 ### Changed

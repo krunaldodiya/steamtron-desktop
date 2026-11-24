@@ -2968,8 +2968,6 @@ fn ensure_real_path(
         .ok_or_else(|| format!("game folder has no name: {}", real.display()))?;
     let computed_base = parent.join(".steamtron-base").join(name);
     let mount = parent.join(".steamtron-mount").join(name);
-    std::fs::create_dir_all(&mount)
-        .map_err(|error| format!("could not create {}: {error}", mount.display()))?;
     let metadata = std::fs::symlink_metadata(&real)
         .map_err(|error| format!("could not inspect {}: {error}", real.display()))?;
     let reparse = metadata.file_attributes() & 0x0000_0400 != 0;
@@ -3028,6 +3026,7 @@ fn ensure_all_real_path_layouts() {
     let Ok(library) = steamtron_core::library::Library::load() else {
         return;
     };
+    let mut mount_parents: Vec<PathBuf> = Vec::new();
     for game in library.games() {
         if game.installation.mode != steamtron_core::library::InstallMode::Managed {
             continue;
@@ -3037,9 +3036,7 @@ fn ensure_all_real_path_layouts() {
         }
         if real_path_layout(&game.id).is_some() {
             repair_real_path_junction(&game.id);
-            continue;
-        }
-        if let Err(error) = ensure_real_path(game, true) {
+        } else if let Err(error) = ensure_real_path(game, true) {
             eprintln!(
                 "SteamTron: could not prepare the real-path layout for {}: {error}",
                 game.title
@@ -3047,6 +3044,36 @@ fn ensure_all_real_path_layouts() {
         } else {
             repair_real_path_junction(&game.id);
         }
+        if let Some(layout) = real_path_layout(&game.id) {
+            remove_empty_mount_dir(&layout.mount);
+            if let Some(parent) = layout.mount.parent() {
+                mount_parents.push(parent.to_path_buf());
+            }
+        }
+    }
+    for parent in mount_parents {
+        let _ = std::fs::remove_dir(parent);
+    }
+}
+
+#[cfg(windows)]
+fn remove_empty_mount_dir(path: &Path) {
+    use std::os::windows::fs::MetadataExt;
+
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.file_attributes() & 0x0000_0400 != 0 {
+        return;
+    }
+    if !metadata.is_dir() {
+        return;
+    }
+    let empty = std::fs::read_dir(path)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false);
+    if empty {
+        let _ = std::fs::remove_dir(path);
     }
 }
 
