@@ -215,6 +215,21 @@ Section "Install"
     DetailPrint "WinFsp already installed; skipping."
   ${EndIf}
 
+  ; WinFsp's user-mode Mount Manager requires Administrator access. Its FSD
+  ; setting lets the non-elevated app register a real volume mount point,
+  ; which games need for GetFinalPathNameByHandle and volume identity.
+  ; Respect an existing choice and only set the value when it is absent.
+  SetRegView 32
+  ClearErrors
+  ReadRegDWORD $0 HKLM "SOFTWARE\WinFsp" "MountUseMountmgrFromFSD"
+  ${If} ${Errors}
+    WriteRegDWORD HKLM "SOFTWARE\WinFsp" "MountUseMountmgrFromFSD" 1
+    DetailPrint "Enabled WinFsp Mount Manager for non-elevated overlays."
+  ${Else}
+    DetailPrint "WinFsp MountUseMountmgrFromFSD already set to $0; leaving it."
+  ${EndIf}
+  SetRegView 64
+
   DetailPrint "Installing SteamTron..."
   ClearErrors
   ExecWait '"$PLUGINSDIR\SteamTron-app-setup.exe" /S' $0

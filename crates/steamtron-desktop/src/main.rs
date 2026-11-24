@@ -2163,6 +2163,15 @@ fn try_overlay_wrapper() -> Option<i32> {
         let merged = overlay.mount().map_err(|error| error.to_string())?.to_path_buf();
         overlay_log(format!("merged={}", merged.display()));
         #[cfg(windows)]
+        overlay_log(format!(
+            "mount_mode={}",
+            if overlay.used_mount_manager() {
+                "mount-manager"
+            } else {
+                "legacy"
+            }
+        ));
+        #[cfg(windows)]
         let mut junction_guard = match (junction.as_deref(), base.as_deref()) {
             (Some(link), Some(base)) => {
                 retarget_junction(Path::new(link), &merged)?;

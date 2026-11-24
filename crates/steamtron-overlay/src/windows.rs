@@ -580,6 +580,7 @@ pub struct WindowsOverlay {
     explicit_mount_point: Option<PathBuf>,
     host: Option<FileSystemHost<UnionFs, CoarseGuard>>,
     init: Option<FspInit>,
+    used_mount_manager: bool,
 }
 
 impl WindowsOverlay {
@@ -598,6 +599,7 @@ impl WindowsOverlay {
             explicit_mount_point: None,
             host: None,
             init: None,
+            used_mount_manager: false,
         }
     }
 
@@ -623,6 +625,14 @@ impl WindowsOverlay {
 
     pub fn merged(&self) -> &Path {
         &self.mount_point
+    }
+
+    /// Whether the last successful mount used the Windows Mount Manager.
+    ///
+    /// Mount Manager mounts expose a real volume/path identity; the legacy
+    /// DefineDosDevice/junction mount does not.
+    pub fn used_mount_manager(&self) -> bool {
+        self.used_mount_manager
     }
 
     pub fn mount(&mut self) -> Result<&Path, OverlayError> {
@@ -651,7 +661,7 @@ impl WindowsOverlay {
         };
         // A directory mount keeps the caller's real path available; a free
         // drive letter is still the default for games that do not need it.
-        let (mount, root) = if let Some(path) = self.explicit_mount_point.clone() {
+        let (mount_plain, root) = if let Some(path) = self.explicit_mount_point.clone() {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|error| {
                     OverlayError::MountFailed(format!(
@@ -682,6 +692,9 @@ impl WindowsOverlay {
                         path.display()
                     )));
                 }
+                // The Mount Manager creates the directory with FILE_CREATE;
+                // an existing empty directory would collide.
+                let _ = fs::remove_dir(&path);
             }
             (path.display().to_string(), path)
         } else {
@@ -691,9 +704,25 @@ impl WindowsOverlay {
             (drive, root)
         };
         self.mount_point = root;
+        self.used_mount_manager = false;
         let mut host = FileSystemHost::<UnionFs, CoarseGuard>::new(params, fs)
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
-        let mut mounted = host.mount(mount.as_str());
+
+        // Prefer the Mount Manager. It publishes a real volume identity so
+        // GetFinalPathNameByHandle and volume queries work; the legacy
+        // DefineDosDevice/junction mount does not.
+        let manager_target = format!(r"\\.\{}", mount_plain.trim_start_matches(r"\\?\"));
+        let mut manager_error = None;
+        let mut mounted = host.mount(manager_target.as_str());
+        if mounted.is_ok() {
+            self.used_mount_manager = true;
+        } else {
+            manager_error = mounted.as_ref().err().map(|error| error.to_string());
+            if let Some(path) = self.explicit_mount_point.as_ref() {
+                remove_empty_directory(path);
+            }
+            mounted = host.mount(mount_plain.as_str());
+        }
         if mounted.is_err() {
             if let Some(path) = self.explicit_mount_point.as_ref() {
                 // WinFsp creates the directory mountpoint itself on some
@@ -710,14 +739,22 @@ impl WindowsOverlay {
                 } else if !path.exists() {
                     let _ = fs::create_dir_all(path);
                 }
-                mounted = host.mount(mount.as_str());
+                mounted = host.mount(mount_plain.as_str());
             }
         }
         if mounted.is_err() && self.explicit_mount_point.is_some() {
-            let extended = format!("\\\\?\\{mount}");
+            let extended = format!("\\\\?\\{mount_plain}");
             mounted = host.mount(extended.as_str());
         }
-        mounted.map_err(|error| OverlayError::MountFailed(error.to_string()))?;
+        if let Err(error) = mounted {
+            let message = match manager_error {
+                Some(manager) => {
+                    format!("mount manager failed: {manager}; legacy mount failed: {error}")
+                }
+                None => error.to_string(),
+            };
+            return Err(OverlayError::MountFailed(message));
+        }
         host.start()
             .map_err(|error| OverlayError::MountFailed(error.to_string()))?;
         self.host = Some(host);
@@ -741,6 +778,21 @@ impl WindowsOverlay {
             let _ = fs::remove_dir_all(&self.layout.work);
         }
         Ok(())
+    }
+}
+
+fn remove_empty_directory(path: &Path) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if !metadata.is_dir() {
+        return;
+    }
+    let empty = fs::read_dir(path)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false);
+    if empty {
+        let _ = fs::remove_dir(path);
     }
 }
 

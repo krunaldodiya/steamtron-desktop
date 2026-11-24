@@ -1,3 +1,17 @@
+## [0.1.71] - 2026-11-24
+
+### Fixed
+
+- Real-path overlays now mount through the Windows Mount Manager when
+  available. Games and launchers see a real volume identity, so
+  `GetFinalPathNameByHandle` and volume queries work. This fixes the Grand
+  Theft Auto V Enhanced launcher restart loop (60+ processes, no window).
+  The Windows bootstrapper enables WinFsp's non-elevated Mount Manager setting
+  when it is absent; the existing DefineDosDevice/junction mount remains as a
+  fallback.
+- Overlay diagnostics record `mount_mode=mount-manager` or `mount_mode=legacy`
+  so a failed launch can be diagnosed without rebuilding.
+
 ## [0.1.70] - 2026-11-24
 
 ### Fixed
