@@ -1,3 +1,15 @@
+## [0.1.69] - 2026-11-24
+
+### Fixed
+
+- Stopping a managed game now points the real-path junction back to
+  `.steamtron-base` after the overlay wrapper is killed. A forced Stop used to
+  leave the junction on the unmounted `.steamtron-mount`, so the game appeared
+  as 0 B/Download until the next Play.
+- Library load recovers a stale persisted root from the canonical
+  `common/<title>` folder (for example `common/FarCry5` vs
+  `common/Far Cry 5`) instead of reporting missing content.
+
 ## [0.1.68] - 2026-11-24
 
 ### Fixed

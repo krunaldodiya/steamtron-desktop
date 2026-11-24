@@ -37,13 +37,14 @@ existing window and exits; only one tray icon exists.
 
 - [x] The single-instance plugin is registered first in the Tauri builder.
 - [x] The callback restores and focuses the main window.
-- [ ] Runtime: launching the installed app twice leaves one process and one
-      tray icon.
+- [x] Runtime: launching the installed app twice leaves one process and one
+      tray icon (0.1.68, second launch left process 5532 only).
 
 ## Verification
 
 - `cargo check --workspace` — exit 0 (0.1.66).
-- Runtime verification is pending until 0.1.66 is installed.
+- 0.1.68 installed; launching the app a second time left only the first
+  process (PID 5532). Runtime verified.
 
 ## Decisions and risks
 

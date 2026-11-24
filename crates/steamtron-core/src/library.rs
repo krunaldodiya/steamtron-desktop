@@ -407,6 +407,18 @@ impl Game {
                 self.installation.root = candidate;
             }
         }
+        // A previous version could persist a stale root (for example
+        // `common/FarCry5` while the real folder is `common/Far Cry 5`).
+        // Recover from the canonical title folder when the stored root is gone.
+        if !self.installation.root.is_dir() {
+            if let Ok(folder) = safe_folder(&self.title) {
+                let canonical = base.join("common").join(folder);
+                if canonical.is_dir() {
+                    self.installation.root =
+                        rebase_with_prefix(&self.installation.root, canonical);
+                }
+            }
+        }
         if let Some(prefix) = manifest
             .get("compatdata_directory")
             .and_then(serde_json::Value::as_str)
@@ -2009,6 +2021,49 @@ mod tests {
         let game = library.game("552520").unwrap();
         assert_eq!(game.installation.root, root);
         assert_eq!(game.launch_targets[0].executable, root.join("bin/FarCry5.exe"));
+    }
+
+    #[test]
+    fn library_open_recovers_a_stale_root_from_the_title_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("SteamTronLibrary/steamtronapps");
+        let canonical = base.join("common/Far Cry 5");
+        fs::create_dir_all(&canonical).unwrap();
+        fs::write(canonical.join("game.exe"), b"MZ").unwrap();
+        let manifest_path = base.join("appmanifest_552520.json");
+        let library_path = temp.path().join("library.json");
+        {
+            let mut library = Library::open(&library_path).unwrap();
+            library.add_drive(temp.path(), "test", true).unwrap();
+            let mut game = sample_game(
+                "552520",
+                "Far Cry 5",
+                base.join("common/FarCry5"),
+            );
+            game.installation.manifest = manifest_path.clone();
+            library.upsert_game(game).unwrap();
+            library.save_index().unwrap();
+        }
+        fs::write(
+            &manifest_path,
+            serde_json::json!({
+                "format": 1,
+                "game_id": "552520",
+                "title": "Far Cry 5",
+                "steam_app_id": 552520,
+                "content_directory": "common/FarCry5",
+                "launcher_targets": [
+                    {"id": "t1", "name": "Far Cry 5", "executable": "bin/FarCry5.exe", "primary": true}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let library = Library::open(&library_path).unwrap();
+        let game = library.game("552520").unwrap();
+        assert_eq!(game.installation.root, canonical);
+        assert_eq!(game.launch_targets[0].executable, canonical.join("bin/FarCry5.exe"));
     }
 
     #[test]

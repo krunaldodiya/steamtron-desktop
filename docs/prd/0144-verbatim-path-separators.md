@@ -80,10 +80,12 @@ on-disk layout.
 - [x] A separator-normalization unit test covers a mixed path.
 - [x] `cargo check --workspace` passes.
 - [x] A valid library root is kept when the manifest path is stale.
-- [ ] Runtime: Max Payne 3 Play resolves `PlayMaxPayne3.exe`.
-- [ ] Runtime: Installed Files reports the 34.9 GB game size.
-- [ ] Runtime: the other verbatim-root games show Play (not Download) and
-      their real sizes.
+- [x] Runtime: Max Payne 3 Play resolves `PlayMaxPayne3.exe`
+      (0.1.68, PID 2272).
+- [x] Runtime: Installed Files reports the real game size (32.5 GiB for
+      34.9 GB decimal) instead of 0 B.
+- [x] Runtime: startup path log shows 17/17 managed roots readable after the
+      stale Far Cry 5 root was repaired.
 - [ ] Runtime: a settings save keeps `content_directory` as
       `common/Max Payne 3`.
 

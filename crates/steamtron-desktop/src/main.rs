@@ -3601,6 +3601,23 @@ async fn stop_managed(game_id: String) -> Result<(), String> {
         .map_err(|error| format!("stop task failed: {error}"))?
 }
 
+/// A forced Stop kills the overlay wrapper, so its junction guard cannot run.
+/// Put the real path back on the base after the process tree is gone.
+#[cfg(windows)]
+fn restore_real_path_after_run(game_id: &str) {
+    let Some(layout) = real_path_layout(game_id) else {
+        return;
+    };
+    if !layout.base.is_dir() {
+        return;
+    }
+    let _ = retarget_junction(&layout.real, &layout.base);
+    let _ = std::fs::remove_dir(&layout.mount);
+    if let Some(parent) = layout.mount.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+}
+
 fn stop_managed_blocking(game_id: String) -> Result<(), String> {
     use steamtron_core::library::Library;
 
@@ -3680,6 +3697,8 @@ fn stop_managed_blocking(game_id: String) -> Result<(), String> {
             .lock()
             .map_err(|_| "Game state lock failed.".to_string())?
             .remove(&game_id);
+        #[cfg(windows)]
+        restore_real_path_after_run(&game_id);
         Ok(())
     }
 }

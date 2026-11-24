@@ -50,8 +50,8 @@ the page stays usable.
 - [x] A pending drive enumeration re-renders only when it completes.
 - [x] Drive cache invalidation is wired to add/remove/default/refresh.
 - [x] `node --check` passes on `app.js`.
-- [ ] Runtime: opening Storage after launch is immediate and the drive rows
-      populate without blocking the pane.
+- [x] Runtime: Storage opened with drive/data content after launch without
+      the previous whole-pane `Loading…` state (0.1.68).
 
 ## Verification
 

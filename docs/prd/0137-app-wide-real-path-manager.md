@@ -54,6 +54,8 @@ overlay. The user never creates a sidecar.
   fallback; a stale snapshot must not replace a patched launcher.
 - R14: A recorded real path whose junction is broken or missing is repaired to
   the base before launch planning; a missing base raises a clear error.
+- R15: A forced Stop restores the junction to the base after the overlay
+  wrapper is killed; the game must not stay on an unmounted mount.
 
 ## Acceptance criteria
 
@@ -70,6 +72,8 @@ overlay. The user never creates a sidecar.
 - [x] Backup restore handles a real-path junction at the target root.
 - [x] Restore keeps an existing configured launcher when its executable still
       exists; backup targets are fallback.
+- [ ] Forced Stop restores the junction to the base (0.1.69 code; runtime
+      retest pending).
 - [ ] Forced-exit repair is exercised.
 
 ## Verification
@@ -108,6 +112,10 @@ overlay. The user never creates a sidecar.
   `Max Payne 3\PlayMaxPayne3.exe` made the game run (PID 6992), without any
   game-specific catalog target. 0.1.63 keeps existing targets that still exist
   and treats backup targets as fallback; not yet installed.
+- 0.1.68 Max Payne Play worked (PID 2272) and Installed Files showed 32.5 GiB.
+  A forced Stop killed the overlay wrapper and left the junction on the
+  unmounted mount; 0.1.69 adds `restore_real_path_after_run` to point it back
+  to the base.
 - 0.1.63 on 2026-11-24 reported `game content folder does not exist` for the
   `\\?\D:\...\Max Payne 3` real path while the base folder existed and the
   `.steamtron-mount` folder was missing. 0.1.64 repaired a real-path junction
