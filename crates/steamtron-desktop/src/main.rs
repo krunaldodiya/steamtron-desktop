@@ -3693,21 +3693,35 @@ fn restore_real_path_after_run(game_id: &str) {
         return;
     }
     // Stop kills the overlay wrapper, so the real path may still be a live
-    // mount when this runs. Retry until WinFsp releases it instead of leaving
-    // the game folder missing.
+    // mount when this runs. WinFsp can take several seconds to release the
+    // volume after the process is terminated. Retry long enough to survive
+    // that, rather than leaving the game folder missing.
     let mut restored = false;
-    for _ in 0..20 {
-        if retarget_junction(&layout.real, &layout.base).is_ok() {
-            restored = true;
-            break;
+    let mut last_error = None;
+    for _ in 0..80 {
+        match retarget_junction(&layout.real, &layout.base) {
+            Ok(()) => {
+                restored = true;
+                break;
+            }
+            Err(error) => last_error = Some(error),
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
     if !restored {
-        eprintln!(
-            "SteamTron: could not restore the real path after Stop: {}",
-            layout.real.display()
+        let message = format!(
+            "could not restore the real path after Stop: {} ({})",
+            layout.real.display(),
+            last_error.unwrap_or_else(|| "no attempt".into())
         );
+        eprintln!("SteamTron: {message}");
+        let path = steamtron_core::paths::layout()
+            .diagnostics_for(game_id)
+            .join("stop-restore.log");
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, message);
     }
     let _ = std::fs::remove_dir(&layout.mount);
     if let Some(parent) = layout.mount.parent() {

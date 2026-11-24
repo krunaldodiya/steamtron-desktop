@@ -1,3 +1,13 @@
+## [0.1.74] - 2026-11-24
+
+### Fixed
+
+- The forced-Stop restore now retries for up to 20 seconds while WinFsp
+  releases the real-path mount, instead of giving up after 5 seconds and
+  leaving the game folder missing. A diagnostics file
+  (`diagnostics/<appid>/stop-restore.log`) records the final error if the
+  restore still fails.
+
 ## [0.1.73] - 2026-11-24
 
 ### Fixed

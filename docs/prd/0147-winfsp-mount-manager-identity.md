@@ -111,7 +111,10 @@ remains non-elevated and the overlay layout is unchanged.
   `RUNE64.DLL` and `VERSION.DLL`; no new Defender detections were logged.
 - 2026-11-24 0.1.72 forced Stop: the real path was left missing because the
   restore raced the wrapper shutdown; the verification script recreated the
-  junction. 0.1.73 adds a retry loop and is pending verification.
+  junction. 0.1.73 added a 5-second retry, but the 0.1.73 Stop test still found
+  the real path missing because WinFsp released the mount after that window.
+  0.1.74 extends the retry to 20 seconds and adds a diagnostics log; final
+  verification is pending.
 
 ## Decisions and risks
 
