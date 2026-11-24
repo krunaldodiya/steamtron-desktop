@@ -50,9 +50,25 @@ jobs:
 
       - name: Install Windows build dependencies
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          choco install winfsp -y --no-progress
           choco install nsis -y --no-progress
+          # winfsp-sys reads HKLM\SOFTWARE\WOW6432Node\WinFsp\InstallDir.
+          # The runner image no longer guarantees that key, so install the
+          # pinned MSI and register the header directory explicitly.
+          $msi = Join-Path $env:RUNNER_TEMP "winfsp-2.1.25156.msi"
+          Invoke-WebRequest "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" -OutFile $msi
+          $process = Start-Process msiexec.exe -ArgumentList @("/i", "`"$msi`"", "/qn", "/norestart") -Wait -PassThru
+          if ($process.ExitCode -notin 0, 3010) { throw "WinFsp MSI failed: $($process.ExitCode)" }
+          $dir = @(
+            "${env:ProgramFiles(x86)}\WinFsp",
+            "$env:ProgramFiles\WinFsp"
+          ) | Where-Object { Test-Path (Join-Path $_ "inc\winfsp\winfsp.h") } | Select-Object -First 1
+          if (-not $dir) { throw "WinFsp headers not found after install" }
+          New-Item -Path "HKLM:\SOFTWARE\WOW6432Node\WinFsp" -Force | Out-Null
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\WinFsp" -Name InstallDir -Value $dir
+          Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\WinFsp" | Format-List
+          Test-Path (Join-Path $dir "inc\winfsp\winfsp.h")
 
       - name: Build bundles
         run: npx --yes @tauri-apps/cli@2 build --bundles ${{ matrix.bundles }}
