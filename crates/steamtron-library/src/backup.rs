@@ -69,37 +69,132 @@ fn lua_manifest_ids(lua: &str) -> Vec<(String, String)> {
 }
 
 pub fn game_appmanifest(game: &steamtron_core::library::Game) -> serde_json::Value {
-    let folder = game.installation.root.file_name().and_then(|name| name.to_str()).unwrap_or("Game");
-    let prefix_name = game.installation.prefix.file_name().and_then(|name| name.to_str()).unwrap_or(folder);
-    let primary = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first());
-    let launcher_relative = primary
-        .and_then(|target| target.executable.strip_prefix(&game.installation.root).ok())
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default();
-    let targets = game.launch_targets.iter().map(|target| {
-        serde_json::json!({
-            "id": target.id,
-            "name": target.name,
-            "executable": target.executable.strip_prefix(&game.installation.root)
-                .map(|path| path.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_else(|_| target.executable.to_string_lossy().into_owned()),
-            "arguments": target.arguments,
-            "primary": target.primary,
-        })
-    }).collect::<Vec<_>>();
-    serde_json::json!({
-        "format": 1,
-        "game_id": game.id,
-        "title": game.title,
-        "steam_app_id": game.metadata_app_id,
-        "content_directory": format!("common/{folder}"),
-        "fixes_directory": format!("fixes/{folder}"),
-        "launcher_relative_path": launcher_relative,
-        "compatdata_directory": format!("compatdata/{prefix_name}"),
-        "proton": game.launch.proton,
-        "launch_options": game.launch.arguments,
-        "launch_targets": targets,
-    })
+    game.appmanifest()
+}
+
+/// Absolute path of the appmanifest that belongs to `game`.
+pub fn appmanifest_path(game: &Game) -> Result<PathBuf, LibraryError> {
+    if !game.installation.manifest.as_os_str().is_empty() {
+        let managed = game
+            .installation
+            .manifest
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("appmanifest_") && name.ends_with(".json"));
+        if !managed {
+            return Err(LibraryError::Invalid(
+                "The game manifest is not a SteamTron appmanifest.".into(),
+            ));
+        }
+        return Ok(game.installation.manifest.clone());
+    }
+    if game.installation.mode == InstallMode::Linked {
+        return Err(LibraryError::Invalid(
+            "A linked game has no managed appmanifest.".into(),
+        ));
+    }
+    let base = game
+        .installation
+        .root
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| LibraryError::Invalid("The managed library folder is invalid.".into()))?;
+    Ok(base.join(format!(
+        "appmanifest_{}.json",
+        game.metadata_app_id
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| game.id.clone())
+    )))
+}
+
+/// Live manifest fields merged over the existing file.
+///
+/// The generated fields own the launch target; fields the backup builder does
+/// not own (details, integrity, quicklook) are preserved.
+pub fn merged_game_appmanifest(game: &Game) -> Value {
+    let generated = game_appmanifest(game);
+    let mut payload = appmanifest_path(game)
+        .ok()
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let (Some(target), Some(source)) = (payload.as_object_mut(), generated.as_object()) {
+        for (key, value) in source {
+            target.insert(key.clone(), value.clone());
+        }
+    }
+    payload
+}
+
+/// Rewrite the game's appmanifest from the live library entry.
+///
+/// Every launcher change calls this so the on-disk manifest cannot keep a
+/// stale target until the user presses "Generate app manifest".
+pub fn write_game_appmanifest(game: &Game) -> Result<PathBuf, LibraryError> {
+    let path = appmanifest_path(game)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| LibraryError::io(parent, error))?;
+    }
+    let data = serde_json::to_vec_pretty(&merged_game_appmanifest(game))
+        .map_err(|error| LibraryError::Archive(error.to_string()))?;
+    let temporary = path.with_extension("json.steamtron.tmp");
+    fs::write(&temporary, data).map_err(|error| LibraryError::io(&temporary, error))?;
+    fs::rename(&temporary, &path).map_err(|error| LibraryError::io(&path, error))?;
+    Ok(path)
+}
+
+fn target_exists(target: &LaunchTarget, root: &Path) -> bool {
+    let path = if target.executable.is_absolute() {
+        target.executable.clone()
+    } else {
+        root.join(&target.executable)
+    };
+    path.is_file()
+}
+
+fn normalize_primary(targets: &mut [LaunchTarget]) {
+    let mut claimed = false;
+    for target in targets.iter_mut() {
+        if target.primary && !claimed {
+            claimed = true;
+        } else {
+            target.primary = false;
+        }
+    }
+    if !claimed {
+        if let Some(first) = targets.first_mut() {
+            first.primary = true;
+        }
+    }
+}
+
+/// Pick the launch targets to keep after a restore.
+///
+/// Configured targets that still exist win over the backup snapshot: the
+/// backup may predate a launcher change, and replacing a working target with
+/// a stale one sends the game back to its original launcher. Backup targets
+/// are fallback for a new or invalid entry; the caller auto-detects only when
+/// neither list has a usable target.
+pub fn restored_launch_targets(
+    existing: &[LaunchTarget],
+    backup: &[LaunchTarget],
+    root: &Path,
+) -> Vec<LaunchTarget> {
+    let mut selected = existing
+        .iter()
+        .filter(|target| target_exists(target, root))
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        selected = backup
+            .iter()
+            .filter(|target| target_exists(target, root))
+            .cloned()
+            .collect();
+    }
+    normalize_primary(&mut selected);
+    selected
 }
 
 fn smd_lua_text(content: &str, app_id: u32) -> String {
@@ -216,12 +311,12 @@ pub fn export_game_backups(
         }
         let zip_path = destination.join(format!("{title}.zip"));
         let temporary = destination.join(format!(".{title}.zip.tmp"));
-        crate::managed::ensure_appmanifest(game)?;
-        let appmanifest = if game.installation.manifest.is_file() {
-            fs::read(&game.installation.manifest).map_err(|error| LibraryError::io(&game.installation.manifest, error))?
-        } else {
-            serde_json::to_vec_pretty(&game_appmanifest(game)).map_err(|error| LibraryError::Archive(error.to_string()))?
-        };
+        // Build the manifest from the live library entry, not from a file that
+        // may still describe an older launcher. Refresh the local file too so
+        // the managed library and the backup agree.
+        let appmanifest = serde_json::to_vec_pretty(&merged_game_appmanifest(game))
+            .map_err(|error| LibraryError::Archive(error.to_string()))?;
+        let _ = write_game_appmanifest(game);
 
         let mut tar_bytes = Vec::new();
         let manifest_count = manifest_data.len();
@@ -731,7 +826,9 @@ pub fn import_game_metadata_at_with_progress(
         }
     }
     progress(total, total, "Import complete").map_err(LibraryError::Archive)?;
-    library.save().map_err(|error| LibraryError::Archive(error.to_string()))?;
+    // Keep the imported appmanifest bytes exact. It is the per-game config
+    // file and is overlaid on the next open.
+    library.save_index().map_err(|error| LibraryError::Archive(error.to_string()))?;
     Ok(ImportSummary { imported, skipped: total - imported, warnings })
 }
 
@@ -1331,4 +1428,110 @@ pub fn repair_backup_fixes(
     }
     progress(total, total, "Backup fixes repair complete").map_err(LibraryError::Archive)?;
     Ok(FixesRepairSummary { scanned: total, updated, complete, skipped, warnings })
+}
+
+#[cfg(test)]
+mod launch_target_tests {
+    use super::*;
+
+    fn sample_game(root: &Path, manifest: &Path, targets: Vec<LaunchTarget>) -> Game {
+        Game {
+            id: "42".into(),
+            title: "Sample".into(),
+            metadata_app_id: Some(42),
+            metadata_source: None,
+            installation: Installation {
+                mode: InstallMode::Managed,
+                root: root.to_path_buf(),
+                prefix: PathBuf::new(),
+                proton: String::new(),
+                manifest: manifest.to_path_buf(),
+                confirmed: true,
+            },
+            steam: None,
+            launch: LaunchSettings::default(),
+            launch_targets: targets,
+            fixes_enabled: true,
+            artwork: Artwork::default(),
+            setup_completed_at: None,
+        }
+    }
+
+    fn target(name: &str, executable: PathBuf, primary: bool) -> LaunchTarget {
+        LaunchTarget {
+            id: name.to_lowercase(),
+            name: name.into(),
+            executable,
+            arguments: Vec::new(),
+            primary,
+        }
+    }
+
+    #[test]
+    fn write_appmanifest_records_the_live_target_and_keeps_extra_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("common").join("Sample");
+        fs::create_dir_all(&root).unwrap();
+        let play = root.join("Play.exe");
+        fs::write(&play, b"MZ").unwrap();
+        let manifest = temp.path().join("appmanifest_42.json");
+        fs::write(
+            &manifest,
+            br#"{"detail":"keep","launcher_targets":[{"id":"old","name":"Old","executable":"Sample/Old.exe","primary":true}]}"#,
+        )
+        .unwrap();
+        let game = sample_game(&root, &manifest, vec![target("Play", play, true)]);
+
+        let written = write_game_appmanifest(&game).unwrap();
+        assert_eq!(written, manifest);
+        let data: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        assert_eq!(data["detail"], "keep");
+        assert_eq!(data["launcher_relative_path"], "Play.exe");
+        assert_eq!(data["launcher_targets"].as_array().unwrap().len(), 1);
+        assert_eq!(data["launcher_targets"][0]["name"], "Play");
+        assert!(data.get("launch_targets").is_none());
+    }
+
+    #[test]
+    fn restore_keeps_a_working_configured_target_over_the_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("Sample");
+        fs::create_dir_all(&root).unwrap();
+        let play = root.join("Play.exe");
+        fs::write(&play, b"MZ").unwrap();
+        let existing = vec![target("Play", play.clone(), true)];
+        let backup = vec![target("Old", root.join("Old.exe"), true)];
+
+        let selected = restored_launch_targets(&existing, &backup, &root);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].executable, play);
+        assert!(selected[0].primary);
+    }
+
+    #[test]
+    fn restore_uses_backup_targets_when_the_configured_one_is_gone() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("Sample");
+        fs::create_dir_all(&root).unwrap();
+        let game = root.join("game.exe");
+        fs::write(&game, b"MZ").unwrap();
+        let existing = vec![target("Play", root.join("Play.exe"), true)];
+        let backup = vec![target("Game", game.clone(), true)];
+
+        let selected = restored_launch_targets(&existing, &backup, &root);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].executable, game);
+        assert!(selected[0].primary);
+    }
+
+    #[test]
+    fn restore_returns_empty_when_no_target_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("Sample");
+        fs::create_dir_all(&root).unwrap();
+        let existing = vec![target("Play", root.join("Play.exe"), true)];
+        let backup = vec![target("Game", root.join("game.exe"), true)];
+
+        assert!(restored_launch_targets(&existing, &backup, &root).is_empty());
+    }
 }

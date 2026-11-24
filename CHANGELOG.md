@@ -1,11 +1,27 @@
 ## [0.1.63] - 2026-11-24
 
+### Added
+
+- The per-game `appmanifest_<id>.json` is now the authoritative settings file
+  for a managed game. Launchers, Proton, prefix mode, environment, arguments,
+  prelaunch and fixes are read from it on every library load and written back
+  on every save. `library.json` remains the index/cache, global settings and
+  fields that are not per-game settings.
+
 ### Fixed
 
 - Restoring a game backup no longer fails with `Access is denied (os error 5)`
   when the destination is a real-path junction. Restore now puts a valid base
   back in place, or removes a stale junction and its layout record, before the
   commit rename.
+- Restore keeps an existing configured launcher when its executable still
+  exists. Backup targets are fallback only, so a stale snapshot cannot replace
+  a working target and send the game back to its original launcher.
+- Backups are built from the live game config, including every launch setting,
+  instead of copying an older manifest snapshot.
+- Storage settings show the data folder and the `library.json` file separately
+  on Windows; opening the data folder no longer fails with
+  `folder does not exist`.
 
 ## [0.1.62] - 2026-11-23
 

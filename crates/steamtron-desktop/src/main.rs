@@ -3901,6 +3901,7 @@ fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value
         .collect();
     serde_json::json!({
         "path": library.path().display().to_string(),
+        "data_home": steamtron_core::paths::layout().home().display().to_string(),
         "settings": library.settings(),
         "drives": library.drives(),
         "games": games,
@@ -5562,17 +5563,6 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
             String::new()
         };
         operation_check(&control)?;
-        let primary = game.launch_targets.iter().find(|target| target.primary).or_else(|| game.launch_targets.first());
-        let launcher_relative = primary.and_then(|target| target.executable.strip_prefix(&root).ok()).map(|path| path.to_string_lossy().replace('\\', "/")).unwrap_or_default();
-        let targets = game.launch_targets.iter().map(|target| {
-            serde_json::json!({
-                "id": target.id,
-                "name": target.name,
-                "executable": target.executable.strip_prefix(&root).map(|path| path.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| target.executable.to_string_lossy().into_owned()),
-                "arguments": target.arguments,
-                "primary": target.primary,
-            })
-        }).collect::<Vec<_>>();
         let mut components = serde_json::Map::new();
         components.insert("content".into(), serde_json::json!({"name":"content.tar","sha256":content_sha}));
         if !fixes_sha.is_empty() {
@@ -5581,28 +5571,20 @@ async fn backup_managed_game(app: tauri::AppHandle, game_id: String, destination
         if !manifest_sha.is_empty() {
             components.insert("manifest_bundle".into(), serde_json::json!({"name":"manifest-bundle.tar","sha256":manifest_sha}));
         }
-        let metadata = serde_json::json!({
-            "backup_format": 2,
-            "format": 1,
-            "game_id": game.id,
-            "title": title,
-            "steam_app_id": app_id,
-            "content_directory": format!("common/{folder}"),
-            "fixes_directory": if fixes_sha.is_empty() { String::new() } else { format!("fixes/{folder}") },
-            "compatdata_directory": format!("compatdata/{}", game.installation.prefix.file_name().and_then(|name| name.to_str()).unwrap_or(&folder)),
-            "content_archive": {"name":"content.tar","sha256":content_sha},
-            "components": components,
-            "launcher_relative_path": launcher_relative,
-            "launcher_targets": targets,
-            "launch_settings": {
-                "environment": game.launch.environment,
-                "prefix_mode": game.launch.prefix_mode,
-                "proton": game.launch.proton,
-                "requires_steam": game.launch.requires_steam,
-            },
-            "proton": game.launch.proton,
-            "fixes_enabled": game.fixes_enabled,
-        });
+        // Start from the game's config file so every setting (targets, Proton,
+        // prefix mode, environment, arguments, prelaunch, fixes) is captured,
+        // then add the backup-only fields.
+        let mut metadata = game.appmanifest();
+        if let Some(object) = metadata.as_object_mut() {
+            object.insert("backup_format".into(), serde_json::json!(2));
+            object.insert("title".into(), serde_json::json!(title));
+            object.insert("steam_app_id".into(), serde_json::json!(app_id));
+            object.insert("content_archive".into(), serde_json::json!({"name":"content.tar","sha256":content_sha}));
+            object.insert("components".into(), serde_json::json!(components));
+            if fixes_sha.is_empty() {
+                object.insert("fixes_directory".into(), serde_json::json!(""));
+            }
+        }
         let _ = std::fs::remove_dir_all(package.join(".manifest-cache"));
         emit_operation_at(&emit_app, "backup", &game_id_emit, "metadata", "running", "Writing appmanifest…", 100.0);
         let manifest_name = format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone()));
@@ -6162,33 +6144,37 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     emit_operation_at(&app, "restore", "", "register", "running", "Finalizing library entry…", 100.0);
 
     let mut game = target_game;
+    let previous_targets = game.launch_targets.clone();
+    let appmanifest_path = if !game.installation.manifest.as_os_str().is_empty() {
+        game.installation.manifest.clone()
+    } else {
+        target_root.parent().and_then(|path| path.parent())
+            .ok_or_else(|| "The managed library folder is invalid.".to_string())?
+            .join(format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone())))
+    };
+    let appmanifest_base = appmanifest_path
+        .parent()
+        .ok_or_else(|| "The managed appmanifest folder is invalid.".to_string())?;
+    // Apply every per-game setting from the backup's config file. Relative
+    // paths resolve against the local library, not the backup folder.
+    game.apply_appmanifest_settings_at(&manifest, appmanifest_base);
     game.installation.root = target_root.clone();
     game.installation.mode = steamtron_core::library::InstallMode::Managed;
     game.installation.confirmed = true;
-    game.fixes_enabled = manifest.get("fixes_enabled").and_then(|value| value.as_bool()).unwrap_or(true);
-    if let Some(settings) = manifest.get("launch_settings") {
-        if let Some(mode) = settings.get("prefix_mode").and_then(|value| value.as_str()) {
-            game.launch.prefix_mode = mode.to_owned();
-        }
-        if let Some(proton) = settings.get("proton").and_then(|value| value.as_str()) {
-            game.launch.proton = proton.to_owned();
-        }
-        if let Some(requires) = settings.get("requires_steam").and_then(|value| value.as_bool()) {
-            game.launch.requires_steam = requires;
-        }
-        if let Some(environment) = settings.get("environment") {
-            if let Ok(environment) = serde_json::from_value(environment.clone()) {
-                game.launch.environment = environment;
-            }
-        }
-    }
-    let mut targets = Vec::new();
-    if let Some(items) = manifest.get("launcher_targets").and_then(|value| value.as_array()) {
+    game.installation.manifest = appmanifest_path.clone();
+    let mut backup_targets = Vec::new();
+    // Backups written by older versions use `launch_targets`; accept both so a
+    // manifest generated by "Generate app manifest" also restores correctly.
+    let manifest_targets = manifest
+        .get("launcher_targets")
+        .or_else(|| manifest.get("launch_targets"))
+        .and_then(|value| value.as_array());
+    if let Some(items) = manifest_targets {
         for (index, item) in items.iter().enumerate() {
             let relative = item.get("executable").and_then(|value| value.as_str()).unwrap_or("");
             if relative.is_empty() { continue; }
             let executable = target_root.join(relative);
-            targets.push(LaunchTarget {
+            backup_targets.push(LaunchTarget {
                 id: item.get("id").and_then(|value| value.as_str()).map(str::to_owned).unwrap_or_else(|| format!("t{}", index + 1)),
                 name: item.get("name").and_then(|value| value.as_str()).unwrap_or("Game").to_owned(),
                 executable,
@@ -6197,6 +6183,14 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
             });
         }
     }
+    // Keep a configured launcher that still exists. A backup can be older
+    // than a launcher change; replacing a working target with the backup's
+    // stale one sends the game back to its original launcher.
+    let mut targets = steamtron_library::backup::restored_launch_targets(
+        &previous_targets,
+        &backup_targets,
+        &target_root,
+    );
     if targets.is_empty() {
         if let Some((executable, name)) = download::detect_launch_target(&target_root) {
             targets.push(LaunchTarget { id: "t1".into(), name, executable, arguments: Vec::new(), primary: true });
@@ -6204,25 +6198,13 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     }
     game.launch_targets = targets;
     steamtron_core::library::mark_setup_completed(&mut game);
-    let appmanifest_path = if !game.installation.manifest.as_os_str().is_empty() {
-        game.installation.manifest.clone()
-    } else {
-        target_root.parent().and_then(|path| path.parent())
-            .ok_or_else(|| "The managed library folder is invalid.".to_string())?
-            .join(format!("appmanifest_{}.json", game.metadata_app_id.map(|value| value.to_string()).unwrap_or_else(|| game.id.clone())))
-    };
-    if let Some(parent) = appmanifest_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let appmanifest_temporary = appmanifest_path.with_extension("json.steamtron.tmp");
-    std::fs::write(&appmanifest_temporary, serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())?;
-    std::fs::rename(&appmanifest_temporary, &appmanifest_path).map_err(|error| error.to_string())?;
     let sidecar_source = manifest_path.with_extension("cache.json");
     if sidecar_source.is_file() {
         let _ = std::fs::copy(&sidecar_source, appmanifest_path.with_extension("cache.json"));
     }
     library.upsert_game(game.clone()).map_err(|error| error.to_string())?;
+    // Save writes the local appmanifest from the live entry, so the restored
+    // config contains the targets and settings actually selected here.
     library.save().map_err(|error| error.to_string())?;
     let _ = std::fs::remove_dir_all(&staging_cleanup);
     emit_operation_at(&app, "restore", "", "done", "done", "Restore complete", 100.0);
@@ -6364,42 +6346,8 @@ async fn generate_managed_appmanifest(game_id: String) -> Result<serde_json::Val
         .cloned()
         .ok_or_else(|| "unknown game".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let path = if !game.installation.manifest.as_os_str().is_empty() {
-            game.installation.manifest.clone()
-        } else {
-            let base = game
-                .installation
-                .root
-                .parent()
-                .and_then(|path| path.parent())
-                .ok_or_else(|| "The managed library folder is invalid.".to_string())?;
-            base.join(format!(
-                "appmanifest_{}.json",
-                game.metadata_app_id
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|| game.id.clone())
-            ))
-        };
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        let generated = steamtron_library::backup::game_appmanifest(&game);
-        // Keep fields the backup builder does not own (details, integrity,
-        // quicklook) and overwrite the core manifest fields.
-        let mut payload = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .filter(|value| value.is_object())
-            .unwrap_or_else(|| serde_json::json!({}));
-        if let (Some(target), Some(source)) = (payload.as_object_mut(), generated.as_object()) {
-            for (key, value) in source {
-                target.insert(key.clone(), value.clone());
-            }
-        }
-        let encoded = serde_json::to_vec_pretty(&payload).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension("json.steamtron.tmp");
-        std::fs::write(&temporary, &encoded).map_err(|error| error.to_string())?;
-        std::fs::rename(&temporary, &path).map_err(|error| error.to_string())?;
+        let path = steamtron_library::backup::write_game_appmanifest(&game)
+            .map_err(|error| error.to_string())?;
         Ok::<_, String>(serde_json::json!({
             "appid": game.metadata_app_id,
             "appmanifest": path.display().to_string(),
@@ -7344,10 +7292,8 @@ fn set_managed_prelaunch(
         game.launch.prelaunch = script.display().to_string();
         game.launch.prelaunch_sha256 = approved.to_ascii_lowercase();
     }
-    library
-        .upsert_game(game.clone())
+    steamtron_library::managed::persist_game_settings(&mut library, &game)
         .map_err(|error| error.to_string())?;
-    library.save().map_err(|error| error.to_string())?;
     Ok(serde_json::json!(game))
 }
 

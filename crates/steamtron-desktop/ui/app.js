@@ -4936,17 +4936,27 @@ async function renderStorageSettings(host) {
   const drives = snapshot?.drives || [];
   const games = snapshot?.games || [];
   const libraryPath = snapshot?.path || "";
-  const dataDir = libraryPath.replace(/\/[^/]+$/, "");
+  // The data folder is not always the library file's parent string: Windows
+  // paths use backslashes, and the backend knows the real home directory.
+  const dataDir = snapshot?.data_home || libraryPath.replace(/[\\/][^\\/]+$/, "");
+  const normalizePath = (value) => String(value || "")
+    .replace(/^\\\\\?\\/, "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
   const available = await settleWithin(
     invoke("available_library_drives").catch(() => []),
     4000,
     [],
   );
   const availableByPath = new Map(available.map((drive) => [drive.path, drive]));
-  const gamesOn = (drive) => games.filter((game) => {
-    const root = game.installation?.root || "";
-    return root === drive.root || root.startsWith(`${drive.root.replace(/\/+$/, "")}/`);
-  }).length;
+  const gamesOn = (drive) => {
+    const root = normalizePath(drive.root);
+    return games.filter((game) => {
+      const gameRoot = normalizePath(game.installation?.root);
+      return gameRoot === root || gameRoot.startsWith(`${root}/`);
+    }).length;
+  };
   const rows = drives.map((drive) => {
     const disk = availableByPath.get(drive.root);
     const used = disk && disk.total ? Math.min(100, Math.max(0, 100 - (disk.free / disk.total) * 100)) : 0;

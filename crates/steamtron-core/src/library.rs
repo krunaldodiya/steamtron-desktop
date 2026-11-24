@@ -230,6 +230,352 @@ pub fn game_ready(game: &Game) -> bool {
         .is_some_and(|target| target.executable.is_file())
 }
 
+impl Game {
+    /// Build the per-game settings manifest (the game's config file).
+    ///
+    /// This is the authoritative source for launch targets, Proton, prefix
+    /// mode, environment, arguments, prelaunch, and fixes. `library.json`
+    /// keeps the index and fields that are not per-game settings.
+    pub fn appmanifest(&self) -> serde_json::Value {
+        let root = &self.installation.root;
+        let folder = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Game");
+        let prefix_name = self
+            .installation
+            .prefix
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or(folder);
+        let primary = self
+            .launch_targets
+            .iter()
+            .find(|target| target.primary)
+            .or_else(|| self.launch_targets.first());
+        let launcher_relative = primary
+            .and_then(|target| target.executable.strip_prefix(root).ok())
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let targets = self
+            .launch_targets
+            .iter()
+            .map(|target| {
+                serde_json::json!({
+                    "id": target.id,
+                    "name": target.name,
+                    "executable": target
+                        .executable
+                        .strip_prefix(root)
+                        .map(|path| path.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_else(|_| target.executable.to_string_lossy().into_owned()),
+                    "arguments": target.arguments,
+                    "primary": target.primary,
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "format": 1,
+            "game_id": self.id,
+            "title": self.title,
+            "steam_app_id": self.metadata_app_id,
+            "content_directory": format!("common/{folder}"),
+            "fixes_directory": format!("fixes/{folder}"),
+            "launcher_relative_path": launcher_relative,
+            "compatdata_directory": format!("compatdata/{prefix_name}"),
+            "proton": self.launch.proton,
+            "launch_options": self.launch.arguments,
+            "launch_settings": {
+                "environment": self.launch.environment,
+                "prefix_mode": self.launch.prefix_mode,
+                "proton": self.launch.proton,
+                "requires_steam": self.launch.requires_steam,
+            },
+            "prelaunch": {
+                "path": self.launch.prelaunch,
+                "sha256": self.launch.prelaunch_sha256,
+            },
+            "fixes_enabled": self.fixes_enabled,
+            "launcher_targets": targets,
+        })
+    }
+
+    /// Apply every manifest setting except launcher targets.
+    pub fn apply_appmanifest_settings(&mut self, manifest: &serde_json::Value) {
+        let Some(base) = self.installation.manifest.parent().map(Path::to_path_buf) else {
+            return;
+        };
+        self.apply_appmanifest_settings_at(manifest, &base);
+    }
+
+    /// Apply settings using an explicit library root for relative paths.
+    ///
+    /// Restore passes the local library root because the source manifest lives
+    /// in the backup folder, not next to the installed game.
+    pub fn apply_appmanifest_settings_at(
+        &mut self,
+        manifest: &serde_json::Value,
+        base: &Path,
+    ) {
+        if let Some(title) = manifest
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            self.title = title.to_owned();
+        }
+        if let Some(app_id) = manifest
+            .get("steam_app_id")
+            .and_then(serde_json::Value::as_u64)
+        {
+            self.metadata_app_id = Some(app_id as u32);
+        }
+        if let Some(content) = manifest
+            .get("content_directory")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            let root = rebase_with_prefix(&self.installation.root, base.join(content));
+            if root != self.installation.root {
+                self.installation.root = root;
+            }
+        }
+        if let Some(prefix) = manifest
+            .get("compatdata_directory")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            self.installation.prefix = rebase_with_prefix(
+                &self.installation.prefix,
+                base.join(prefix),
+            );
+        }
+
+        let mut proton_applied = false;
+        if let Some(settings) = manifest
+            .get("launch_settings")
+            .and_then(serde_json::Value::as_object)
+        {
+            if let Some(environment) = settings
+                .get("environment")
+                .and_then(serde_json::Value::as_object)
+            {
+                self.launch.environment = environment
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        value.as_str().map(|value| (name.clone(), value.to_owned()))
+                    })
+                    .collect();
+            }
+            if let Some(mode) = settings
+                .get("prefix_mode")
+                .and_then(serde_json::Value::as_str)
+            {
+                self.launch.prefix_mode = mode.to_owned();
+            }
+            if let Some(proton) = settings
+                .get("proton")
+                .and_then(serde_json::Value::as_str)
+            {
+                self.launch.proton = proton.to_owned();
+                self.installation.proton = proton.to_owned();
+                proton_applied = true;
+            }
+            if let Some(requires) = settings
+                .get("requires_steam")
+                .and_then(serde_json::Value::as_bool)
+            {
+                self.launch.requires_steam = requires;
+            }
+        }
+        if !proton_applied {
+            if let Some(proton) = manifest
+                .get("proton")
+                .and_then(serde_json::Value::as_str)
+            {
+                self.launch.proton = proton.to_owned();
+                self.installation.proton = proton.to_owned();
+            }
+        }
+        if let Some(options) = manifest
+            .get("launch_options")
+            .and_then(serde_json::Value::as_array)
+        {
+            self.launch.arguments = options
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_owned))
+                .collect();
+        }
+        if let Some(prelaunch) = manifest
+            .get("prelaunch")
+            .and_then(serde_json::Value::as_object)
+        {
+            self.launch.prelaunch = prelaunch
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            self.launch.prelaunch_sha256 = prelaunch
+                .get("sha256")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+        }
+        if let Some(enabled) = manifest
+            .get("fixes_enabled")
+            .and_then(serde_json::Value::as_bool)
+        {
+            self.fixes_enabled = enabled;
+        }
+    }
+
+    /// Apply the per-game settings manifest, including launcher targets.
+    ///
+    /// Only fields present in the manifest override the library copy, so an
+    /// older partial manifest still loads. `launcher_targets` is canonical;
+    /// an empty legacy `launch_targets` array is ignored so an old metadata
+    /// snapshot cannot erase configured launchers.
+    pub fn apply_appmanifest(&mut self, manifest: &serde_json::Value) {
+        self.apply_appmanifest_settings(manifest);
+        let canonical = manifest
+            .get("launcher_targets")
+            .and_then(serde_json::Value::as_array);
+        let legacy = manifest
+            .get("launch_targets")
+            .and_then(serde_json::Value::as_array)
+            .filter(|items| !items.is_empty());
+        if let Some(items) = canonical.or(legacy) {
+            let mut targets = Vec::new();
+            for (index, item) in items.iter().enumerate() {
+                let Some(relative) = item
+                    .get("executable")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let path = Path::new(relative);
+                let executable = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    self.installation.root.join(path)
+                };
+                let name = item
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        executable
+                            .file_stem()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("Game")
+                            .to_owned()
+                    });
+                targets.push(LaunchTarget {
+                    id: item
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| format!("t{}", index + 1)),
+                    name,
+                    executable,
+                    arguments: item
+                        .get("arguments")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(|value| value.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    primary: item
+                        .get("primary")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(index == 0),
+                });
+            }
+            let mut claimed = false;
+            for target in &mut targets {
+                if target.primary && !claimed {
+                    claimed = true;
+                } else {
+                    target.primary = false;
+                }
+            }
+            if !claimed {
+                if let Some(first) = targets.first_mut() {
+                    first.primary = true;
+                }
+            }
+            self.launch_targets = targets;
+        } else if self.launch_targets.is_empty() {
+            if let Some(relative) = manifest
+                .get("launcher_relative_path")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+            {
+                let path = Path::new(relative);
+                let executable = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    self.installation.root.join(path)
+                };
+                let name = executable
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Game")
+                    .to_owned();
+                self.launch_targets = vec![LaunchTarget {
+                    id: "t1".into(),
+                    name,
+                    executable,
+                    arguments: Vec::new(),
+                    primary: true,
+                }];
+            }
+        }
+    }
+}
+
+/// A SteamTron per-game config file, not a Steam `.acf` manifest.
+fn is_managed_appmanifest(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("appmanifest_") && name.ends_with(".json"))
+}
+
+/// Keep the Windows extended-length prefix when the library already used one.
+fn rebase_with_prefix(existing: &Path, candidate: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let existing_text = existing.to_string_lossy();
+        let candidate_text = candidate.to_string_lossy();
+        if existing_text.starts_with(r"\\?\") && !candidate_text.starts_with(r"\\?\") {
+            return PathBuf::from(format!(r"\\?\{}", candidate_text));
+        }
+    }
+    let _ = existing;
+    candidate
+}
+
+/// Overlay the per-game config file, which is authoritative for settings.
+fn apply_appmanifest_from_disk(game: &mut Game) {
+    if !is_managed_appmanifest(&game.installation.manifest) {
+        return;
+    }
+    let Ok(bytes) = fs::read(&game.installation.manifest) else {
+        return;
+    };
+    let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return;
+    };
+    game.apply_appmanifest(&manifest);
+}
+
 /// Stamp the first ready transition; later edits keep the original time.
 pub fn mark_setup_completed(game: &mut Game) {
     if game.setup_completed_at.is_none() && game_ready(game) {
@@ -338,6 +684,8 @@ impl Library {
         let mut games = document.games;
         for game in &mut games {
             normalize_install_mode(&document.drives, game);
+            // The per-game config file wins over the library cache.
+            apply_appmanifest_from_disk(game);
         }
         Ok(Self {
             path,
@@ -531,6 +879,42 @@ pub fn set_default_drive(&mut self, id: &str) -> Result<(), LibraryError> {
     }
 
     pub fn save(&self) -> Result<(), LibraryError> {
+        // Write every game's config file first: it is authoritative, so a
+        // failure here must not leave library.json claiming a new value.
+        for game in &self.games {
+            if !is_managed_appmanifest(&game.installation.manifest) {
+                continue;
+            }
+            let path = &game.installation.manifest;
+            let mut payload = fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .filter(serde_json::Value::is_object)
+                .unwrap_or_else(|| serde_json::json!({}));
+            let generated = game.appmanifest();
+            if let (Some(target), Some(source)) =
+                (payload.as_object_mut(), generated.as_object())
+            {
+                for (key, value) in source {
+                    target.insert(key.clone(), value.clone());
+                }
+            }
+            let content = serde_json::to_string_pretty(&payload).map_err(|source| {
+                LibraryError::Json {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+            write_atomic(path, content.as_bytes())?;
+        }
+        self.save_index()
+    }
+
+    /// Write only the library index, leaving per-game config files untouched.
+    ///
+    /// Metadata import uses this so an imported appmanifest keeps its exact
+    /// bytes; the next `open` overlays it as the authoritative config.
+    pub fn save_index(&self) -> Result<(), LibraryError> {
         let document = Document {
             version: LIBRARY_VERSION,
             settings: self.settings.clone(),
@@ -1328,5 +1712,161 @@ mod tests {
             reopened.settings().picker_folders.get("fixes_export").map(String::as_str),
             Some(picker.to_string_lossy().as_ref())
         );
+    }
+
+    fn configured_game(root: &Path, manifest: &Path) -> Game {
+        let mut game = sample_game("42", "Configured", root.to_path_buf());
+        game.metadata_app_id = Some(42);
+        game.installation.manifest = manifest.to_path_buf();
+        game.installation.prefix = manifest.parent().unwrap().join("compatdata/Configured");
+        game.launch.proton = "/opt/proton/GE".into();
+        game.launch.arguments = vec!["-windowed".into()];
+        game.launch.environment.insert("WINEDLLOVERRIDES".into(), "x=n".into());
+        game.launch.prefix_mode = "steam".into();
+        game.launch.requires_steam = true;
+        game.launch.prelaunch = "/tmp/prelaunch.sh".into();
+        game.launch.prelaunch_sha256 = "abc".into();
+        game.fixes_enabled = false;
+        game.launch_targets = vec![
+            LaunchTarget {
+                id: "play".into(),
+                name: "Play".into(),
+                executable: root.join("Play.exe"),
+                arguments: vec!["-nolauncher".into()],
+                primary: true,
+            },
+            LaunchTarget {
+                id: "game".into(),
+                name: "Game".into(),
+                executable: root.join("Game.exe"),
+                arguments: Vec::new(),
+                primary: false,
+            },
+        ];
+        game
+    }
+
+    #[test]
+    fn appmanifest_round_trips_every_game_setting() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("common/Configured");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Play.exe"), b"MZ").unwrap();
+        fs::write(root.join("Game.exe"), b"MZ").unwrap();
+        let manifest_path = temp.path().join("appmanifest_42.json");
+        let game = configured_game(&root, &manifest_path);
+
+        let manifest = game.appmanifest();
+        assert_eq!(manifest["launcher_targets"][0]["executable"], "Play.exe");
+        assert_eq!(manifest["launch_settings"]["prefix_mode"], "steam");
+        assert_eq!(manifest["prelaunch"]["path"], "/tmp/prelaunch.sh");
+        assert_eq!(manifest["fixes_enabled"], false);
+
+        let mut restored = sample_game("42", "Placeholder", root.clone());
+        restored.installation.manifest = manifest_path.clone();
+        restored.apply_appmanifest(&manifest);
+        assert_eq!(restored.title, "Configured");
+        assert_eq!(restored.launch.proton, "/opt/proton/GE");
+        assert_eq!(restored.launch.arguments, vec!["-windowed"]);
+        assert_eq!(restored.launch.prefix_mode, "steam");
+        assert!(restored.launch.requires_steam);
+        assert_eq!(restored.launch.prelaunch, "/tmp/prelaunch.sh");
+        assert!(!restored.fixes_enabled);
+        assert_eq!(restored.launch_targets.len(), 2);
+        assert_eq!(restored.launch_targets[0].executable, root.join("Play.exe"));
+        assert!(restored.launch_targets[0].primary);
+    }
+
+    #[test]
+    fn library_open_overlays_the_per_game_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("SteamTronLibrary/steamtronapps/common/Configured");
+        let base = temp.path().join("SteamTronLibrary/steamtronapps");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Play.exe"), b"MZ").unwrap();
+        let manifest_path = base.join("appmanifest_42.json");
+        let library_path = temp.path().join("library.json");
+
+        {
+            let mut library = Library::open(&library_path).unwrap();
+            library.add_drive(temp.path(), "test", true).unwrap();
+            let mut cached = sample_game("42", "Library Cache", root.clone());
+            cached.installation.manifest = manifest_path.clone();
+            library.upsert_game(cached).unwrap();
+            library.save_index().unwrap();
+        }
+        let manifest = serde_json::json!({
+            "format": 1,
+            "game_id": "42",
+            "title": "Manifest Config",
+            "steam_app_id": 42,
+            "content_directory": "common/Configured",
+            "launch_options": ["-manifest"],
+            "launch_settings": {
+                "environment": {"WINEDLLOVERRIDES": "manifest=n"},
+                "prefix_mode": "steam",
+                "proton": "/manifest/proton",
+                "requires_steam": true
+            },
+            "prelaunch": {"path": "/manifest/prelaunch.sh", "sha256": "def"},
+            "fixes_enabled": false,
+            "launcher_targets": [
+                {"id": "play", "name": "Play", "executable": "Play.exe", "primary": true}
+            ]
+        });
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+
+        let library = Library::open(&library_path).unwrap();
+        let game = library.game("42").unwrap();
+        assert_eq!(game.title, "Manifest Config");
+        assert_eq!(game.launch.arguments, vec!["-manifest"]);
+        assert_eq!(game.launch.prefix_mode, "steam");
+        assert_eq!(game.launch.proton, "/manifest/proton");
+        assert!(game.launch.requires_steam);
+        assert_eq!(game.launch.prelaunch, "/manifest/prelaunch.sh");
+        assert!(!game.fixes_enabled);
+        assert_eq!(game.launch_targets[0].executable, root.join("Play.exe"));
+    }
+
+    #[test]
+    fn save_leaves_a_steam_acf_alone() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("SteamLibrary/steamapps/common/Sample");
+        fs::create_dir_all(&root).unwrap();
+        let acf = temp.path().join("SteamLibrary/steamapps/appmanifest_42.acf");
+        let original = b"\"AppState\"\n{\n\t\"appid\"\t\t\"42\"\n}\n";
+        fs::write(&acf, original).unwrap();
+        let mut library = Library::open(temp.path().join("library.json")).unwrap();
+        library.add_drive(temp.path(), "test", true).unwrap();
+        let mut game = sample_game("42", "Sample", root);
+        game.installation.mode = InstallMode::Linked;
+        game.installation.manifest = acf.clone();
+        library.upsert_game(game).unwrap();
+        library.save().unwrap();
+
+        assert_eq!(fs::read(&acf).unwrap(), original);
+    }
+
+    #[test]
+    fn library_save_writes_the_per_game_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("SteamTronLibrary/steamtronapps/common/Configured");
+        let base = temp.path().join("SteamTronLibrary/steamtronapps");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Play.exe"), b"MZ").unwrap();
+        let manifest_path = base.join("appmanifest_42.json");
+        let mut library = Library::open(temp.path().join("library.json")).unwrap();
+        library.add_drive(temp.path(), "test", true).unwrap();
+        let game = configured_game(&root, &manifest_path);
+        library.upsert_game(game).unwrap();
+        library.save().unwrap();
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        assert_eq!(manifest["launch_settings"]["prefix_mode"], "steam");
+        assert_eq!(manifest["launch_options"][0], "-windowed");
+        assert_eq!(manifest["prelaunch"]["path"], "/tmp/prelaunch.sh");
+        assert_eq!(manifest["launcher_targets"][0]["name"], "Play");
+        assert_eq!(manifest["launcher_targets"][0]["executable"], "Play.exe");
     }
 }

@@ -387,12 +387,7 @@ pub fn set_launch_target_at(
         updated.installation.proton = request.proton.trim().to_owned();
     }
     steamtron_core::library::mark_setup_completed(&mut updated);
-    library
-        .upsert_game(updated)
-        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
-    library
-        .save()
-        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    persist_game_settings(&mut library, &updated)?;
     Ok(TargetReport {
         game_id: request.game_id,
         executable: executable.display().to_string(),
@@ -405,6 +400,25 @@ pub fn set_launch_target_at(
 pub fn set_launch_target(request: SetTargetRequest) -> Result<TargetReport, LibraryError> {
     set_launch_target_at(request, &Library::default_path())
 }
+
+/// Persist a game-settings change and refresh its managed appmanifest.
+///
+/// Every settings surface (launchers, Proton, prefix mode, environment,
+/// arguments, fixes) goes through this so the on-disk manifest cannot keep
+/// stale values until the user presses "Generate app manifest".
+pub fn persist_game_settings(
+    library: &mut Library,
+    game: &Game,
+) -> Result<(), LibraryError> {
+    library
+        .upsert_game(game.clone())
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    library
+        .save()
+        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    Ok(())
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct LinkLauncher {
     #[serde(default)]
@@ -557,12 +571,7 @@ pub fn link_game_at(
     updated.installation.confirmed = true;
     updated.launch_targets = targets;
     steamtron_core::library::mark_setup_completed(&mut updated);
-    library
-        .upsert_game(updated)
-        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
-    library
-        .save()
-        .map_err(|error| LibraryError::Invalid(error.to_string()))?;
+    persist_game_settings(&mut library, &updated)?;
     let launcher_count = library
         .game(&game_id)
         .map(|game| game.launch_targets.len())
@@ -1314,6 +1323,11 @@ mod tests {
         assert_eq!(stored.launch_targets.len(), 1);
         assert!(stored.launch_targets[0].primary);
         assert_eq!(stored.launch_targets[0].arguments, vec!["-windowed"]);
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&stored.installation.manifest).unwrap()).unwrap();
+        assert_eq!(manifest["launcher_targets"][0]["executable"], "game.exe");
+        assert_eq!(manifest["launcher_targets"][0]["name"], "game.exe");
+        assert_eq!(manifest["launcher_targets"][0]["primary"].as_bool(), Some(true));
 
         let outside = set_launch_target_at(
             SetTargetRequest {
@@ -1462,6 +1476,12 @@ mod tests {
         assert_eq!(game.launch_targets.len(), 2);
         assert!(game.launch_targets[0].primary);
         assert!(!game.launch_targets[1].primary);
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&game.installation.manifest).unwrap()).unwrap();
+        assert_eq!(manifest["launcher_targets"][0]["name"], "game");
+        assert_eq!(manifest["launcher_targets"][1]["name"], "Launcher");
+        assert_eq!(manifest["launcher_targets"][0]["primary"].as_bool(), Some(true));
+        assert!(manifest.get("launch_targets").is_none());
     }
 
     #[test]

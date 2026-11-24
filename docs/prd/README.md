@@ -162,3 +162,5 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0138](0138-elevated-game-launchers.md) | Elevation-required game launchers | active | 2026-11-23 |
 | [0139](0139-fixes-zip-import.md) | Fixes ZIP import and complete extraction | active | 2026-11-23 |
 | [0140](0140-launcher-loop-watchdog.md) | Launcher restart-loop watchdog | active | 2026-11-23 |
+| [0141](0141-appmanifest-settings-config.md) | Per-game appmanifest as the settings config | active | 2026-11-24 |
+| [0142](0142-storage-data-folder.md) | Storage settings data folder path | active | 2026-11-24 |

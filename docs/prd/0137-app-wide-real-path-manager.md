@@ -49,6 +49,9 @@ overlay. The user never creates a sidecar.
 - R12: Restoring a game backup prepares the target root first: a valid layout is
   put back to its base, and a stale junction is removed, before the commit
   rename.
+- R13: Restore keeps an existing configured launcher whose executable still
+  exists. The backup's targets are fallback, and auto-detection is the final
+  fallback; a stale snapshot must not replace a patched launcher.
 
 ## Acceptance criteria
 
@@ -62,7 +65,9 @@ overlay. The user never creates a sidecar.
 - [ ] Watch Dogs 2 still launches with the real path.
 - [ ] Restore moves the base back and removes the junction/mount/record.
 - [ ] Uninstall and move restore the layout first.
-- [ ] Backup restore handles a real-path junction at the target root.
+- [x] Backup restore handles a real-path junction at the target root.
+- [x] Restore keeps an existing configured launcher when its executable still
+      exists; backup targets are fallback.
 - [ ] Forced-exit repair is exercised.
 
 ## Verification
@@ -94,11 +99,15 @@ overlay. The user never creates a sidecar.
   missing, and the real path was a stale junction.
 - Restoring the Max Payne backup on 0.1.62 extracted 32.6 GB then failed with
   `Access is denied (os error 5)` at the commit rename, because the target was
-  still a junction. 0.1.63 adds `prepare_target_for_restore`; the stale junction
-  and sidecar were removed for a clean retry. Not yet installed/tested.
-- Not run yet: Watch Dogs 2/Max Payne after 0.1.63, restore, uninstall or move
-  after 0.1.58. Only code inspection on Linux; Windows-only code is not compiled
-  locally.
+  still a junction. The stale junction and sidecar were removed and the retry
+  succeeded.
+- The retry replaced the configured PlayMaxPayne3 target with MaxPayne3, so the
+  game asked for the Rockstar launcher. Setting the primary target to
+  `Max Payne 3\PlayMaxPayne3.exe` made the game run (PID 6992), without any
+  game-specific catalog target. 0.1.63 keeps existing targets that still exist
+  and treats backup targets as fallback; not yet installed.
+- Not run yet: restore on 0.1.63, uninstall or move after 0.1.58. Only code
+  inspection on Linux; Windows-only code is not compiled locally.
 
 ## Decisions and risks
 
