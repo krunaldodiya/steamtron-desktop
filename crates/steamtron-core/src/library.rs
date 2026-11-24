@@ -295,6 +295,10 @@ impl Game {
             .file_name()
             .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
+            .unwrap_or("Game")
+            // A legacy verbatim path can carry `common/` as one component.
+            .rsplit(['/', '\\'])
+            .next()
             .unwrap_or("Game");
         let prefix_name = self
             .installation
@@ -302,6 +306,9 @@ impl Game {
             .file_name()
             .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
+            .unwrap_or(folder)
+            .rsplit(['/', '\\'])
+            .next()
             .unwrap_or(folder);
         let primary = self
             .launch_targets
@@ -508,6 +515,8 @@ impl Game {
                 } else {
                     self.installation.root.join(path)
                 };
+                #[cfg(windows)]
+                let executable = PathBuf::from(executable.to_string_lossy().replace('/', r"\"));
                 let name = item
                     .get("name")
                     .and_then(serde_json::Value::as_str)
@@ -570,6 +579,8 @@ impl Game {
                 } else {
                     self.installation.root.join(path)
                 };
+                #[cfg(windows)]
+                let executable = PathBuf::from(executable.to_string_lossy().replace('/', r"\"));
                 let name = executable
                     .file_stem()
                     .and_then(|name| name.to_str())
@@ -594,15 +605,34 @@ fn is_managed_appmanifest(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("appmanifest_") && name.ends_with(".json"))
 }
 
+/// Normalize Windows separators before a path is made verbatim.
+///
+/// Win32 passes a `\\?\` path to the filesystem without normalization. A `/`
+/// in that string is a name character, not a separator, so
+/// `\\?\D:\Games\common/Game` fails with `ERROR_INVALID_NAME`.
+fn windows_separators(value: &str) -> String {
+    value.replace('/', r"\")
+}
+
 /// Keep the Windows extended-length prefix when the library already used one.
 fn rebase_with_prefix(existing: &Path, candidate: PathBuf) -> PathBuf {
     #[cfg(windows)]
     {
+        let candidate_text = windows_separators(&candidate.to_string_lossy());
         let existing_text = existing.to_string_lossy();
-        let candidate_text = candidate.to_string_lossy();
-        if existing_text.starts_with(r"\\?\") && !candidate_text.starts_with(r"\\?\") {
+        if existing_text.starts_with(r"\\?\") {
+            if candidate_text.starts_with(r"\\?\") {
+                return PathBuf::from(candidate_text);
+            }
+            if candidate_text.starts_with(r"\\") {
+                return PathBuf::from(format!(
+                    r"\\?\UNC\{}",
+                    candidate_text.trim_start_matches('\\')
+                ));
+            }
             return PathBuf::from(format!(r"\\?\{}", candidate_text));
         }
+        return PathBuf::from(candidate_text);
     }
     let _ = existing;
     candidate
@@ -1796,6 +1826,15 @@ mod tests {
             },
         ];
         game
+    }
+
+    #[test]
+    fn verbatim_paths_normalize_forward_slashes() {
+        assert_eq!(
+            windows_separators(r"D:\SteamTronLibrary\steamtronapps\common/Max Payne 3"),
+            r"D:\SteamTronLibrary\steamtronapps\common\Max Payne 3"
+        );
+        assert_eq!(windows_separators("common/Max Payne 3"), r"common\Max Payne 3");
     }
 
     #[test]

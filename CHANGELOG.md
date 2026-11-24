@@ -1,3 +1,17 @@
+## [0.1.67] - 2026-11-24
+
+### Fixed
+
+- Windows managed games whose library root uses the `\\?\` extended prefix now
+  normalize `/` to `\` before the path is made verbatim. A manifest
+  `content_directory` such as `common/Max Payne 3` previously produced
+  `\\?\D:\...\common/Max Payne 3`, which Win32 rejects with
+  `ERROR_INVALID_NAME`. This fixes the `game content folder does not exist`
+  error, the `0 B` installation size, and the misleading "base folder is
+  missing" message for every affected game.
+- `repair_game_root` normalizes separators before deriving its parent and name,
+  and path equality checks ignore the `\\?\` vs plain representation.
+
 ## [0.1.66] - 2026-11-24
 
 ### Fixed

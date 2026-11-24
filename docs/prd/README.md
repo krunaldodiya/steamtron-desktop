@@ -165,3 +165,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0141](0141-appmanifest-settings-config.md) | Per-game appmanifest as the settings config | active | 2026-11-24 |
 | [0142](0142-storage-data-folder.md) | Storage settings data folder path | active | 2026-11-24 |
 | [0143](0143-single-instance-tray.md) | Single SteamTron instance and tray icon | active | 2026-11-24 |
+| [0144](0144-verbatim-path-separators.md) | Windows verbatim path separator normalization | active | 2026-11-24 |

@@ -2631,7 +2631,43 @@ fn path_diagnostic(label: &str, path: &Path, extra: &str) {
 
 fn normalized_windows_path(path: &Path) -> PathBuf {
     let text = path.display().to_string();
-    PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
+    let text = text
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&text)
+        .replace('/', r"\");
+    PathBuf::from(text)
+}
+
+/// Compare paths across the `\\?\D:\...` and `D:\...` representations.
+fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        normalized_windows_path(left)
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&normalized_windows_path(right).to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+/// Normalize separators without dropping an existing `\\?\` prefix.
+#[cfg(windows)]
+fn normalize_verbatim_path(path: &Path) -> PathBuf {
+    PathBuf::from(path.display().to_string().replace('/', r"\"))
+}
+
+/// A legacy manifest overlay could leave `/` inside a `\\?\` path. Normalize
+/// every stored game path before planning or touching the real-path junction.
+#[cfg(windows)]
+fn normalize_game_paths(game: &mut steamtron_core::library::Game) {
+    game.installation.root = normalize_verbatim_path(&game.installation.root);
+    game.installation.prefix = normalize_verbatim_path(&game.installation.prefix);
+    game.installation.manifest = normalize_verbatim_path(&game.installation.manifest);
+    for target in &mut game.launch_targets {
+        target.executable = normalize_verbatim_path(&target.executable);
+    }
 }
 
 /// Put a missing or broken game root back on its pristine base folder.
@@ -2641,23 +2677,22 @@ fn normalized_windows_path(path: &Path) -> PathBuf {
 /// still the canonical content.
 #[cfg(windows)]
 fn repair_game_root(root: &Path) -> Result<bool, String> {
-    if root.is_dir() {
+    let real = normalized_windows_path(root);
+    if real.is_dir() {
         return Ok(true);
     }
-    let Some(parent) = root.parent() else {
+    let Some(parent) = real.parent() else {
         return Ok(false);
     };
-    let Some(name) = root.file_name() else {
+    let Some(name) = real.file_name() else {
         return Ok(false);
     };
     let base = parent.join(".steamtron-base").join(name);
     if !base.is_dir() {
         return Ok(false);
     }
-    let real = normalized_windows_path(root);
-    let base = normalized_windows_path(&base);
     retarget_junction(&real, &base)?;
-    Ok(root.is_dir() || real.is_dir())
+    Ok(real.is_dir())
 }
 
 #[cfg(windows)]
@@ -2751,7 +2786,7 @@ fn prepare_target_for_restore(game_id: &str, root: &Path) -> Result<(), String> 
     let record = real_path_record_path(game_id);
     if let Ok(bytes) = std::fs::read(&record) {
         if let Ok(layout) = serde_json::from_slice::<RealPathLayout>(&bytes) {
-            if layout.real == root {
+            if paths_equivalent(&layout.real, root) {
                 if layout.base.is_dir() {
                     restore_real_path_layout(game_id, &layout)?;
                     return Ok(());
@@ -3039,10 +3074,15 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     }
     #[cfg(windows)]
     path_diagnostic(
-        "play-before-real-path",
+        "play-before-normalize",
         &game.installation.root,
         &format!("id={} manifest={:?}", game.id, game.installation.manifest),
     );
+    #[cfg(windows)]
+    {
+        normalize_game_paths(&mut game);
+        path_diagnostic("play-normalized", &game.installation.root, "");
+    }
     #[cfg(windows)]
     let real_path = {
         let drive = profile
@@ -6332,7 +6372,7 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
     let mut game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
     let drive = library.drives().iter().find(|drive| drive.id == drive_id).cloned().ok_or_else(|| "unknown drive".to_string())?;
     let layout = steamtron_core::library::game_layout(&drive.root, &game).map_err(|error| error.to_string())?;
-    if game.installation.root == layout.content {
+    if paths_equivalent(&game.installation.root, &layout.content) {
         return Err("The game is already on that drive.".into());
     }
     if layout.content.exists() {
