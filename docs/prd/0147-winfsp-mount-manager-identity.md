@@ -80,6 +80,8 @@ remains non-elevated and the overlay layout is unchanged.
       game-written overlay files and no base file is modified.
 - [ ] Defender logs no new detection for `PlayGTAV.exe`, `version.dll`, or
       `RUNE64.dll` during Play.
+- [ ] Stop restores the real-path junction to `.steamtron-base` without manual
+      repair.
 - [ ] Far Cry 5, Max Payne 3, Watch Dogs 2, Assassin's Creed Origins and Little
       Nightmares II still launch.
 - [ ] If the Mount Manager mount is unavailable, the legacy mount still works.
@@ -102,7 +104,14 @@ remains non-elevated and the overlay layout is unchanged.
   FSD) both produced 2 processes and the game window. This established that
   Mount Manager alone was not enough; the union must also be mounted at the
   real path.
-- Code and installer verification are pending the 0.1.72 build.
+- 2026-11-24 0.1.72 normal Play: `merged=` and `mounted_at=` both reported the
+  real game folder, `mount_mode=mount-manager`; 2 processes and the
+  `Grand Theft Auto V` window. Base hashes were identical while running and
+  after Stop. The upper layer contained copies of `PLAYGTAV.EXE`,
+  `RUNE64.DLL` and `VERSION.DLL`; no new Defender detections were logged.
+- 2026-11-24 0.1.72 forced Stop: the real path was left missing because the
+  restore raced the wrapper shutdown; the verification script recreated the
+  junction. 0.1.73 adds a retry loop and is pending verification.
 
 ## Decisions and risks
 

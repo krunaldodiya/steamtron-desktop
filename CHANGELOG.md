@@ -1,3 +1,12 @@
+## [0.1.73] - 2026-11-24
+
+### Fixed
+
+- A forced Stop now retries restoring the real-path junction until WinFsp
+  releases the mount. Previously the restore could race the wrapper shutdown
+  and leave the game folder missing, so the library showed 0 B/Download until
+  the next launch.
+
 ## [0.1.72] - 2026-11-24
 
 ### Fixed

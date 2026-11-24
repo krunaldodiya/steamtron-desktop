@@ -3692,7 +3692,23 @@ fn restore_real_path_after_run(game_id: &str) {
     if !layout.base.is_dir() {
         return;
     }
-    let _ = retarget_junction(&layout.real, &layout.base);
+    // Stop kills the overlay wrapper, so the real path may still be a live
+    // mount when this runs. Retry until WinFsp releases it instead of leaving
+    // the game folder missing.
+    let mut restored = false;
+    for _ in 0..20 {
+        if retarget_junction(&layout.real, &layout.base).is_ok() {
+            restored = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if !restored {
+        eprintln!(
+            "SteamTron: could not restore the real path after Stop: {}",
+            layout.real.display()
+        );
+    }
     let _ = std::fs::remove_dir(&layout.mount);
     if let Some(parent) = layout.mount.parent() {
         let _ = std::fs::remove_dir(parent);
