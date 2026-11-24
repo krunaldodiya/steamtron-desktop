@@ -14,6 +14,11 @@ Stop behaved the same way in reverse.
 The old temporary `busy(button, "Starting…")` state was replaced by the next
 polling render, so the feedback disappeared.
 
+The first Play of a game also runs the existing per-game Defender exclusion
+apply, which opens a UAC secure-desktop prompt. The desktop switch back to the
+app can look like a UI reload; it is a one-time-per-game Windows prompt, not a
+webview reload. Later Plays skip it because the security marker exists.
+
 ## Goal
 
 The detail-page primary button immediately shows **Starting…** after Play and
