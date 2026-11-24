@@ -886,6 +886,10 @@ pub fn set_default_drive(&mut self, id: &str) -> Result<(), LibraryError> {
                 continue;
             }
             let path = &game.installation.manifest;
+            // A game on an unplugged drive must not block an unrelated save.
+            if !path.parent().is_some_and(Path::is_dir) {
+                continue;
+            }
             let mut payload = fs::read(path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
