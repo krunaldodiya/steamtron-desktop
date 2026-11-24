@@ -136,6 +136,9 @@ nothing.
 - 0.1.62 installed. GTA V Play returned the catalog note
   ("The imported RUNE PlayGTAV build is incompatible...") without creating a
   play log or starting a process tree, so the known loop is blocked.
+- 0.1.62 FC5 regression: catalog target `bin/FarCry5.exe`, Uplay fix and
+  auto-GoldBerg; normal app performed the elevation relaunch and the game ran
+  (PID 12720, `play-1795479065.log`).
 - Not run yet: an updated/matching GTA V Enhanced patch; Watch Dogs 2 and Max
   Payne 3 regression after the catalog change.
 - Not implemented yet: Uplay/SocialClub/EA modules, full analyzer, module UI,

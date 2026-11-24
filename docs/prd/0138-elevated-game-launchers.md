@@ -82,8 +82,11 @@ error if the user declines.
   `play-1795434674.log`: the first wrapper found the game required elevation,
   restored and unmounted, then the elevated wrapper logged a second `start`,
   `merged`, `junction`, `cwd` and `exec`. The user confirmed the game played.
+- 0.1.62 (catalog release): FC5 from the normal non-elevated app logged the
+  elevation relaunch and kept the game running (PID 12720). The catalog target
+  and overlay path did not change the elevation behavior.
 - Not yet verified: declining UAC, direct Play, and a non-elevated game start on
-  0.1.60.
+  0.1.60/0.1.62.
 
 ## Decisions and risks
 

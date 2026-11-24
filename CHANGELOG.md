@@ -1,3 +1,12 @@
+## [0.1.63] - 2026-11-24
+
+### Fixed
+
+- Restoring a game backup no longer fails with `Access is denied (os error 5)`
+  when the destination is a real-path junction. Restore now puts a valid base
+  back in place, or removes a stale junction and its layout record, before the
+  commit rename.
+
 ## [0.1.62] - 2026-11-23
 
 ### Added

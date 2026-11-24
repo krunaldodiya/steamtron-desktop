@@ -2684,6 +2684,40 @@ fn real_path_has_content(_game_id: &str) -> bool {
     false
 }
 
+/// Make the installed path safe to rename during a backup restore.
+///
+/// A real-path layout leaves a junction at the game root. `std::fs::rename`
+/// cannot move that reparse point to the restore staging folder (Windows
+/// returns access denied). Put a valid base back in place, or remove a stale
+/// junction and its record, before the restore commits.
+#[cfg(windows)]
+fn prepare_target_for_restore(game_id: &str, root: &Path) -> Result<(), String> {
+    let record = real_path_record_path(game_id);
+    if let Ok(bytes) = std::fs::read(&record) {
+        if let Ok(layout) = serde_json::from_slice::<RealPathLayout>(&bytes) {
+            if layout.real == root {
+                if layout.base.is_dir() {
+                    restore_real_path_layout(game_id, &layout)?;
+                    return Ok(());
+                }
+                remove_real_path_record(game_id)?;
+            }
+        }
+    }
+    use std::os::windows::fs::MetadataExt;
+    if let Ok(metadata) = std::fs::symlink_metadata(root) {
+        if metadata.file_attributes() & 0x0000_0400 != 0 {
+            remove_junction(root)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn prepare_target_for_restore(_game_id: &str, _root: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(windows)]
 fn repair_real_path_junction(game_id: &str) {
     let running = managed_runs()
@@ -6047,6 +6081,7 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         let _ = manifest_components;
 
         emit_operation_at(&emit_app, "restore", "", "commit", "running", "Finalizing restored files…", 100.0);
+        prepare_target_for_restore(&target_game_worker.id, &target_root_worker)?;
         // Commit with rollback. The previous content/fixes are moved aside in
         // staging first; any commit error restores them and removes the new files.
         let old_target = staging.join(".old-target");

@@ -46,6 +46,9 @@ overlay. The user never creates a sidecar.
 - R11: A library snapshot taken while Play is swapping the junction counts the
   recorded base as installed content, so the UI does not flash Download for an
   installed game.
+- R12: Restoring a game backup prepares the target root first: a valid layout is
+  put back to its base, and a stale junction is removed, before the commit
+  rename.
 
 ## Acceptance criteria
 
@@ -59,6 +62,7 @@ overlay. The user never creates a sidecar.
 - [ ] Watch Dogs 2 still launches with the real path.
 - [ ] Restore moves the base back and removes the junction/mount/record.
 - [ ] Uninstall and move restore the layout first.
+- [ ] Backup restore handles a real-path junction at the target root.
 - [ ] Forced-exit repair is exercised.
 
 ## Verification
@@ -79,14 +83,21 @@ overlay. The user never creates a sidecar.
   exercised in an installed build.
 - 0.1.60 with normal non-elevated SteamTron: the overlay wrapper logged the
   elevation relaunch and started Far Cry 5. The user confirmed it played.
-- 0.1.62 installed. The catalog path prepared FC5 and the wrapper reached its
-  elevation relaunch, but the test was stopped when the user left. The app was
-  closed, the junction restored to base and the mount removed; no game was left
-  running.
+- 0.1.62 installed. FC5 Play from the normal app prepared the real path, logged
+  the elevation relaunch, started the elevated wrapper and left the game running
+  (PID 12720, `play-1795479065.log`).
+- Watch Dogs 2 also launched through the catalog path (`bin/WatchDogs2.exe`,
+  wrapper PID 7652); the user confirmed it played.
 - 0.1.62 GTA V Play is blocked by the catalog `requires_patch` entry before any
   overlay or process tree starts.
-- Not run yet: Watch Dogs 2, Max Payne 3, restore, uninstall or move after
-  0.1.58. Only code inspection on Linux; Windows-only code is not compiled
+- Max Payne 3 was not installed: `.maxpayne3-base` and `.maxpayne3-mount` were
+  missing, and the real path was a stale junction.
+- Restoring the Max Payne backup on 0.1.62 extracted 32.6 GB then failed with
+  `Access is denied (os error 5)` at the commit rename, because the target was
+  still a junction. 0.1.63 adds `prepare_target_for_restore`; the stale junction
+  and sidecar were removed for a clean retry. Not yet installed/tested.
+- Not run yet: Watch Dogs 2/Max Payne after 0.1.63, restore, uninstall or move
+  after 0.1.58. Only code inspection on Linux; Windows-only code is not compiled
   locally.
 
 ## Decisions and risks
