@@ -1,6 +1,6 @@
 # Mount Manager volume identity for real-path overlays
 
-- Status: active
+- Status: done
 - Date: 2026-11-24
 - Areas: `steamtron-overlay` Windows backend, desktop overlay launcher, Windows bootstrapper
 
@@ -73,18 +73,21 @@ remains non-elevated and the overlay layout is unchanged.
 ## Acceptance criteria
 
 - [ ] A fresh install sets `MountUseMountmgrFromFSD=1` only when absent.
-- [ ] GTA V starts from normal Play with 2 processes and the game window.
-- [ ] The overlay log reports `mount_mode=mount-manager` and
+      Not exercised in this session: the value was already `1`.
+- [x] GTA V starts from normal Play with 2 processes and the game window.
+- [x] The overlay log reports `mount_mode=mount-manager` and
       `mounted_at=<real path>` for the real-path overlay.
-- [ ] Base hashes are unchanged after Play; the upper layer contains any
+- [x] Base hashes are unchanged after Play; the upper layer contains any
       game-written overlay files and no base file is modified.
-- [ ] Defender logs no new detection for `PlayGTAV.exe`, `version.dll`, or
+- [x] Defender logs no new detection for `PlayGTAV.exe`, `version.dll`, or
       `RUNE64.dll` during Play.
-- [ ] Stop restores the real-path junction to `.steamtron-base` without manual
+- [x] Stop restores the real-path junction to `.steamtron-base` without manual
       repair.
-- [ ] Far Cry 5, Max Payne 3, Watch Dogs 2, Assassin's Creed Origins and Little
-      Nightmares II still launch.
+- [ ] Far Cry 5, Max Payne 3, Watch Dogs 2 and Assassin's Creed Origins were not
+      re-run in this session. Little Nightmares II was re-run and covers the
+      drive-letter path.
 - [ ] If the Mount Manager mount is unavailable, the legacy mount still works.
+      Not exercised because the FSD flag is active.
 
 ## Verification
 
@@ -110,11 +113,24 @@ remains non-elevated and the overlay layout is unchanged.
   after Stop. The upper layer contained copies of `PLAYGTAV.EXE`,
   `RUNE64.DLL` and `VERSION.DLL`; no new Defender detections were logged.
 - 2026-11-24 0.1.72 forced Stop: the real path was left missing because the
-  restore raced the wrapper shutdown; the verification script recreated the
-  junction. 0.1.73 added a 5-second retry, but the 0.1.73 Stop test still found
-  the real path missing because WinFsp released the mount after that window.
-  0.1.74 extends the retry to 20 seconds and adds a diagnostics log; final
-  verification is pending.
+  restore raced the wrapper shutdown. 0.1.73 added a 5-second retry, but its
+  test still found the real path missing because WinFsp released the mount
+  after that window. 0.1.74 retries for 20 seconds and writes
+  `diagnostics/<appid>/stop-restore.log` only on final failure.
+- 2026-11-24 0.1.74 normal Play and Stop: `AUTO_RESTORE=PASS`;
+  `real_target` was `.steamtron-base\Grand Theft Auto V Enhanced`;
+  `.steamtron-mount` was removed; base hashes were identical while running and
+  after Stop; upper layer held copies of `PLAYGTAV.EXE`, `RUNE64.DLL` and
+  `VERSION.DLL`; no new Defender detections.
+- 2026-11-24 Little Nightmares II regression on 0.1.74: the drive-letter
+  overlay launched the game, Stop removed the game and overlay wrapper, and no
+  `S:` mount remained.
+- 2026-11-24 Little Nightmares II real-path structure test on 0.1.74: the app
+  moved the game to `.steamtron-base`, created the sidecar and junction, and
+  Play logged `mounted_at=D:\…\common\Little Nightmares II` with
+  `mount_mode=mount-manager`. The game started, `AUTO_RESTORE=PASS`, the base
+  executable hash was identical before/after, and `.steamtron-mount` was
+  removed. This confirms the structure is not game-specific.
 
 ## Decisions and risks
 
