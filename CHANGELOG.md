@@ -1,3 +1,12 @@
+## [0.1.77] - 2026-11-24
+
+### Fixed
+
+- The game detail primary button now shows **Starting…** immediately after
+  Play and **Stopping…** immediately after Stop. The state survives polling
+  renders and clears when the backend operation finishes, instead of flashing
+  back to Play/Stop during the real-path mount or restore.
+
 ## [0.1.76] - 2026-11-24
 
 ### Changed

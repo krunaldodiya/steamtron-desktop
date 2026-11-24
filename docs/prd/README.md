@@ -170,3 +170,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0146](0146-non-elevated-gui.md) | Non-elevated GUI launch | done | 2026-11-24 |
 | [0147](0147-winfsp-mount-manager-identity.md) | WinFsp Mount Manager volume identity | done | 2026-11-24 |
 | [0148](0148-unified-base-layout.md) | Unified `.steamtron-base` layout for all managed games | active | 2026-11-24 |
+| [0149](0149-play-stop-pending-feedback.md) | Play and Stop pending feedback | active | 2026-11-24 |

@@ -16,6 +16,9 @@ let managedLibrary = null;
 let managedSelectedId = null;
 let runningManaged = new Set();
 const runningGrace = new Map();
+// Persist "Starting…"/"Stopping…" across polling renders until the backend
+// operation finishes, so the primary button never flashes back to Play/Stop.
+const managedPending = new Map();
 let libraryPage = 1;
 // Every route owns its selection so Home and Library never share an active
 // card. The detail page keeps using managedSelectedId independently.
@@ -565,32 +568,40 @@ function renderManagedLibrary() {
 
 async function startManagedGame(game, button) {
   if (!(await confirmDialog({ title: "Play game", message: `Play ${game.title}?`, confirmLabel: "Play" }))) return;
+  managedPending.set(game.id, "starting");
   const stop = button ? busy(button, "Starting…") : () => {};
+  renderManagedMode();
   try {
     const result = await invoke("play_managed", { gameId: game.id });
     runningManaged.add(game.id);
     runningGrace.set(game.id, Date.now() + 20000);
     showToast(`Started ${game.title} · ${result.log}`);
     managedLibrary = await invoke("library_snapshot").catch(() => managedLibrary);
-    renderManagedMode();
   } catch (error) {
     showToast(String(error), true);
     stop();
+  } finally {
+    managedPending.delete(game.id);
+    renderManagedMode();
   }
 }
 
 async function stopManagedGame(game, button) {
   if (!(await confirmDialog({ title: "Stop game", message: `Stop ${game.title}? Unsaved game progress may be lost.`, confirmLabel: "Stop", danger: true }))) return;
+  managedPending.set(game.id, "stopping");
   const stop = button ? busy(button, "Stopping…") : () => {};
+  renderManagedMode();
   try {
     await invoke("stop_managed", { gameId: game.id });
     runningGrace.delete(game.id);
     runningManaged.delete(game.id);
     showToast(`Stopped ${game.title}`);
-    renderManagedMode();
   } catch (error) {
     showToast(String(error), true);
     stop();
+  } finally {
+    managedPending.delete(game.id);
+    renderManagedMode();
   }
 }
 
@@ -889,13 +900,18 @@ function renderManagedPreview(game) {
   const installed = managedReady(game);
   const download = managedDownloads.get(game.id);
   const downloading = Boolean(download && !downloadTerminal(download));
-  const action = running
-    ? '<button id="managed-stop" class="danger">Stop</button>'
-    : downloading
-      ? `<button id="managed-downloading" class="primary">${download.status === "paused" ? "Paused" : "Downloading"}</button>`
-      : !installed
-        ? '<button id="managed-download" class="primary">Download</button>'
-        : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
+  const pending = managedPending.get(game.id);
+  const action = pending === "starting"
+    ? '<button id="managed-pending" class="primary" disabled>Starting…</button>'
+    : pending === "stopping"
+      ? '<button id="managed-pending" class="danger" disabled>Stopping…</button>'
+      : running
+        ? '<button id="managed-stop" class="danger">Stop</button>'
+        : downloading
+          ? `<button id="managed-downloading" class="primary">${download.status === "paused" ? "Paused" : "Downloading"}</button>`
+          : !installed
+            ? '<button id="managed-download" class="primary">Download</button>'
+            : `<button id="managed-play" class="primary"${canPlay ? "" : " disabled"}>Play</button>`;
   detailEl.innerHTML = `<div class="page game-page game-detail">
     <div class="game-page-top"><button id="managed-back" class="secondary">← ${gameDetailOrigin === "store" ? "Store" : gameDetailOrigin === "home" ? "Home" : "Library"}</button></div>
     <section class="game-hero${provisionalHero ? "" : " no-artwork"}" id="game-hero"${provisionalHero ? ` style="background-image:url('${escape(provisionalHero)}')"` : ""}>
