@@ -1,6 +1,6 @@
 # Play and Stop pending feedback
 
-- Status: active
+- Status: done
 - Date: 2026-11-24
 - Areas: `steamtron-desktop` UI
 
@@ -35,16 +35,17 @@ finishes.
 
 ## Acceptance criteria
 
-- [ ] Play changes to **Starting…** before the game process appears.
-- [ ] Stop changes to **Stopping…** and stays there through the 20-second
+- [x] Play changes to **Starting…** before the game process appears.
+- [x] Stop changes to **Stopping…** and stays there through the 20-second
       restore window.
-- [ ] The button returns to Play/Stop correctly after the operation.
-- [ ] No per-game conditions are added.
+- [x] The button returns to Play/Stop correctly after the operation.
+- [x] No per-game conditions are added.
 
 ## Verification
 
-- 0.1.77 is the first build with `managedPending`. Runtime UI verification is
-  pending.
+- 0.1.77 installed. UIA test on GTA:
+  `start_labels=Starting…`, `stop_labels=Stopping…`, `final_play=True`.
+  The polling render no longer flashes back to Play/Stop.
 
 ## Links
 

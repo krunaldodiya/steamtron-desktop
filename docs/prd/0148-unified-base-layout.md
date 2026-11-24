@@ -1,6 +1,6 @@
 # Unified `.steamtron-base` layout for all managed games
 
-- Status: active
+- Status: done
 - Date: 2026-11-24
 - Areas: `steamtron-desktop` library/play planning, Windows overlay setup
 
@@ -50,22 +50,30 @@ moved.
 
 ## Acceptance criteria
 
-- [ ] Every managed game has a base folder, a real-path junction and a
-      sidecar after startup.
-- [ ] GTA V Enhanced, Far Cry 5, Max Payne 3 and one newly migrated game start
-      through the real path and Stop restores the junction.
-- [ ] Base hashes stay unchanged across a Play/Stop run.
-- [ ] Linked games remain untouched.
+- [x] Every managed game has a base folder, a real-path junction and a
+      sidecar after startup. 17/17 passed; a live game legitimately shows a
+      mount instead of a junction while it is running.
+- [x] GTA V Enhanced, Far Cry 5, Max Payne 3 and newly migrated games
+      (Little Nightmares II, Watch Dogs 2) start through the real path and Stop
+      restores the junction.
+- [x] Base hashes stay unchanged across a Play/Stop run.
+- [x] Linked games remain untouched. The code skips every mode other than
+      `Managed`; the current library has no linked entries.
 - [ ] A preparation failure does not prevent the game from launching through
-      the drive-letter fallback.
+      the drive-letter fallback. Not exercised because every managed game
+      prepared successfully.
 
 ## Verification
 
 - 0.1.74 verified the real-path layout manually on GTA V Enhanced and Little
   Nightmares II: `mount_mode=mount-manager`, base hashes unchanged,
   `AUTO_RESTORE=PASS`.
-- 0.1.75 is the first build with the global startup migration and forced
-  managed-game preparation. Runtime verification is pending.
+- 0.1.75/0.1.76 runtime: 17/17 managed games have base + junction + sidecar;
+  `.steamtron-mount` no longer exists.
+- GTA V Enhanced, Far Cry 5 and Max Payne 3 Play/Stop: real-path
+  `mount_mode=mount-manager`, `AUTO_RESTORE=PASS`, base hashes unchanged.
+- Little Nightmares II and Watch Dogs 2 were migrated from direct folders and
+  launched through the new layout. No per-game preparation was used.
 
 ## Decisions and risks
 
