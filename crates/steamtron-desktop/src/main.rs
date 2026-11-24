@@ -3233,8 +3233,11 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         #[cfg(not(windows))]
         let (overlay_common, overlay_cwd) = (common.clone(), common.clone());
         let target_cwd = {
-            let text = target
-                .executable
+            // Use the resolved executable, not the stored target: imported
+            // games can hold an absolute path from another machine, and the
+            // plan rebases the exe but a stale cwd still breaks the launch.
+            let text = plan
+                .program
                 .parent()
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| overlay_cwd.clone());

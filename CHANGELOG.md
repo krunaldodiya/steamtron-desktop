@@ -9,6 +9,10 @@
 - Library load recovers a stale persisted root from the canonical
   `common/<title>` folder (for example `common/FarCry5` vs
   `common/Far Cry 5`) instead of reporting missing content.
+- Overlay launches use the resolved executable's directory as the working
+  directory. Imported games with an old absolute target (Little Nightmares I
+  and II) previously got a stale cwd and did not start even though the exe was
+  rebased to `S:`.
 
 ## [0.1.68] - 2026-11-24
 
