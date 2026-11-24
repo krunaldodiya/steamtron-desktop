@@ -58,13 +58,17 @@ jobs:
           # pinned MSI and register the header directory explicitly.
           $msi = Join-Path $env:RUNNER_TEMP "winfsp-2.1.25156.msi"
           Invoke-WebRequest "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" -OutFile $msi
-          $process = Start-Process msiexec.exe -ArgumentList @("/i", "`"$msi`"", "/qn", "/norestart") -Wait -PassThru
+          $process = Start-Process msiexec.exe -ArgumentList @("/i", "`"$msi`"", "/qn", "/norestart", "ADDLOCAL=ALL") -Wait -PassThru
           if ($process.ExitCode -notin 0, 3010) { throw "WinFsp MSI failed: $($process.ExitCode)" }
           $dir = @(
             "${env:ProgramFiles(x86)}\WinFsp",
             "$env:ProgramFiles\WinFsp"
           ) | Where-Object { Test-Path (Join-Path $_ "inc\winfsp\winfsp.h") } | Select-Object -First 1
-          if (-not $dir) { throw "WinFsp headers not found after install" }
+          if (-not $dir) {
+            Get-ChildItem "${env:ProgramFiles(x86)}", "$env:ProgramFiles" -Directory -Filter WinFsp -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Output ('WinFsp dir: ' + $_.FullName); Get-ChildItem $_.FullName -Force | Select-Object Name }
+            throw "WinFsp Developer headers not found after install"
+          }
           New-Item -Path "HKLM:\SOFTWARE\WOW6432Node\WinFsp" -Force | Out-Null
           Set-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\WinFsp" -Name InstallDir -Value $dir
           Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\WinFsp" | Format-List
