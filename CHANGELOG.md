@@ -1,3 +1,12 @@
+## [0.1.65] - 2026-11-24
+
+### Fixed
+
+- Before launch planning, a missing or broken game root is repaired from the
+  `.steamtron-base` sibling even when the real-path record is gone. If the base
+  is also missing, the error names the base folder instead of reporting a
+  generic missing content path.
+
 ## [0.1.64] - 2026-11-24
 
 ### Fixed

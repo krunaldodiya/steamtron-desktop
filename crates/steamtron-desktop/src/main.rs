@@ -2604,6 +2604,32 @@ fn normalized_windows_path(path: &Path) -> PathBuf {
     PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
 }
 
+/// Put a missing or broken game root back on its pristine base folder.
+///
+/// This is the last safety net before launch planning: the record may be
+/// absent after an interrupted overlay, but the `.steamtron-base` sibling is
+/// still the canonical content.
+#[cfg(windows)]
+fn repair_game_root(root: &Path) -> Result<bool, String> {
+    if root.is_dir() {
+        return Ok(true);
+    }
+    let Some(parent) = root.parent() else {
+        return Ok(false);
+    };
+    let Some(name) = root.file_name() else {
+        return Ok(false);
+    };
+    let base = parent.join(".steamtron-base").join(name);
+    if !base.is_dir() {
+        return Ok(false);
+    }
+    let real = normalized_windows_path(root);
+    let base = normalized_windows_path(&base);
+    retarget_junction(&real, &base)?;
+    Ok(root.is_dir() || real.is_dir())
+}
+
 #[cfg(windows)]
 fn fixes_have_launcher(root: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -3065,6 +3091,29 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     let target = primary_target(&game)
         .cloned()
         .ok_or_else(|| "This game has no launch target yet.".to_string())?;
+    #[cfg(windows)]
+    if !game.installation.root.is_dir() {
+        eprintln!(
+            "SteamTron: root missing debug={:?} is_dir={} real_path={:?} metadata={:?}",
+            game.installation.root,
+            game.installation.root.is_dir(),
+            real_path.as_ref().map(|layout| layout.real.display().to_string()),
+            std::fs::symlink_metadata(&game.installation.root)
+                .map(|metadata| metadata.file_attributes()),
+        );
+        // The real-path record can be missing after an interrupted overlay.
+        // The base folder is still the authoritative content.
+        if !repair_game_root(&game.installation.root)? {
+            return Err(format!(
+                "game content folder does not exist: {} (base folder is missing)",
+                game.installation.root.display()
+            ));
+        }
+        eprintln!(
+            "SteamTron: repaired game root {}",
+            game.installation.root.display()
+        );
+    }
     let plan = managed_launch_plan(&game, &target, &client_root)
         .map_err(|error| error.to_string())?;
     let fixes = managed_fixes_dir(&game);

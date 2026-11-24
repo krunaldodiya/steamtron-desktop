@@ -90,7 +90,13 @@ fields that are not per-game settings.
 - The process-group test failure is environmental (`kill -TERM` in the WSL test
   harness) and unrelated to this change.
 
-Runtime verification is pending because 0.1.63 is not built or installed.
+0.1.63 was installed and its manifest was inspected on 2026-11-24. The live
+Max Payne manifest contained both keys: `launcher_targets` still had the stale
+`MaxPayne3` primary, while `launch_targets` had the correct `PlayMaxPayne3`.
+0.1.64 resolves the conflict from `launcher_relative_path` and removes the
+legacy key on save.
+
+Runtime verification of 0.1.64 is pending until it is installed.
 
 ## Decisions and risks
 
