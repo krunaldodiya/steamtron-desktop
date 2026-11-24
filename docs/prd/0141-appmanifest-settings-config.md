@@ -61,6 +61,9 @@ fields that are not per-game settings.
   configured launchers.
 - R7: Metadata import keeps the imported appmanifest bytes exact and the next
   open overlays it.
+- R8: If a manifest still contains both `launcher_targets` and the legacy
+  `launch_targets`, prefer the list whose primary executable matches
+  `launcher_relative_path`; saving removes the legacy key.
 
 ## Acceptance criteria
 
@@ -71,6 +74,8 @@ fields that are not per-game settings.
       **Generate app manifest**.
 - [x] Restore target selection prefers an existing usable target, then backup
       targets, then auto-detection.
+- [x] A dual-key manifest resolves to the list matching
+      `launcher_relative_path`, and saving removes the legacy key.
 - [ ] Runtime: change Proton, environment, arguments, prelaunch and launcher in
       the installed app and confirm `appmanifest_<id>.json` changes each time.
 - [ ] Runtime: back up and restore Max Payne 3 and confirm the appmanifest and

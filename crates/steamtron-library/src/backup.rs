@@ -120,6 +120,8 @@ pub fn merged_game_appmanifest(game: &Game) -> Value {
         .filter(Value::is_object)
         .unwrap_or_else(|| serde_json::json!({}));
     if let (Some(target), Some(source)) = (payload.as_object_mut(), generated.as_object()) {
+        // One canonical launcher key; remove the legacy duplicate.
+        target.remove("launch_targets");
         for (key, value) in source {
             target.insert(key.clone(), value.clone());
         }

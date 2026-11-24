@@ -52,6 +52,8 @@ overlay. The user never creates a sidecar.
 - R13: Restore keeps an existing configured launcher whose executable still
   exists. The backup's targets are fallback, and auto-detection is the final
   fallback; a stale snapshot must not replace a patched launcher.
+- R14: A recorded real path whose junction is broken or missing is repaired to
+  the base before launch planning; a missing base raises a clear error.
 
 ## Acceptance criteria
 

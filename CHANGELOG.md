@@ -1,3 +1,15 @@
+## [0.1.64] - 2026-11-24
+
+### Fixed
+
+- A game manifest that still contained both `launcher_targets` and the legacy
+  `launch_targets` could select an older launcher. The resolver now prefers the
+  list whose primary executable matches `launcher_relative_path`, and saving
+  removes the legacy key.
+- A real-path junction left pointing at a missing overlay mount is repaired to
+  the base folder before launch planning. A missing base now reports a clear
+  error instead of `game content folder does not exist`.
+
 ## [0.1.63] - 2026-11-24
 
 ### Added

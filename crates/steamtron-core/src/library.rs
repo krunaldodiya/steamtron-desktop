@@ -230,6 +230,59 @@ pub fn game_ready(game: &Game) -> bool {
         .is_some_and(|target| target.executable.is_file())
 }
 
+/// Pick the launcher list from a manifest that may still contain both keys.
+///
+/// The canonical key is `launcher_targets`. Older manifests wrote
+/// `launch_targets`, and a restored backup could leave a stale
+/// `launcher_targets` next to a newer `launch_targets`. When both exist,
+/// prefer the list whose primary executable matches `launcher_relative_path`;
+/// otherwise prefer the longer list, then the canonical one.
+pub fn manifest_target_items(
+    manifest: &serde_json::Value,
+) -> Option<&[serde_json::Value]> {
+    let canonical = manifest
+        .get("launcher_targets")
+        .and_then(serde_json::Value::as_array);
+    let legacy = manifest
+        .get("launch_targets")
+        .and_then(serde_json::Value::as_array);
+    let relative = manifest
+        .get("launcher_relative_path")
+        .and_then(serde_json::Value::as_str)
+        .map(|value| value.replace('\\', "/"));
+    let matches_relative = |items: &[serde_json::Value]| {
+        let Some(relative) = relative.as_deref() else {
+            return false;
+        };
+        items
+            .iter()
+            .find(|item| {
+                item.get("primary")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .or_else(|| items.first())
+            .and_then(|item| item.get("executable").and_then(serde_json::Value::as_str))
+            .is_some_and(|executable| executable.replace('\\', "/") == relative)
+    };
+    match (canonical, legacy) {
+        (Some(canonical), None) => Some(canonical.as_slice()),
+        (None, Some(legacy)) => Some(legacy.as_slice()),
+        (Some(canonical), Some(legacy)) => {
+            if matches_relative(canonical) {
+                Some(canonical.as_slice())
+            } else if matches_relative(legacy) {
+                Some(legacy.as_slice())
+            } else if legacy.len() > canonical.len() {
+                Some(legacy.as_slice())
+            } else {
+                Some(canonical.as_slice())
+            }
+        }
+        (None, None) => None,
+    }
+}
+
 impl Game {
     /// Build the per-game settings manifest (the game's config file).
     ///
@@ -439,14 +492,7 @@ impl Game {
     /// snapshot cannot erase configured launchers.
     pub fn apply_appmanifest(&mut self, manifest: &serde_json::Value) {
         self.apply_appmanifest_settings(manifest);
-        let canonical = manifest
-            .get("launcher_targets")
-            .and_then(serde_json::Value::as_array);
-        let legacy = manifest
-            .get("launch_targets")
-            .and_then(serde_json::Value::as_array)
-            .filter(|items| !items.is_empty());
-        if let Some(items) = canonical.or(legacy) {
+        if let Some(items) = manifest_target_items(manifest) {
             let mut targets = Vec::new();
             for (index, item) in items.iter().enumerate() {
                 let Some(relative) = item
@@ -899,6 +945,8 @@ pub fn set_default_drive(&mut self, id: &str) -> Result<(), LibraryError> {
             if let (Some(target), Some(source)) =
                 (payload.as_object_mut(), generated.as_object())
             {
+                // One canonical launcher key; remove the legacy duplicate.
+                target.remove("launch_targets");
                 for (key, value) in source {
                     target.insert(key.clone(), value.clone());
                 }
@@ -1852,6 +1900,35 @@ mod tests {
     }
 
     #[test]
+    fn manifest_targets_prefer_the_list_matching_the_relative_path() {
+        let manifest = serde_json::json!({
+            "launcher_relative_path": "Max Payne 3/PlayMaxPayne3.exe",
+            "launcher_targets": [
+                {"executable": "Max Payne 3/MaxPayne3.exe", "primary": true}
+            ],
+            "launch_targets": [
+                {"executable": "Max Payne 3/MaxPayne3.exe", "primary": false},
+                {"executable": "Max Payne 3/PlayMaxPayne3.exe", "primary": true}
+            ]
+        });
+        let items = manifest_target_items(&manifest).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1]["executable"], "Max Payne 3/PlayMaxPayne3.exe");
+
+        let canonical = serde_json::json!({
+            "launcher_relative_path": "Game/Play.exe",
+            "launcher_targets": [
+                {"executable": "Game/Play.exe", "primary": true}
+            ],
+            "launch_targets": [
+                {"executable": "Game/Old.exe", "primary": true}
+            ]
+        });
+        let items = manifest_target_items(&canonical).unwrap();
+        assert_eq!(items[0]["executable"], "Game/Play.exe");
+    }
+
+    #[test]
     fn library_save_writes_the_per_game_config() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("SteamTronLibrary/steamtronapps/common/Configured");
@@ -1863,6 +1940,11 @@ mod tests {
         library.add_drive(temp.path(), "test", true).unwrap();
         let game = configured_game(&root, &manifest_path);
         library.upsert_game(game).unwrap();
+        fs::write(
+            &manifest_path,
+            br#"{"legacy":"keep","launch_targets":[{"executable":"Old.exe","primary":true}]}"#,
+        )
+        .unwrap();
         library.save().unwrap();
 
         let manifest: serde_json::Value =
@@ -1872,5 +1954,7 @@ mod tests {
         assert_eq!(manifest["prelaunch"]["path"], "/tmp/prelaunch.sh");
         assert_eq!(manifest["launcher_targets"][0]["name"], "Play");
         assert_eq!(manifest["launcher_targets"][0]["executable"], "Play.exe");
+        assert_eq!(manifest["legacy"], "keep");
+        assert!(manifest.get("launch_targets").is_none());
     }
 }
