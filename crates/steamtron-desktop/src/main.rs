@@ -2598,7 +2598,37 @@ fn real_path_status(game: &steamtron_core::library::Game) -> serde_json::Value {
     }
 }
 
-#[cfg(windows)]
+/// Append a path-state line that survives elevation and stderr redirection.
+fn path_diagnostic(label: &str, path: &Path, extra: &str) {
+    use std::io::Write;
+
+    let target = steamtron_core::paths::layout()
+        .diagnostics()
+        .join("path-check.log");
+    if let Some(parent) = target.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let metadata = std::fs::symlink_metadata(path)
+        .map(|metadata| format!("{:?}", metadata.file_type()))
+        .unwrap_or_else(|error| format!("error:{error}"));
+    let link = std::fs::read_link(path)
+        .map(|target| target.display().to_string())
+        .unwrap_or_else(|error| format!("error:{error}"));
+    let line = format!(
+        "{label} path={:?} is_dir={} exists={} metadata={metadata} link={link} {extra}",
+        path,
+        path.is_dir(),
+        path.exists()
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&target)
+    {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
 fn normalized_windows_path(path: &Path) -> PathBuf {
     let text = path.display().to_string();
     PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
@@ -3008,6 +3038,12 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         catalog::apply_target(&mut game, entry)?;
     }
     #[cfg(windows)]
+    path_diagnostic(
+        "play-before-real-path",
+        &game.installation.root,
+        &format!("id={} manifest={:?}", game.id, game.installation.manifest),
+    );
+    #[cfg(windows)]
     let real_path = {
         let drive = profile
             .as_ref()
@@ -3024,8 +3060,13 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     };
     #[cfg(windows)]
     if let Some(layout) = real_path.as_ref() {
+        path_diagnostic("play-layout-real", &layout.real, "");
+        path_diagnostic("play-layout-base", &layout.base, "");
+        path_diagnostic("play-layout-mount", &layout.mount, "");
         retarget_junction(&layout.real, &layout.base)
             .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?;
+        path_diagnostic("play-after-retarget-root", &game.installation.root, "");
+        path_diagnostic("play-after-retarget-real", &layout.real, "");
     }
     let steam_root = steam::steam_root().ok();
     #[cfg(target_os = "windows")]
@@ -3093,14 +3134,15 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .ok_or_else(|| "This game has no launch target yet.".to_string())?;
     #[cfg(windows)]
     if !game.installation.root.is_dir() {
-        use std::os::windows::fs::MetadataExt;
-        eprintln!(
-            "SteamTron: root missing debug={:?} is_dir={} real_path={:?} metadata={:?}",
-            game.installation.root,
-            game.installation.root.is_dir(),
-            real_path.as_ref().map(|layout| layout.real.display().to_string()),
-            std::fs::symlink_metadata(&game.installation.root)
-                .map(|metadata| metadata.file_attributes()),
+        path_diagnostic(
+            "play-before-plan-missing-root",
+            &game.installation.root,
+            &format!(
+                "real_path={:?}",
+                real_path
+                    .as_ref()
+                    .map(|layout| layout.real.display().to_string())
+            ),
         );
         // The real-path record can be missing after an interrupted overlay.
         // The base folder is still the authoritative content.
@@ -7767,6 +7809,13 @@ fn main() {
         std::process::exit(code);
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .setup(|app| {
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
@@ -7781,8 +7830,21 @@ fn main() {
                 steamtron_library::managed::cleanup_legacy_lua_files();
                 steamtron_library::managed::organize_manifest_store();
                 steamtron_library::managed::populate_missing_appmanifests();
+                let _ = std::fs::remove_file(
+                    steamtron_core::paths::layout()
+                        .diagnostics()
+                        .join("path-check.log"),
+                );
                 if let Ok(library) = steamtron_core::library::Library::load() {
                     for game in library.games() {
+                        path_diagnostic(
+                            "startup",
+                            &game.installation.root,
+                            &format!(
+                                "id={} manifest={:?}",
+                                game.id, game.installation.manifest
+                            ),
+                        );
                         let _ = steamtron_library::cache::backfill_from_global(game);
                         if let Some(appid) = game.metadata_app_id {
                             let _ = steamtron_library::updates::available_updates(&appid.to_string());

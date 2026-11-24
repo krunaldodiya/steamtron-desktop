@@ -1,3 +1,14 @@
+## [0.1.66] - 2026-11-24
+
+### Fixed
+
+- Only one SteamTron instance runs. Launching the app again shows and focuses
+  the existing window instead of creating another process and tray icon.
+- Added a per-game path diagnostic at
+  `<data home>/diagnostics/path-check.log`, written at startup and around
+  real-path preparation, so Windows path failures can be inspected even when
+  the app was launched elevated.
+
 ## [0.1.65] - 2026-11-24
 
 ### Fixed
