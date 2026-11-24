@@ -3093,6 +3093,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         .ok_or_else(|| "This game has no launch target yet.".to_string())?;
     #[cfg(windows)]
     if !game.installation.root.is_dir() {
+        use std::os::windows::fs::MetadataExt;
         eprintln!(
             "SteamTron: root missing debug={:?} is_dir={} real_path={:?} metadata={:?}",
             game.installation.root,
