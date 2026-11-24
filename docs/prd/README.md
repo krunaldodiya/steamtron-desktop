@@ -167,3 +167,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0143](0143-single-instance-tray.md) | Single SteamTron instance and tray icon | active | 2026-11-24 |
 | [0144](0144-verbatim-path-separators.md) | Windows verbatim path separator normalization | active | 2026-11-24 |
 | [0145](0145-storage-prefetch.md) | Storage settings prefetch and non-blocking render | active | 2026-11-24 |
+| [0146](0146-non-elevated-gui.md) | Non-elevated GUI launch | active | 2026-11-24 |

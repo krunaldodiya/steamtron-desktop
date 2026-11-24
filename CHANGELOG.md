@@ -1,3 +1,12 @@
+## [0.1.70] - 2026-11-24
+
+### Fixed
+
+- The GUI no longer stays elevated when it is started by the installer Finish
+  page or an administrator shell. It relaunches through Explorer as the
+  signed-in user and exits the elevated instance. Per-game overlay and runtime
+  children keep their own elevation behavior.
+
 ## [0.1.69] - 2026-11-24
 
 ### Fixed

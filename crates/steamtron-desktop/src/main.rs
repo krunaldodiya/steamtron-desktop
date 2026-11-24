@@ -7862,6 +7862,75 @@ fn proton_install_child() -> Option<i32> {
     Some(proton_sources::run_install(family, tag, name, resume))
 }
 
+/// Whether the current process has an elevated token.
+#[cfg(windows)]
+fn process_is_elevated() -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut size = 0u32;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut _,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut size,
+        );
+        CloseHandle(token);
+        ok != 0 && elevation.TokenIsElevated != 0
+    }
+}
+
+/// Relaunch the GUI through Explorer, which starts it as the signed-in user.
+///
+/// The installer Finish page inherits the installer's elevated token. The UI
+/// does not need elevation; game/runtime children elevate themselves. A marker
+/// prevents a relaunch loop if Explorer cannot drop the token.
+#[cfg(windows)]
+fn relaunch_gui_non_elevated() -> bool {
+    const MARKER: &str = "steamtron-user-launch.flag";
+    let marker = std::env::temp_dir().join(MARKER);
+    if !process_is_elevated() {
+        let _ = std::fs::remove_file(&marker);
+        return false;
+    }
+    if let Ok(metadata) = std::fs::metadata(&marker) {
+        if metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.elapsed().ok())
+            .is_some_and(|age| age < std::time::Duration::from_secs(120))
+        {
+            let _ = std::fs::remove_file(&marker);
+            eprintln!("SteamTron: still elevated after relaunch; continuing");
+            return false;
+        }
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let _ = std::fs::write(&marker, b"1");
+    if std::process::Command::new("explorer.exe")
+        .arg(&exe)
+        .spawn()
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&marker);
+        return false;
+    }
+    eprintln!("SteamTron: relaunching the GUI as the signed-in user");
+    true
+}
+
 fn main() {
     if let Some(code) = proton_install_child() {
         std::process::exit(code);
@@ -7869,6 +7938,10 @@ fn main() {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if let Some(code) = try_overlay_wrapper() {
         std::process::exit(code);
+    }
+    #[cfg(windows)]
+    if relaunch_gui_non_elevated() {
+        std::process::exit(0);
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
