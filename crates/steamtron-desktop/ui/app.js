@@ -3549,7 +3549,9 @@ async function boot() {
       return;
     }
     hideAuthGate();
+    primeSettingsCache();
     await load();
+    primeSettingsCache(managedLibrary);
   } catch (error) {
     showAuthGate(`Could not check sign-in: ${error}`);
   }
@@ -3574,7 +3576,9 @@ async function runSignIn() {
       return;
     }
     hideAuthGate();
+    primeSettingsCache();
     await load();
+    primeSettingsCache(managedLibrary);
   } catch (error) {
     gateStatus.textContent = String(error);
   } finally {
@@ -4586,9 +4590,48 @@ function closeSettingsPage() {
   }
 }
 
+// Settings are prefetched at launch so Storage opens from memory instead of
+// waiting for a fresh library snapshot and a slow Windows drive enumeration.
+const settingsCache = {
+  library: null,
+  libraryPending: null,
+  drives: null,
+  drivesPending: null,
+};
+
+function primeSettingsCache(library = null) {
+  if (library) settingsCache.library = library;
+  if (!settingsCache.library && !settingsCache.libraryPending) {
+    settingsCache.libraryPending = invoke("library_snapshot")
+      .then((snapshot) => {
+        settingsCache.library = snapshot;
+        return snapshot;
+      })
+      .catch(() => null)
+      .finally(() => {
+        settingsCache.libraryPending = null;
+      });
+  }
+  if (!settingsCache.drives && !settingsCache.drivesPending) {
+    settingsCache.drivesPending = invoke("available_library_drives")
+      .then((drives) => {
+        settingsCache.drives = drives;
+        return drives;
+      })
+      .catch(() => [])
+      .finally(() => {
+        settingsCache.drivesPending = null;
+      });
+  }
+}
+
 async function refreshSettingsLibrary() {
-  try { settingsLibrary = await invoke("library_snapshot"); }
-  catch (_error) { settingsLibrary = null; }
+  try {
+    settingsLibrary = await invoke("library_snapshot");
+    settingsCache.library = settingsLibrary;
+  } catch (_error) {
+    settingsLibrary = null;
+  }
   return settingsLibrary;
 }
 
@@ -4919,6 +4962,9 @@ async function showAddDriveDialog() {
     try {
       const result = await invoke("add_library_drive", { path: selected });
       managedLibrary = result;
+      settingsCache.library = result;
+      settingsCache.drives = null;
+      primeSettingsCache();
       close();
       await renderSettingsPage();
       showToast("Drive added");
@@ -4932,7 +4978,15 @@ async function showAddDriveDialog() {
 }
 
 async function renderStorageSettings(host) {
-  const snapshot = await settleWithin(refreshSettingsLibrary(), 4000, null);
+  let snapshot = settingsCache.library;
+  if (!snapshot) {
+    snapshot = await settleWithin(
+      settingsCache.libraryPending || refreshSettingsLibrary(),
+      1500,
+      null,
+    );
+    if (snapshot) settingsCache.library = snapshot;
+  }
   const drives = snapshot?.drives || [];
   const games = snapshot?.games || [];
   const libraryPath = snapshot?.path || "";
@@ -4944,11 +4998,27 @@ async function renderStorageSettings(host) {
     .replace(/\\/g, "/")
     .replace(/\/+$/, "")
     .toLowerCase();
-  const available = await settleWithin(
-    invoke("available_library_drives").catch(() => []),
-    4000,
-    [],
-  );
+  let available = settingsCache.drives;
+  if (!available) {
+    const pending = settingsCache.drivesPending
+      || invoke("available_library_drives").catch(() => []);
+    available = await settleWithin(pending, 1500, null);
+    if (available) {
+      settingsCache.drives = available;
+    } else {
+      available = [];
+      // Do not hold the whole page: fill the drive rows when enumeration ends.
+      void Promise.resolve(pending)
+        .then((drives) => {
+          if (Array.isArray(drives)) {
+            settingsCache.drives = drives;
+            if (settingsTab === "storage") void renderStorageSettings(host);
+          }
+        })
+        .catch(() => {});
+    }
+  }
+  const waitingForDrives = !settingsCache.drives;
   const availableByPath = new Map(available.map((drive) => [drive.path, drive]));
   const gamesOn = (drive) => {
     const root = normalizePath(drive.root);
@@ -4971,7 +5041,7 @@ async function renderStorageSettings(host) {
   host.innerHTML = `
     <section class="settings-section"><h2>Your game drives</h2><p>Added drives are the only destinations for managed games. Game content lives under <code>SteamTronLibrary/steamtronapps</code>; registration never moves existing files.</p><div class="settings-card">
       <div class="settings-row"><div class="row-text"><strong>Registered game drives</strong><span>Select one of these mounted roots when adding or restoring a game.</span></div><div class="row-control"><button id="setting-refresh-drives">Refresh drives</button></div></div>
-      ${rows || '<div class="settings-row"><div class="row-text"><span>No drives registered yet.</span></div></div>'}
+      ${rows || `<div class="settings-row"><div class="row-text"><span>${waitingForDrives ? "Loading drives…" : "No drives registered yet."}</span></div></div>`}
       <div class="settings-row"><div class="row-text"><strong>Add drive</strong><span>Choose a mounted partition. No folder or game file is created.</span></div><div class="row-control"><button id="setting-add-drive">Add drive…</button></div></div>
     </div></section>
     <section class="settings-section"><h2>Game backups</h2><p>Restore a portable SteamTron game backup to a registered game or create its library entry automatically.</p><div class="settings-card">
@@ -4993,6 +5063,9 @@ async function renderStorageSettings(host) {
     button.onclick = async () => {
       try {
         await invoke("set_default_library_drive", { id: button.dataset.defaultDrive });
+        settingsCache.library = null;
+        settingsCache.drives = null;
+        primeSettingsCache();
         await load();
         await renderSettingsPage();
         showToast("Default drive updated");
@@ -5004,6 +5077,9 @@ async function renderStorageSettings(host) {
       if (!(await confirmDialog({ title: "Remove drive", message: "Remove this drive registration? Only the registration is removed. Games, saves and folders stay on the drive.", confirmLabel: "Remove", danger: true }))) return;
       try {
         await invoke("remove_library_drive", { id: button.dataset.removeDrive });
+        settingsCache.library = null;
+        settingsCache.drives = null;
+        primeSettingsCache();
         await load();
         await renderSettingsPage();
         showToast("Drive registration removed");
@@ -5035,7 +5111,11 @@ async function renderStorageSettings(host) {
       operation.fail(String(error));
     }
   };
-  host.querySelector("#setting-refresh-drives").onclick = () => { void renderSettingsPage(); };
+  host.querySelector("#setting-refresh-drives").onclick = () => {
+    settingsCache.drives = null;
+    primeSettingsCache();
+    void renderSettingsPage();
+  };
   host.querySelector("#setting-add-drive").onclick = () => { void showAddDriveDialog(); };
   const openData = host.querySelector("#setting-open-data");
   if (openData) openData.onclick = async () => {

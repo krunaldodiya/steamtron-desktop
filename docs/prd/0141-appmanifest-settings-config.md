@@ -109,6 +109,9 @@ Runtime verification of 0.1.64 is pending until it is installed.
   settings.
 - Manifest writes happen before `library.json`; a failed write leaves the old
   index in place instead of claiming a setting that was not persisted.
+- A manifest `content_directory` uses `/`; on Windows it must be normalized
+  before the library root is made verbatim (`\\?\`). The 0.1.67 fix is in
+  `0144-verbatim-path-separators.md`.
 
 ## Links
 

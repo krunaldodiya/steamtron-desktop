@@ -1,3 +1,18 @@
+## [0.1.68] - 2026-11-24
+
+### Fixed
+
+- Opening **Settings → Storage** no longer blocks the whole pane while the
+  Windows drive list is enumerated. The library snapshot and drive list are
+  prefetched at launch, cached, and rendered immediately; a slow or pending
+  drive enumeration only fills the drive rows when it finishes.
+- A stale appmanifest `content_directory` no longer replaces a valid library
+  root. For example, `common/FarCry5` is ignored when the real folder is
+  `common/Far Cry 5`, so Play and the installed size work again.
+- `Game::appmanifest` never derives a folder name containing `/`, preventing a
+  nested `common/common/<Game>` path from being written by a legacy malformed
+  root.
+
 ## [0.1.67] - 2026-11-24
 
 ### Fixed
@@ -8,7 +23,8 @@
   `\\?\D:\...\common/Max Payne 3`, which Win32 rejects with
   `ERROR_INVALID_NAME`. This fixes the `game content folder does not exist`
   error, the `0 B` installation size, and the misleading "base folder is
-  missing" message for every affected game.
+  missing" message for every affected game. Games without a `.steamtron-base`
+  sidecar now show Play again instead of Download when their files exist.
 - `repair_game_root` normalizes separators before deriving its parent and name,
   and path equality checks ignore the `\\?\` vs plain representation.
 

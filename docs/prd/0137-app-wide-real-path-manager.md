@@ -110,8 +110,11 @@ overlay. The user never creates a sidecar.
   and treats backup targets as fallback; not yet installed.
 - 0.1.63 on 2026-11-24 reported `game content folder does not exist` for the
   `\\?\D:\...\Max Payne 3` real path while the base folder existed and the
-  `.steamtron-mount` folder was missing. 0.1.64 repairs a real-path junction
-  that points at a missing mount before launch planning.
+  `.steamtron-mount` folder was missing. 0.1.64 repaired a real-path junction
+  that points at a missing mount, but the audit found the actual failing root
+  was `\\?\D:\...\common/Max Payne 3` (a verbatim path containing `/`).
+  0.1.67 normalizes separators before adding the verbatim prefix and before
+  deriving the real-path base; see `0144-verbatim-path-separators.md`.
 - Not run yet: restore on 0.1.63, uninstall or move after 0.1.58. Only code
   inspection on Linux; Windows-only code is not compiled locally.
 
