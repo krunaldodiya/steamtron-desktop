@@ -2928,6 +2928,9 @@ fn ensure_real_path(
 ) -> Result<Option<RealPathLayout>, String> {
     use std::os::windows::fs::MetadataExt;
 
+    if game.installation.mode != steamtron_core::library::InstallMode::Managed {
+        return Ok(None);
+    }
     if let Some(layout) = real_path_layout(&game.id) {
         // A crash or forced exit can leave the real path pointing at a mount
         // that no longer exists. Put it back on the base before planning.
@@ -3013,6 +3016,38 @@ fn ensure_real_path(
     };
     save_real_path_layout(&game.id, &layout)?;
     Ok(Some(layout))
+}
+
+/// Give every managed game the same `.steamtron-base` real-path layout.
+///
+/// This runs at startup and is idempotent: games already on a base are only
+/// repaired, linked games are left alone, and a failure is logged so Play can
+/// fall back to the drive-letter overlay for that game.
+#[cfg(windows)]
+fn ensure_all_real_path_layouts() {
+    let Ok(library) = steamtron_core::library::Library::load() else {
+        return;
+    };
+    for game in library.games() {
+        if game.installation.mode != steamtron_core::library::InstallMode::Managed {
+            continue;
+        }
+        if !game.installation.root.is_dir() {
+            continue;
+        }
+        if real_path_layout(&game.id).is_some() {
+            repair_real_path_junction(&game.id);
+            continue;
+        }
+        if let Err(error) = ensure_real_path(game, true) {
+            eprintln!(
+                "SteamTron: could not prepare the real-path layout for {}: {error}",
+                game.title
+            );
+        } else {
+            repair_real_path_junction(&game.id);
+        }
+    }
 }
 
 #[tauri::command]
@@ -3166,14 +3201,23 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         let drive = profile
             .as_ref()
             .is_some_and(|entry| entry.overlay_mode() == catalog::OverlayMode::Drive);
-        let force = profile
-            .as_ref()
-            .is_some_and(|entry| entry.overlay_mode() == catalog::OverlayMode::Real);
+        let force = game.installation.mode == steamtron_core::library::InstallMode::Managed
+            || profile
+                .as_ref()
+                .is_some_and(|entry| entry.overlay_mode() == catalog::OverlayMode::Real);
         if drive {
             None
         } else {
-            ensure_real_path(&game, force)
-                .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?
+            match ensure_real_path(&game, force) {
+                Ok(layout) => layout,
+                Err(error) => {
+                    eprintln!(
+                        "SteamTron: real-path layout unavailable for {}: {error}",
+                        game.title
+                    );
+                    None
+                }
+            }
         }
     };
     #[cfg(windows)]
@@ -8073,6 +8117,8 @@ fn main() {
                 steamtron_library::managed::cleanup_legacy_lua_files();
                 steamtron_library::managed::organize_manifest_store();
                 steamtron_library::managed::populate_missing_appmanifests();
+                #[cfg(windows)]
+                ensure_all_real_path_layouts();
                 let _ = std::fs::remove_file(
                     steamtron_core::paths::layout()
                         .diagnostics()

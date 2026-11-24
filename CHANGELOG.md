@@ -1,3 +1,14 @@
+## [0.1.75] - 2026-11-24
+
+### Changed
+
+- Every managed game now uses the same Windows layout:
+  `common/.steamtron-base/<Game>` plus a real-path junction and sidecar.
+  Startup migrates games that still keep content directly in `common/<Game>`;
+  Play also prepares the layout for a managed game if startup has not finished.
+  Linked games are unchanged. A preparation failure falls back to the
+  drive-letter overlay for that game.
+
 ## [0.1.74] - 2026-11-24
 
 ### Fixed
