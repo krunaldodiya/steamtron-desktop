@@ -3,8 +3,8 @@
 - Status: active
 - Date: 2026-11-26
 - Branch: `poc/hidden-public-launch-root` (not merged into `main`)
-- Phase: implementation on the experiment branch. The FC5 gate and installed-build
-  verification are still pending.
+- Phase: implementation verified on the experiment branch (migration, FC5
+  Play/Stop, Little Nightmares backup/uninstall/restore). Not merged.
 - Areas: Windows overlay layout, library roots, appmanifest, Steam registration,
   backups/restores, security exclusions, Play/Stop lifecycle
 
@@ -180,20 +180,34 @@ Known implementation limits:
       hidden junction created, wrapper log showed `mounted_at` the hidden root,
       the game window appeared with 2 processes, content hashes were unchanged,
       and the test rolled back to the 0.1.77 layout.
-- [ ] Far Cry 5: not run yet in the implementation branch. Pending the branch
-      build and install.
-- [x] No `.steamtron-mount` directory was created by the GTA POC.
+- [x] Far Cry 5: branch build installed. Play from the app mounted at
+      `.steamtron-junction\Far Cry 5` with `mount_mode=mount-manager` and
+      started `FARCRY5.EXE` from the hidden path; the user confirmed the game
+      was running. Stop restored the launch junction. Executable hash was
+      unchanged.
+- [x] No `.steamtron-mount` directory was created by the GTA POC or the branch
+      build.
 - [x] GTA rolled back to the 0.1.77 layout cleanly.
 - [x] `main` remains unchanged.
-- [x] Two-root layout implemented in the experiment branch (code-level; not yet
-      compiled or installed).
+- [x] Two-root layout implemented, compiled, and installed in the experiment
+      branch.
+- [x] Startup migration converted all 17 managed games with 0 failures:
+      real content under `common\<Game>`, launch junction under
+      `.steamtron-junction\<Game>`, sidecar `content`/`launch`.
+- [x] Backup/uninstall/restore round trip verified on Little Nightmares:
+      app uninstall removed content, junction and sidecar; restore from the
+      existing `G:` backup recreated content, junction, sidecar and library
+      target with the original executable hash.
 
 ### Full feature (after POC)
 
 - [x] Library/Play/Steam/backups/restores use the correct root (code-level).
-- [ ] GTA, FC5, Max Payne, LN2 and a simple game pass (runtime).
-- [x] Migration from 0.1.77 is implemented and reversible (code-level).
+- [ ] GTA, FC5, Max Payne, LN2 and a simple game pass (runtime). GTA and FC5
+      passed; Max Payne 3 and LN2 are still pending.
+- [x] Migration from 0.1.77 is implemented and reversible.
 - [ ] Crash/power-loss repair is verified (runtime).
+- [x] Backup creation from the new layout and restore over an existing install
+      both pass on Little Nightmares.
 
 ## POC test procedure
 
@@ -249,9 +263,75 @@ GTA V Enhanced POC, executed on 2026-11-26 before the implementation pause:
 - Far Cry 5 POC: not run; paused for PRD review.
 - No app code was changed; `main` remains 0.1.77.
 
-Implementation branch status (2026-11-26): the two-root code is written and
-formatted (`cargo fmt`) but has not been compiled, installed, or run. Runtime
-evidence below will be filled only from the rebuilt and installed branch binary.
+Branch build verification, 2026-11-26:
+
+- Windows CI run `45791546643` passed; installer
+  `SteamTron_0.1.77_x64-setup.exe` SHA-256
+  `31e58d08c0dde0d67d7021a96288124976335ac778d2143f8a4774d91bf66e72`.
+- Installed `steamtron-desktop.exe` SHA-256
+  `b709c28c8521e0d8b363c384ef97907b4268f552bc612503ae45bd61766a28b2`,
+  version 0.1.77.
+- Startup `overlay-layout.log`: `migrated=17 failed=0 managed=17`.
+- Layout verifier: 17/17 PASS; every `common\<Game>` is a real directory,
+  every `.steamtron-junction\<Game>` is a junction to it, every sidecar has
+  `content`/`launch`, legacy `.steamtron-base` folders are gone, and
+  `.steamtron-mount` does not exist.
+
+GTA V Enhanced (3240220), app Play:
+
+- `PLAYGTAV.EXE` and `GTA5_ENHANCED.EXE` command lines both used
+  `common\.steamtron-junction\Grand Theft Auto V Enhanced`.
+- Play log: `mounted_at` the hidden root, `mount_mode=mount-manager`.
+- The user confirmed the game was running.
+- `PlayGTAV.exe` SHA-256 stayed `da21b92b…b1dddc`; `GTA5_Enhanced.exe`
+  stayed `b48e80f5…9987ea`.
+
+Far Cry 5 (552520), app Play/Stop:
+
+- Play log:
+  - `mounted_at=D:\...\.steamtron-junction\Far Cry 5`;
+  - `mount_mode=mount-manager`;
+  - `exec=D:\...\.steamtron-junction\Far Cry 5\bin\FarCry5.exe`.
+- `FARCRY5.EXE` command line was the hidden launch path; the user confirmed
+  the game was running.
+- Stop through the app returned the button to Play and restored
+  `.steamtron-junction\Far Cry 5 -> common\Far Cry 5`.
+- `FarCry5.exe` SHA-256 stayed
+  `e12e0a0dfb7d1bb48da2fee78aa172288c5b2495b09dffec9426663c6a028c73`.
+- A manual wrapper run also started `FARCRY5.EXE` from the hidden path with an
+  unchanged hash. That harness killed the wrapper while child processes were
+  still alive, so its launch junction was not restored; the app Stop path
+  restored it correctly.
+
+Little Nightmares (424840), backup and restore round trip:
+
+- Existing `G:\Games\SteamTronGames\Little Nightmares` backup validated:
+  `content.tar` 9,770,853,888 bytes, SHA-256
+  `e435122d50a4237e8b9339fb80734f62b95ed1655b4cf5e13f9a4204e404d49a`
+  (matches its manifest); fixes TAR checksum matches; the executable inside
+  the backup is `02a06e91…f1485d`.
+- App Uninstall removed `common\Little Nightmares`, the hidden launch junction
+  and the overlay sidecar. The library entry stayed with `confirmed=false` and
+  no launch targets; fixes and prefix were kept.
+- Restore from that backup recreated the content, the hidden launch junction,
+  the sidecar and the original library target. The executable SHA-256 was
+  again `02a06e91…f1485d`; no legacy `.steamtron-base` was created.
+- A fresh backup written from the new layout to
+  `G:\Games\SteamTronGames\RoundTrip\Little Nightmares`:
+  - `content.tar` 9,770,853,888 bytes;
+  - actual SHA-256 `57974a06…fcd907` matches the backup manifest;
+  - fixes TAR checksum matches;
+  - the source executable stayed `02a06e91…f1485d`.
+- Restoring that fresh backup over the installed game also passed: content,
+  launch junction, sidecar, library target and executable hash were restored.
+- Little Nightmares app Play mounted at the hidden root and executed
+  `LITTLENIGHTMARES.EXE` from it; app Stop restored the junction. This run is
+  not counted as a game-window proof because the automation stopped it while
+  the Play confirmation dialog was still being handled.
+
+Remaining runtime gates: Max Payne 3 and Little Nightmares II through the app,
+and crash/power-loss repair.
+
 
 ## Decisions and risks
 
@@ -263,15 +343,15 @@ evidence below will be filled only from the rebuilt and installed branch binary.
   rewrite when it builds the wrapper command.
 - Path-sensitive launchers may still validate the hidden path or registry
   install path. GTA/FC5 are the first gates.
-- Steam registration may reject a hidden `installdir`; this must be resolved
-  before the full refactor, not in the POC.
-- Backups/restores must use `content_root`; if they follow `launch_root` while
-  a game is mounted, they may capture the overlay view instead of the actual
-  content.
+- Steam registration publishes only the App ID/Lua; `content_directory` remains
+  `common\<Game>` and no hidden `installdir` is written. Steam-client launches
+  bypass the app overlay, the same as the 0.1.77 layout.
+- Backups and restores use `content_root`, not `launch_root`. Verified by the
+  Little Nightmares uninstall/restore and backup-over-existing round trips.
 - Crash recovery must never leave actual content only in a hidden mount or
   temporary location.
-- A forced Stop race is handled by the existing 20-second restore retry; the
-  POC must confirm it for the hidden root.
+- A forced Stop race is handled by the existing 20-second restore retry; FC5
+  and Little Nightmares app Stop both restored the launch junction.
 
 ## Rollback
 
