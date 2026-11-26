@@ -131,6 +131,8 @@ The experiment branch implements the two-root model in the desktop app:
   rewritten from the content root to the launch root before the wrapper starts,
   so a content root that is itself a junction still launches from the mount.
 - Forced `Stop` restores the launch junction with the existing 20-second retry.
+  A dead WinFsp mount that left an empty directory is cleaned up before the
+  junction is recreated; a live non-empty mount is never deleted.
 - Backups, downloads, Verify and restores keep using `content`; the launch root
   is only used for Play and the overlay.
 - The sidecar stores only `content`/`launch`. A downgraded 0.1.77 build sees an

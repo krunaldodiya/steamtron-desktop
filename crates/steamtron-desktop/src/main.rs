@@ -2158,9 +2158,7 @@ fn try_overlay_wrapper() -> Option<i32> {
         let mut real_path_guard: Option<JunctionGuard> = real_mount
             .as_ref()
             .map(|(link, base)| {
-                if std::fs::symlink_metadata(link).is_ok() {
-                    remove_junction(link)?;
-                }
+                clear_mountpoint(link)?;
                 Ok::<_, String>(JunctionGuard {
                     link: link.clone(),
                     base: base.clone(),
@@ -2531,7 +2529,7 @@ fn retarget_junction(link: &Path, target: &Path) -> Result<(), String> {
         ));
     }
     if std::fs::symlink_metadata(link).is_ok() {
-        remove_junction(link)?;
+        clear_mountpoint(link)?;
     }
     if let Some(parent) = link.parent() {
         std::fs::create_dir_all(parent)
@@ -2566,15 +2564,7 @@ fn restore_real_path_layout(game_id: &str) -> Result<serde_json::Value, String> 
         LayoutRecord::Current(layout) => {
             // Content already lives in the public folder in this layout. Only
             // the hidden launch junction and the overlay record are removed.
-            if let Ok(metadata) = std::fs::symlink_metadata(&layout.launch) {
-                if metadata.file_attributes() & 0x0000_0400 == 0 {
-                    return Err(format!(
-                        "{} is not an idle junction; stop the game before removing the overlay layout",
-                        layout.launch.display()
-                    ));
-                }
-                remove_junction(&layout.launch)?;
-            }
+            clear_mountpoint(&layout.launch)?;
             remove_real_path_record(game_id)?;
             remove_empty_launch_root(&layout.launch);
             layout_log(format!(
@@ -2739,6 +2729,45 @@ fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
     metadata.file_attributes() & 0x0000_0400 != 0
 }
 
+/// Remove an idle junction or a leftover empty mount directory.
+///
+/// A WinFsp mount that was killed can leave an empty plain directory instead
+/// of a reparse point. `rmdir` only removes the junction, so the empty
+/// directory needs its own cleanup before the next mount/restore.
+#[cfg(windows)]
+fn clear_mountpoint(path: &Path) -> Result<(), String> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "could not inspect mountpoint {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    if is_reparse_point(&metadata) {
+        return remove_junction(path);
+    }
+    if metadata.is_dir() {
+        let empty = std::fs::read_dir(path)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if empty {
+            return std::fs::remove_dir(path)
+                .map_err(|error| format!("could not remove {}: {error}", path.display()));
+        }
+        return Err(format!(
+            "{} is a live mount or a non-empty folder; stop the game first",
+            path.display()
+        ));
+    }
+    Err(format!(
+        "{} is not a junction or directory",
+        path.display()
+    ))
+}
+
 #[cfg(windows)]
 fn layout_log(message: String) {
     use std::io::Write;
@@ -2804,12 +2833,17 @@ fn ensure_junction(link: &Path, target: &Path) -> Result<(), String> {
                 return Ok(());
             }
         } else if link.is_dir() {
-            // A live WinFsp mount or a plain folder must never be deleted by
-            // the idle-layout repair.
-            return Err(format!(
-                "{} is not an idle junction; stop the game before repairing the overlay",
-                link.display()
-            ));
+            let empty = std::fs::read_dir(link)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+            if !empty {
+                // A live WinFsp mount or a plain folder must never be deleted
+                // by the idle-layout repair.
+                return Err(format!(
+                    "{} is not an idle junction; stop the game before repairing the overlay",
+                    link.display()
+                ));
+            }
         }
     }
     retarget_junction(link, target)
@@ -2904,10 +2938,18 @@ fn migrate_legacy_layout(
                 }
                 remove_junction(&real)?;
             } else if real.is_dir() {
-                return Err(format!(
-                    "both the public game folder and the legacy base exist: {}",
-                    real.display()
-                ));
+                let empty = std::fs::read_dir(&real)
+                    .map(|mut entries| entries.next().is_none())
+                    .unwrap_or(false);
+                if !empty {
+                    return Err(format!(
+                        "both the public game folder and the legacy base exist: {}",
+                        real.display()
+                    ));
+                }
+                std::fs::remove_dir(&real).map_err(|error| {
+                    format!("could not remove stale mount path {}: {error}", real.display())
+                })?;
             }
         } else if real.exists() {
             return Err(format!(
