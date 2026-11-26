@@ -3,7 +3,8 @@
 - Status: active
 - Date: 2026-11-26
 - Branch: `poc/hidden-public-launch-root` (not merged into `main`)
-- Phase: PRD review only. Implementation and further POC runs are paused.
+- Phase: implementation on the experiment branch. The FC5 gate and installed-build
+  verification are still pending.
 - Areas: Windows overlay layout, library roots, appmanifest, Steam registration,
   backups/restores, security exclusions, Play/Stop lifecycle
 
@@ -105,8 +106,45 @@ The sidecar becomes:
 }
 ```
 
-The current sidecar fields (`real`, `base`, `mount`) are POC-only and should be
-replaced by `content`/`launch` in the full refactor.
+New sidecars store only `content`/`launch`. A downgraded 0.1.77 build cannot
+parse that shape, so it rebuilds its own `.steamtron-base` junction layout on
+startup instead of misreading the hidden launch path as the game folder.
+
+## Implementation (branch)
+
+The experiment branch implements the two-root model in the desktop app:
+
+- `steamtron-core::library::launch_root(content)` derives
+  `common\.steamtron-junction\<Game>` from the content root.
+- `RealPathLayout` now stores `content` and `launch`. Existing
+  `real`/`base`/`mount` records remain readable as a legacy format.
+- Startup migrates every managed game that still has the 0.1.77 junction
+  layout:
+  1. remove the public junction at `common\<Game>`;
+  2. rename `.steamtron-base\<Game>` back to `common\<Game>`;
+  3. create `.steamtron-junction\<Game> -> common\<Game>`;
+  4. write the new sidecar.
+- Migration is a same-volume rename. It never copies content and is retryable
+  after an interruption.
+- `Play` now mounts at `.steamtron-junction\<Game>` with `common\<Game>` as the
+  lower layer. The target executable, arguments and working directory are
+  rewritten from the content root to the launch root before the wrapper starts,
+  so a content root that is itself a junction still launches from the mount.
+- Forced `Stop` restores the launch junction with the existing 20-second retry.
+- Backups, downloads, Verify and restores keep using `content`; the launch root
+  is only used for Play and the overlay.
+- The sidecar stores only `content`/`launch`. A downgraded 0.1.77 build sees an
+  unknown record and rebuilds its `.steamtron-base` layout automatically.
+- Defender exclusions now include both the content folder and the hidden launch
+  root, plus a legacy base when one still exists.
+- The Fixes UI describes the two-root layout and the button removes only the
+  hidden launch root and sidecar; game files stay in the public folder.
+
+Known implementation limits:
+
+- Steam client launches do not pass through the app wrapper; this was already
+  true for the 0.1.77 layout. PlayTron Play is the verified overlay path.
+- A live game blocks migration/repair of its layout by design.
 
 ## Requirements
 
@@ -139,18 +177,20 @@ replaced by `content`/`launch` in the full refactor.
       hidden junction created, wrapper log showed `mounted_at` the hidden root,
       the game window appeared with 2 processes, content hashes were unchanged,
       and the test rolled back to the 0.1.77 layout.
-- [ ] Far Cry 5: not run. Paused for PRD review before the second POC.
+- [ ] Far Cry 5: not run yet in the implementation branch. Pending the branch
+      build and install.
 - [x] No `.steamtron-mount` directory was created by the GTA POC.
 - [x] GTA rolled back to the 0.1.77 layout cleanly.
 - [x] `main` remains unchanged.
+- [x] Two-root layout implemented in the experiment branch (code-level; not yet
+      compiled or installed).
 
 ### Full feature (after POC)
 
-- [ ] Library/Play/Steam/backups/restores use the correct root for every
-      managed game.
-- [ ] GTA, FC5, Max Payne, LN2 and a simple game pass.
-- [ ] Migration from 0.1.77 is automatic and reversible.
-- [ ] Crash/power-loss repair is verified.
+- [x] Library/Play/Steam/backups/restores use the correct root (code-level).
+- [ ] GTA, FC5, Max Payne, LN2 and a simple game pass (runtime).
+- [x] Migration from 0.1.77 is implemented and reversible (code-level).
+- [ ] Crash/power-loss repair is verified (runtime).
 
 ## POC test procedure
 
@@ -206,10 +246,18 @@ GTA V Enhanced POC, executed on 2026-11-26 before the implementation pause:
 - Far Cry 5 POC: not run; paused for PRD review.
 - No app code was changed; `main` remains 0.1.77.
 
+Implementation branch status (2026-11-26): the two-root code is written and
+formatted (`cargo fmt`) but has not been compiled, installed, or run. Runtime
+evidence below will be filled only from the rebuilt and installed branch binary.
+
 ## Decisions and risks
 
 - The hidden launch root is the key difference from the failed
   `.steamtron-mount` test: launch path and final path are identical.
+- `content_directory` and `launcher_relative_path` stay relative to
+  `common\<Game>`. They describe the content root and the stored launch target;
+  they are not rewritten to the hidden launch root. Play performs the path
+  rewrite when it builds the wrapper command.
 - Path-sensitive launchers may still validate the hidden path or registry
   install path. GTA/FC5 are the first gates.
 - Steam registration may reject a hidden `installdir`; this must be resolved
