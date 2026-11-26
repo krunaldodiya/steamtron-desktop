@@ -332,6 +332,11 @@ Little Nightmares (424840), backup and restore round trip:
 Remaining runtime gates: Max Payne 3 and Little Nightmares II through the app,
 and crash/power-loss repair.
 
+Safety follow-up after the installed test build: commit `159e641` adds explicit
+run-marker guards to Move, Restore and Uninstall and uses the live-mount check
+during restore. The installed binary used for the evidence above was `d869e85`,
+so those guards are code-level until the next build.
+
 
 ## Decisions and risks
 
