@@ -3244,11 +3244,10 @@ fn prepare_target_for_restore(game_id: &str, root: &Path) -> Result<(), String> 
         }
         Some(LayoutRecord::Current(layout)) => {
             if paths_equivalent(&layout.content, root) {
-                if let Ok(metadata) = std::fs::symlink_metadata(&layout.launch) {
-                    if is_reparse_point(&metadata) {
-                        remove_junction(&layout.launch)?;
-                    }
-                }
+                // Removes an idle junction or a stale empty mount directory;
+                // refuses a live/non-empty mount instead of renaming content
+                // underneath a running game.
+                clear_mountpoint(&layout.launch)?;
                 return Ok(());
             }
             // A stale record for another folder must not block the restore.
@@ -6830,6 +6829,13 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         steamtron_library::backup::import_backup_entry(&mut library, &drive.root, &folder)
             .map_err(|error| error.to_string())?
     };
+    if managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(&target_game.id))
+        .unwrap_or(true)
+    {
+        return Err("Stop the game before restoring its backup.".into());
+    }
     let target_root = target_game.installation.root.clone();
     target_game.fixes_enabled = manifest
         .get("fixes_enabled")
@@ -7104,6 +7110,13 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
         .game(&game_id)
         .cloned()
         .ok_or_else(|| "unknown game".to_string())?;
+    if managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(&game_id))
+        .unwrap_or(true)
+    {
+        return Err("Stop the game before moving its install folder.".into());
+    }
     let drive = library
         .drives()
         .iter()
@@ -7166,6 +7179,13 @@ fn uninstall_managed_game_at(
         .game(game_id)
         .cloned()
         .ok_or_else(|| "unknown game".to_string())?;
+    if managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(game_id))
+        .unwrap_or(true)
+    {
+        return Err("Stop the game before uninstalling it.".into());
+    }
     if !game_process_pids(&game).is_empty() {
         return Err("Stop the game before uninstalling it.".into());
     }
