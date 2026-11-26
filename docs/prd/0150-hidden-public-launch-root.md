@@ -3,6 +3,7 @@
 - Status: active
 - Date: 2026-11-26
 - Branch: `poc/hidden-public-launch-root` (not merged into `main`)
+- Phase: PRD review only. Implementation and further POC runs are paused.
 - Areas: Windows overlay layout, library roots, appmanifest, Steam registration,
   backups/restores, security exclusions, Play/Stop lifecycle
 
@@ -133,15 +134,15 @@ replaced by `content`/`launch` in the full refactor.
 
 ### POC
 
-- [ ] PRD committed in the POC branch.
-- [ ] GTA V Enhanced: content moved to `common\Grand Theft Auto V Enhanced`,
-      hidden junction created, wrapper log shows `mounted_at` the hidden root,
-      game starts with the game window, Stop restores the hidden junction, and
-      the content hashes are unchanged.
-- [ ] Far Cry 5: same, including the wrapper's elevation relaunch.
-- [ ] No `.steamtron-mount` directory is created.
-- [ ] Both games roll back to the 0.1.77 layout cleanly.
-- [ ] `main` remains unchanged.
+- [x] PRD committed in the POC branch.
+- [x] GTA V Enhanced: content moved to `common\Grand Theft Auto V Enhanced`,
+      hidden junction created, wrapper log showed `mounted_at` the hidden root,
+      the game window appeared with 2 processes, content hashes were unchanged,
+      and the test rolled back to the 0.1.77 layout.
+- [ ] Far Cry 5: not run. Paused for PRD review before the second POC.
+- [x] No `.steamtron-mount` directory was created by the GTA POC.
+- [x] GTA rolled back to the 0.1.77 layout cleanly.
+- [x] `main` remains unchanged.
 
 ### Full feature (after POC)
 
@@ -185,7 +186,25 @@ For each of GTA V Enhanced (3240220) and Far Cry 5 (552520):
 
 ## Verification
 
-Pending POC execution.
+GTA V Enhanced POC, executed on 2026-11-26 before the implementation pause:
+
+- Content was moved to `common\Grand Theft Auto V Enhanced`.
+- `.steamtron-junction\Grand Theft Auto V Enhanced` was created as the public
+  junction.
+- Wrapper log:
+  - `mounted_at=D:\...\.steamtron-junction\Grand Theft Auto V Enhanced`;
+  - `mount_mode=mount-manager`.
+- Game process tree: `PLAYGTAV.EXE -> GTA5_ENHANCED.EXE`; window
+  `Grand Theft Auto V`; 2 distinct processes, no restart loop.
+- Content hashes before/after were identical:
+  - `PlayGTAV.exe` `da21b92b…b1dddc`;
+  - `GTA5_Enhanced.exe` `b48e80f5…9987ea`.
+- `.steamtron-mount` was not created.
+- The POC rolled back: `common\Grand Theft Auto V Enhanced` is again a junction
+  to `.steamtron-base\Grand Theft Auto V Enhanced`; the hidden root was
+  removed.
+- Far Cry 5 POC: not run; paused for PRD review.
+- No app code was changed; `main` remains 0.1.77.
 
 ## Decisions and risks
 
