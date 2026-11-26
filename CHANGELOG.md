@@ -1,3 +1,17 @@
+## [0.1.78] - 2026-11-26
+
+### Changed
+
+- Managed games now keep their real files in `common/<Game>` and launch
+  through a hidden `common/.steamtron-junction/<Game>` junction that becomes
+  the WinFsp mount only while the game runs. Startup migrates existing
+  `.steamtron-base` layouts in place; downloads, Verify, backups and restores
+  continue to use the content folder.
+- Play rewrites the target, arguments and working directory to the hidden
+  launch root. Stop restores the junction with the 20-second retry, and a
+  forced or crashed wrapper is repaired on the next app start. Move, Restore
+  and Uninstall refuse while the game is tracked as running.
+
 ## [0.1.77] - 2026-11-24
 
 ### Fixed
