@@ -8690,6 +8690,8 @@ fn main() {
                 let _ = window.maximize();
             }
             setup_tray(app)?;
+            #[cfg(windows)]
+            ensure_all_real_path_layouts();
             std::thread::spawn(|| {
                 let _ = download::resolve_smd();
             });
@@ -8698,8 +8700,6 @@ fn main() {
                 steamtron_library::managed::cleanup_legacy_lua_files();
                 steamtron_library::managed::organize_manifest_store();
                 steamtron_library::managed::populate_missing_appmanifests();
-                #[cfg(windows)]
-                ensure_all_real_path_layouts();
                 let _ = std::fs::remove_file(
                     steamtron_core::paths::layout()
                         .diagnostics()

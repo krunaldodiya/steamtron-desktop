@@ -119,7 +119,8 @@ The experiment branch implements the two-root model in the desktop app:
 - `RealPathLayout` now stores `content` and `launch`. Existing
   `real`/`base`/`mount` records remain readable as a legacy format.
 - Startup migrates every managed game that still has the 0.1.77 junction
-  layout:
+  layout. The scan runs synchronously in Tauri setup, before Play commands are
+  served, so a click cannot race the migration:
   1. remove the public junction at `common\<Game>`;
   2. rename `.steamtron-base\<Game>` back to `common\<Game>`;
   3. create `.steamtron-junction\<Game> -> common\<Game>`;
