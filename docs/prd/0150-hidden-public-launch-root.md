@@ -3,8 +3,9 @@
 - Status: active
 - Date: 2026-11-26
 - Branch: `poc/hidden-public-launch-root` (not merged into `main`)
-- Phase: implementation verified on the experiment branch (migration, FC5
-  Play/Stop, Little Nightmares backup/uninstall/restore). Not merged.
+- Phase: all runtime gates passed on the experiment branch (17-game migration,
+  GTA/FC5/Max Payne/LN2/LN1 Play/Stop, Little Nightmares
+  backup/uninstall/restore, forced-crash repair). Not merged.
 - Areas: Windows overlay layout, library roots, appmanifest, Steam registration,
   backups/restores, security exclusions, Play/Stop lifecycle
 
@@ -202,10 +203,14 @@ Known implementation limits:
 ### Full feature (after POC)
 
 - [x] Library/Play/Steam/backups/restores use the correct root (code-level).
-- [ ] GTA, FC5, Max Payne, LN2 and a simple game pass (runtime). GTA and FC5
-      passed; Max Payne 3 and LN2 are still pending.
+- [x] GTA, FC5, Max Payne, LN2 and a simple game pass (runtime). All five
+      launched from the hidden root and returned to the content junction.
 - [x] Migration from 0.1.77 is implemented and reversible.
 - [ ] Crash/power-loss repair is verified (runtime).
+      Forced-crash repair is verified: after killing the wrapper and game
+      during Play, `common\Little Nightmares` stayed intact and restarting the
+      app recreated `.steamtron-junction\Little Nightmares`. Actual power-loss
+      was not simulated.
 - [x] Backup creation from the new layout and restore over an existing install
       both pass on Little Nightmares.
 
@@ -329,8 +334,45 @@ Little Nightmares (424840), backup and restore round trip:
   not counted as a game-window proof because the automation stopped it while
   the Play confirmation dialog was still being handled.
 
-Remaining runtime gates: Max Payne 3 and Little Nightmares II through the app,
-and crash/power-loss repair.
+Max Payne 3 (204100), app Play/Stop:
+
+- `PLAYMAXPAYNE3.EXE` ran from
+  `common\.steamtron-junction\Max Payne 3\Max Payne 3\PlayMaxPayne3.exe`.
+- Play log: hidden `mounted_at`, `mount_mode=mount-manager`.
+- Stop used the app confirmation; the launch junction returned to
+  `common\Max Payne 3`.
+- `PlayMaxPayne3.exe` SHA-256 stayed `f0ac2ac1…0a09762`.
+
+Little Nightmares II (860510), user-driven app Play/Stop:
+
+- User confirmed the game started and stopped successfully.
+- Fresh log: `mounted_at` the hidden root, `mount_mode=mount-manager`,
+  `exec` the hidden `Little Nightmares II.exe`.
+- Launch junction restored to `common\Little Nightmares II`; sidecar still
+  `content`/`launch`; no `stop-restore.log`.
+- `Little Nightmares II.exe` SHA-256 stayed `2920c170…bd1c9`.
+
+Little Nightmares (424840), app Play/Stop after the restore:
+
+- Play confirmation accepted; `LITTLENIGHTMARES.EXE` ran from the hidden path.
+- Play log: hidden `mounted_at`, `mount_mode=mount-manager`.
+- Stop confirmation accepted; launch junction restored to
+  `common\Little Nightmares`.
+- Executable SHA-256 stayed `02a06e91…f1485d`.
+
+Crash recovery (Little Nightmares):
+
+- Play mounted the hidden root and the user-visible game process started.
+- The wrapper, game process and app were force-killed without Stop; the
+  launch path disappeared, but `common\Little Nightmares` remained and its
+  executable hash stayed `02a06e91…f1485d`.
+- Restarting the app recreated
+  `.steamtron-junction\Little Nightmares -> common\Little Nightmares`; the
+  sidecar stayed `content`/`launch`, the library stayed installed, and the
+  hash was still unchanged.
+- Actual power loss was not simulated.
+
+Remaining runtime gates: none for the POC.
 
 Safety follow-up after the installed test build: commit `159e641` adds explicit
 run-marker guards to Move, Restore and Uninstall and uses the live-mount check
