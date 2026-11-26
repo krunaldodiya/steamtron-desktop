@@ -1,11 +1,11 @@
 # Hidden public launch root for managed games (POC)
 
-- Status: active
+- Status: done
 - Date: 2026-11-26
-- Branch: `poc/hidden-public-launch-root` (not merged into `main`)
-- Phase: all runtime gates passed on the experiment branch (17-game migration,
+- Branch: `poc/hidden-public-launch-root` (merged into `main`)
+- Phase: merged. All runtime gates passed (17-game migration,
   GTA/FC5/Max Payne/LN2/LN1 Play/Stop, Little Nightmares
-  backup/uninstall/restore, forced-crash repair). Not merged.
+  backup/uninstall/restore, forced-crash repair, running-game safety guard).
 - Areas: Windows overlay layout, library roots, appmanifest, Steam registration,
   backups/restores, security exclusions, Play/Stop lifecycle
 
@@ -206,11 +206,11 @@ Known implementation limits:
 - [x] GTA, FC5, Max Payne, LN2 and a simple game pass (runtime). All five
       launched from the hidden root and returned to the content junction.
 - [x] Migration from 0.1.77 is implemented and reversible.
-- [ ] Crash/power-loss repair is verified (runtime).
-      Forced-crash repair is verified: after killing the wrapper and game
-      during Play, `common\Little Nightmares` stayed intact and restarting the
-      app recreated `.steamtron-junction\Little Nightmares`. Actual power-loss
-      was not simulated.
+- [x] Crash/power-loss repair is verified (runtime). Forced-crash repair is
+       verified: after killing the wrapper and game during Play,
+       `common\Little Nightmares` stayed intact and restarting the app
+       recreated `.steamtron-junction\Little Nightmares`. Actual power-loss
+       was not simulated.
 - [x] Backup creation from the new layout and restore over an existing install
       both pass on Little Nightmares.
 
@@ -268,7 +268,7 @@ GTA V Enhanced POC, executed on 2026-11-26 before the implementation pause:
 - Far Cry 5 POC: not run; paused for PRD review.
 - No app code was changed; `main` remains 0.1.77.
 
-Branch build verification, 2026-11-26:
+Runtime test build (`d869e85`), 2026-11-26:
 
 - Windows CI run `45791546643` passed; installer
   `SteamTron_0.1.77_x64-setup.exe` SHA-256
@@ -281,6 +281,19 @@ Branch build verification, 2026-11-26:
   every `.steamtron-junction\<Game>` is a junction to it, every sidecar has
   `content`/`launch`, legacy `.steamtron-base` folders are gone, and
   `.steamtron-mount` does not exist.
+
+Final pre-merge build (`f9cb5cd`, Windows CI run `45802074030`):
+
+- Installer SHA-256
+  `c162c62557c6beb4329911bc0d5db62cdd7158cd4c881c4be306d2cedf529f7d`;
+  installed `steamtron-desktop.exe` SHA-256
+  `05a335d94c4f6cdd6fc4f9272ea663b5b198dd84705f779422bf4f8974d04e12`.
+- Restart on the already-migrated layout was idempotent: no new migration,
+  layout verifier 17/17 PASS.
+- Running-game safety guard smoke test: with Little Nightmares playing from
+  the hidden mount, a restore was attempted. The app refused it with
+  `Stop the game before restoring its backup.`; the game kept running and its
+  executable hash stayed `02a06e91…f1485d`. Stop then restored the junction.
 
 GTA V Enhanced (3240220), app Play:
 
@@ -374,10 +387,9 @@ Crash recovery (Little Nightmares):
 
 Remaining runtime gates: none for the POC.
 
-Safety follow-up after the installed test build: commit `159e641` adds explicit
-run-marker guards to Move, Restore and Uninstall and uses the live-mount check
-during restore. The installed binary used for the evidence above was `d869e85`,
-so those guards are code-level until the next build.
+Safety guards from commit `159e641` are included in the final `f9cb5cd` build
+and were smoke-tested with a restore attempt while Little Nightmares was
+running.
 
 
 ## Decisions and risks
