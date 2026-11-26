@@ -235,10 +235,11 @@ fn planned_paths(appid: &str, include_game: bool) -> Result<Vec<SecurityPath>, S
                 path: game.display().to_string(),
                 excluded: false,
             });
-            // The real-path overlay keeps pristine content in a sibling base
-            // folder and mounts the union at a sibling mount folder. Defender
-            // resolves files served through that mount to these paths, so both
-            // must be excluded or the fix executables are quarantined.
+            // The two-root layout keeps pristine content in the public game
+            // folder and mounts the union at a hidden launch sibling. Defender
+            // resolves files served through that mount to those paths, so both
+            // must be excluded or the fix executables are quarantined. Keep
+            // covering the legacy base while a 0.1.77 layout is still present.
             if let (Some(parent), Some(name)) = (game.parent(), game.file_name()) {
                 let base = parent.join(".steamtron-base").join(name);
                 if base.is_dir() {
@@ -248,6 +249,16 @@ fn planned_paths(appid: &str, include_game: bool) -> Result<Vec<SecurityPath>, S
                         path: base.display().to_string(),
                         excluded: false,
                     });
+                }
+                if let Some(launch) = steamtron_core::library::launch_root(&game) {
+                    if launch.exists() {
+                        paths.push(SecurityPath {
+                            label: "Game launch".into(),
+                            exists: true,
+                            path: launch.display().to_string(),
+                            excluded: false,
+                        });
+                    }
                 }
             }
         }

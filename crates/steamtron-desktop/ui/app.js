@@ -2340,11 +2340,11 @@ function openManagedGameOptions(game) {
           ${catalog.note ? `<p class="pane-note">${escape(catalog.note)}</p>` : ""}
           <div class="fix-action-row"><button id="fix-apply-recommended"${catalog.requires_patch ? " disabled" : ""}>Apply recommended</button></div>
         </section>` : ""}
-        ${realPathSupported ? `<section class="fix-section"><h4>Real-path overlay</h4>
-          <p class="pane-note">Launcher games use a real-path overlay: the installed folder moves to a hidden base on the same drive, and a junction at the original path switches to the merged view only while the game runs. The installed game files are never modified.</p>
-          <p class="fix-path">${realPath.prepared ? escape(realPath.real) : "Not prepared. Play prepares it automatically when a launcher fix is detected."}</p>
-          ${realPath.prepared ? `<p class="fix-meta">Base: ${escape(realPath.base)}<br>Mount: ${escape(realPath.mount)}</p>` : ""}
-          <div class="fix-action-row"><button id="fix-realpath-restore" class="danger"${realPath.prepared ? "" : " disabled"}>Restore game folder</button></div>
+        ${realPathSupported ? `<section class="fix-section"><h4>Two-root overlay layout</h4>
+          <p class="pane-note">Launcher games keep their installed files in the normal game folder. A hidden launch folder next to it switches to the merged fixes view only while the game runs, so the installed files are never modified.</p>
+          <p class="fix-path">${realPath.prepared ? escape(realPath.launch) : "Not prepared. Play prepares it automatically."}</p>
+          ${realPath.prepared ? `<p class="fix-meta">Content: ${escape(realPath.content)}<br>Launch: ${escape(realPath.launch)}</p>` : ""}
+          <div class="fix-action-row"><button id="fix-realpath-restore" class="danger"${realPath.prepared ? "" : " disabled"}>Remove overlay layout</button></div>
         </section>` : ""}
         <section class="fix-section"><h4>GoldBerg emulator</h4>
           <p class="pane-note">Replaces this game's Steam library with the GoldBerg emulator. The emulator release is downloaded once and shared by every game; an existing steam_interfaces.txt is preserved and the installed game files are never changed.</p>
@@ -2432,8 +2432,8 @@ function openManagedGameOptions(game) {
         };
       }
       pane.querySelector("#fix-realpath-restore").onclick = async (event) => {
-        if (!(await confirmDialog({ title: "Restore game folder", message: "Move the game back from the hidden real-path base to its normal folder? Stop the game first. Fixes are not changed.", confirmLabel: "Restore", danger: true }))) return;
-        void run(event.currentTarget, () => invoke("restore_managed_real_path", { gameId: game.id }), "Game folder restored");
+        if (!(await confirmDialog({ title: "Remove overlay layout", message: "Remove the hidden launch folder and overlay record? The installed game files stay in their normal folder. Stop the game first. Fixes are not changed.", confirmLabel: "Remove", danger: true }))) return;
+        void run(event.currentTarget, () => invoke("restore_managed_real_path", { gameId: game.id }), "Overlay layout removed");
       };
       pane.querySelector("#fix-goldberg-apply").onclick = (event) => {
         showToast("Applying GoldBerg — first use downloads the emulator assets.");

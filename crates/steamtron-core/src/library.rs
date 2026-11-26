@@ -1304,6 +1304,18 @@ pub fn game_layout(drive_root: &Path, game: &Game) -> Result<GameLayout, Library
     })
 }
 
+/// Hidden public launch root for a managed game's content folder.
+///
+/// Content always stays in `common/<Game>`. The launcher-facing path is a
+/// sibling under `common/.steamtron-junction`: a junction while idle and a
+/// WinFsp mount while the game runs. Keeping the launch path and the final
+/// path identical avoids the launcher path-mismatch restart loop.
+pub fn launch_root(content: &Path) -> Option<PathBuf> {
+    let parent = content.parent()?;
+    let name = content.file_name()?;
+    Some(parent.join(".steamtron-junction").join(name))
+}
+
 /// Local SteamTron copy of the game's Lua manifest.
 ///
 /// Added games keep this next to their managed content so downloads,
@@ -1547,6 +1559,23 @@ mod tests {
             artwork: Artwork::default(),
             setup_completed_at: None,
         }
+    }
+
+    #[test]
+    fn launch_root_is_a_hidden_sibling_of_content() {
+        assert_eq!(
+            launch_root(Path::new(r"D:\Library\steamtronapps\common\Sample Game")),
+            Some(PathBuf::from(
+                r"D:\Library\steamtronapps\common\.steamtron-junction\Sample Game"
+            ))
+        );
+        assert_eq!(
+            launch_root(Path::new("/mnt/library/steamtronapps/common/Sample Game")),
+            Some(PathBuf::from(
+                "/mnt/library/steamtronapps/common/.steamtron-junction/Sample Game"
+            ))
+        );
+        assert_eq!(launch_root(Path::new("")), None);
     }
 
     #[test]

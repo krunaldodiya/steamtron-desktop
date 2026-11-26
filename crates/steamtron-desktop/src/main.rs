@@ -2158,9 +2158,7 @@ fn try_overlay_wrapper() -> Option<i32> {
         let mut real_path_guard: Option<JunctionGuard> = real_mount
             .as_ref()
             .map(|(link, base)| {
-                if std::fs::symlink_metadata(link).is_ok() {
-                    remove_junction(link)?;
-                }
+                clear_mountpoint(link)?;
                 Ok::<_, String>(JunctionGuard {
                     link: link.clone(),
                     base: base.clone(),
@@ -2531,7 +2529,7 @@ fn retarget_junction(link: &Path, target: &Path) -> Result<(), String> {
         ));
     }
     if std::fs::symlink_metadata(link).is_ok() {
-        remove_junction(link)?;
+        clear_mountpoint(link)?;
     }
     if let Some(parent) = link.parent() {
         std::fs::create_dir_all(parent)
@@ -2556,46 +2554,72 @@ fn retarget_junction(link: &Path, target: &Path) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn restore_real_path_layout(
-    game_id: &str,
-    layout: &RealPathLayout,
-) -> Result<serde_json::Value, String> {
-    if !layout.base.is_dir() {
-        return Err(format!(
-            "the prepared game base is missing: {}",
-            layout.base.display()
-        ));
-    }
-    let metadata = std::fs::symlink_metadata(&layout.real)
-        .map_err(|error| format!("could not inspect {}: {error}", layout.real.display()))?;
+fn restore_real_path_layout(game_id: &str) -> Result<serde_json::Value, String> {
     use std::os::windows::fs::MetadataExt;
-    if metadata.file_attributes() & 0x0000_0400 == 0 {
-        return Err(format!(
-            "{} is no longer a real-path junction; refusing to move the game folder",
-            layout.real.display()
-        ));
+
+    let Some(record) = read_layout_record(game_id) else {
+        return Ok(serde_json::json!({ "restored": false }));
+    };
+    match record {
+        LayoutRecord::Current(layout) => {
+            // Content already lives in the public folder in this layout. Only
+            // the hidden launch junction and the overlay record are removed.
+            clear_mountpoint(&layout.launch)?;
+            remove_real_path_record(game_id)?;
+            remove_empty_launch_root(&layout.launch);
+            layout_log(format!(
+                "detached game={game_id} content={} launch={}",
+                layout.content.display(),
+                layout.launch.display()
+            ));
+            Ok(serde_json::json!({
+                "restored": true,
+                "content": layout.content.display().to_string(),
+                "launch": layout.launch.display().to_string(),
+            }))
+        }
+        LayoutRecord::Legacy(layout) => {
+            if layout.base.is_dir() {
+                if let Ok(metadata) = std::fs::symlink_metadata(&layout.real) {
+                    if metadata.file_attributes() & 0x0000_0400 == 0 {
+                        return Err(format!(
+                            "{} is no longer a real-path junction; refusing to move the game folder",
+                            layout.real.display()
+                        ));
+                    }
+                    remove_junction(&layout.real)?;
+                }
+                std::fs::rename(&layout.base, &layout.real).map_err(|error| {
+                    format!(
+                        "could not move the game back to {}: {error}",
+                        layout.real.display()
+                    )
+                })?;
+            } else if let Ok(metadata) = std::fs::symlink_metadata(&layout.real) {
+                // The base is already gone; remove a dangling public junction
+                // instead of leaving a broken game path behind.
+                if is_reparse_point(&metadata) {
+                    remove_junction(&layout.real)?;
+                }
+            }
+            let _ = std::fs::remove_dir(&layout.mount);
+            if let Some(parent) = layout.mount.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+            if let Some(parent) = layout.base.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+            remove_real_path_record(game_id)?;
+            layout_log(format!(
+                "restored legacy game={game_id} content={}",
+                layout.real.display()
+            ));
+            Ok(serde_json::json!({
+                "restored": true,
+                "content": layout.real.display().to_string(),
+            }))
+        }
     }
-    remove_junction(&layout.real)?;
-    if let Err(error) = std::fs::rename(&layout.base, &layout.real) {
-        let _ = retarget_junction(&layout.real, &layout.base);
-        return Err(format!(
-            "could not move the game back to {}: {error}",
-            layout.real.display()
-        ));
-    }
-    let mount_removed = std::fs::remove_dir(&layout.mount).is_ok();
-    if let Some(parent) = layout.mount.parent() {
-        let _ = std::fs::remove_dir(parent);
-    }
-    if let Some(parent) = layout.base.parent() {
-        let _ = std::fs::remove_dir(parent);
-    }
-    remove_real_path_record(game_id)?;
-    Ok(serde_json::json!({
-        "restored": true,
-        "real": layout.real.display().to_string(),
-        "mountRemoved": mount_removed,
-    }))
 }
 
 #[cfg(windows)]
@@ -2629,9 +2653,26 @@ impl Drop for JunctionGuard {
 #[cfg(windows)]
 #[derive(serde::Deserialize, serde::Serialize)]
 struct RealPathLayout {
+    content: PathBuf,
+    launch: PathBuf,
+}
+
+/// Sidecar written by 0.1.77 and earlier.
+///
+/// `real` was the public junction, `base` the hidden pristine content and
+/// `mount` the now-obsolete `.steamtron-mount` path.
+#[cfg(windows)]
+#[derive(serde::Deserialize)]
+struct LegacyRealPathLayout {
     real: PathBuf,
     base: PathBuf,
     mount: PathBuf,
+}
+
+#[cfg(windows)]
+enum LayoutRecord {
+    Current(RealPathLayout),
+    Legacy(LegacyRealPathLayout),
 }
 
 #[cfg(windows)]
@@ -2643,13 +2684,316 @@ fn real_path_record_path(game_id: &str) -> PathBuf {
 }
 
 #[cfg(windows)]
-fn real_path_layout(game_id: &str) -> Option<RealPathLayout> {
+fn read_layout_record(game_id: &str) -> Option<LayoutRecord> {
     let bytes = std::fs::read(real_path_record_path(game_id)).ok()?;
-    let layout: RealPathLayout = serde_json::from_slice(&bytes).ok()?;
-    if !layout.base.is_dir() {
-        return None;
+    if let Ok(layout) = serde_json::from_slice::<RealPathLayout>(&bytes) {
+        return Some(LayoutRecord::Current(layout));
     }
-    Some(layout)
+    serde_json::from_slice::<LegacyRealPathLayout>(&bytes)
+        .ok()
+        .map(LayoutRecord::Legacy)
+}
+
+/// Read-only view of a prepared layout.
+///
+/// A legacy record is mapped to its current paths in memory but is not
+/// migrated here: Play and startup call [`ensure_real_path`], which owns the
+/// on-disk migration. Read paths must never rename a game folder.
+#[cfg(windows)]
+fn real_path_layout(game_id: &str) -> Option<RealPathLayout> {
+    match read_layout_record(game_id)? {
+        LayoutRecord::Current(layout) => layout.content.is_dir().then_some(layout),
+        LayoutRecord::Legacy(layout) => layout.base.is_dir().then(|| RealPathLayout {
+            content: layout.base,
+            launch: layout.real,
+        }),
+    }
+}
+
+#[cfg(windows)]
+fn launch_root_for(content: &Path) -> Option<PathBuf> {
+    steamtron_core::library::launch_root(content)
+}
+
+#[cfg(windows)]
+fn remove_empty_launch_root(launch: &Path) {
+    if let Some(parent) = launch.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+}
+
+#[cfg(windows)]
+fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    metadata.file_attributes() & 0x0000_0400 != 0
+}
+
+/// Remove an idle junction or a leftover empty mount directory.
+///
+/// A WinFsp mount that was killed can leave an empty plain directory instead
+/// of a reparse point. `rmdir` only removes the junction, so the empty
+/// directory needs its own cleanup before the next mount/restore.
+#[cfg(windows)]
+fn clear_mountpoint(path: &Path) -> Result<(), String> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "could not inspect mountpoint {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    if is_reparse_point(&metadata) {
+        return remove_junction(path);
+    }
+    if metadata.is_dir() {
+        let empty = std::fs::read_dir(path)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if empty {
+            return std::fs::remove_dir(path)
+                .map_err(|error| format!("could not remove {}: {error}", path.display()));
+        }
+        return Err(format!(
+            "{} is a live mount or a non-empty folder; stop the game first",
+            path.display()
+        ));
+    }
+    Err(format!(
+        "{} is not a junction or directory",
+        path.display()
+    ))
+}
+
+#[cfg(windows)]
+fn layout_log(message: String) {
+    use std::io::Write;
+
+    let target = steamtron_core::paths::layout()
+        .diagnostics()
+        .join("overlay-layout.log");
+    if let Some(parent) = target.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&target)
+    {
+        let _ = writeln!(file, "{stamp} {message}");
+    }
+}
+
+#[cfg(windows)]
+fn retarget_junction_with_retry(
+    link: &Path,
+    target: &Path,
+    attempts: usize,
+    delay: std::time::Duration,
+) -> Result<(), String> {
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        match retarget_junction(link, target) {
+            Ok(()) => {
+                if attempt > 0 {
+                    layout_log(format!(
+                        "junction recovered after {} attempts link={} target={}",
+                        attempt + 1,
+                        link.display(),
+                        target.display()
+                    ));
+                }
+                return Ok(());
+            }
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(delay);
+        }
+    }
+    Err(last_error.unwrap_or_else(|| format!("could not create junction {}", link.display())))
+}
+
+/// Point `link` at `target`, leaving an already-correct junction untouched.
+#[cfg(windows)]
+fn ensure_junction(link: &Path, target: &Path) -> Result<(), String> {
+    if let Ok(metadata) = std::fs::symlink_metadata(link) {
+        if is_reparse_point(&metadata) {
+            let correct = std::fs::read_link(link)
+                .ok()
+                .is_some_and(|existing| paths_equivalent(&existing, target));
+            if correct && link.is_dir() {
+                return Ok(());
+            }
+        } else if link.is_dir() {
+            let empty = std::fs::read_dir(link)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+            if !empty {
+                // A live WinFsp mount or a plain folder must never be deleted
+                // by the idle-layout repair.
+                return Err(format!(
+                    "{} is not an idle junction; stop the game before repairing the overlay",
+                    link.display()
+                ));
+            }
+        }
+    }
+    retarget_junction(link, target)
+}
+
+#[cfg(windows)]
+fn ensure_junction_with_retry(
+    link: &Path,
+    target: &Path,
+    attempts: usize,
+    delay: std::time::Duration,
+) -> Result<(), String> {
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        match ensure_junction(link, target) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(delay);
+        }
+    }
+    Err(last_error.unwrap_or_else(|| format!("could not create junction {}", link.display())))
+}
+
+/// Rewrite a command argument from the content root to the launch root.
+///
+/// The overlay wrapper also rewrites arguments it can canonicalize, but the
+/// launch path must already be correct before the mount exists (and for
+/// content roots that are themselves junctions). Case-insensitive because
+/// Windows paths are.
+#[cfg(windows)]
+fn launch_arg(value: &str, layout: &RealPathLayout) -> String {
+    let text = value.strip_prefix(r"\\?\").unwrap_or(value);
+    let content = normalized_windows_path(&layout.content)
+        .to_string_lossy()
+        .to_string();
+    let launch = normalized_windows_path(&layout.launch)
+        .to_string_lossy()
+        .to_string();
+    if text.eq_ignore_ascii_case(&content) {
+        return launch;
+    }
+    let prefix = format!("{content}\\");
+    if text.len() > prefix.len()
+        && text
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
+    {
+        return format!("{launch}\\{}", &text[prefix.len()..]);
+    }
+    value.to_owned()
+}
+
+/// Convert the 0.1.77 `common/<Game> -> .steamtron-base/<Game>` layout into
+/// the two-root layout: real content in `common/<Game>` and a hidden launch
+/// junction at `.steamtron-junction/<Game>`.
+///
+/// Every step is a same-volume rename or junction operation. The content is
+/// never copied, and an interrupted migration is safe to retry: if the base is
+/// already gone and the public folder is real, only the launch junction and
+/// sidecar are written.
+#[cfg(windows)]
+fn migrate_legacy_layout(
+    game_id: &str,
+    layout: &LegacyRealPathLayout,
+) -> Result<RealPathLayout, String> {
+    let real = normalized_windows_path(&layout.real);
+    let base = normalized_windows_path(&layout.base);
+    let mount = normalized_windows_path(&layout.mount);
+    let name = real
+        .file_name()
+        .ok_or_else(|| format!("game folder has no name: {}", real.display()))?;
+    if base.file_name() != Some(name)
+        || base.parent().and_then(Path::file_name) != Some(std::ffi::OsStr::new(".steamtron-base"))
+    {
+        return Err(format!(
+            "legacy base path does not match the game folder: {} (base {})",
+            real.display(),
+            base.display()
+        ));
+    }
+    if base.is_dir() {
+        if let Ok(metadata) = std::fs::symlink_metadata(&real) {
+            if is_reparse_point(&metadata) {
+                let target = std::fs::read_link(&real).ok();
+                if target.as_deref() == Some(mount.as_path()) {
+                    layout_log(format!(
+                        "migrating a stale mount path game={game_id} real={}",
+                        real.display()
+                    ));
+                }
+                remove_junction(&real)?;
+            } else if real.is_dir() {
+                let empty = std::fs::read_dir(&real)
+                    .map(|mut entries| entries.next().is_none())
+                    .unwrap_or(false);
+                if !empty {
+                    return Err(format!(
+                        "both the public game folder and the legacy base exist: {}",
+                        real.display()
+                    ));
+                }
+                std::fs::remove_dir(&real).map_err(|error| {
+                    format!("could not remove stale mount path {}: {error}", real.display())
+                })?;
+            }
+        } else if real.exists() {
+            return Err(format!(
+                "the public game path is not a directory: {}",
+                real.display()
+            ));
+        }
+        if let Some(parent) = real.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        }
+        std::fs::rename(&base, &real).map_err(|error| {
+            format!(
+                "could not move the legacy base to {}: {error}",
+                real.display()
+            )
+        })?;
+    } else if !real.is_dir() {
+        return Err(format!(
+            "both the legacy base and the public game folder are missing: {}",
+            real.display()
+        ));
+    }
+    let launch = launch_root_for(&real)
+        .ok_or_else(|| format!("could not derive the launch root for {}", real.display()))?;
+    ensure_junction_with_retry(&launch, &real, 40, std::time::Duration::from_millis(250))?;
+    let current = RealPathLayout {
+        content: real.clone(),
+        launch: launch.clone(),
+    };
+    save_real_path_layout(game_id, &current)?;
+    let _ = std::fs::remove_dir(&mount);
+    if let Some(parent) = mount.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+    if let Some(parent) = base.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+    layout_log(format!(
+        "migrated game={game_id} content={} launch={}",
+        real.display(),
+        launch.display()
+    ));
+    Ok(current)
 }
 
 #[cfg(windows)]
@@ -2664,10 +3008,23 @@ fn remove_real_path_record(game_id: &str) -> Result<(), String> {
 
 #[cfg(windows)]
 fn real_path_status(game: &steamtron_core::library::Game) -> serde_json::Value {
-    match real_path_layout(&game.id) {
-        Some(layout) => serde_json::json!({
+    match read_layout_record(&game.id) {
+        Some(LayoutRecord::Current(layout)) => serde_json::json!({
             "supported": true,
-            "prepared": true,
+            "prepared": layout.content.is_dir(),
+            "content": layout.content.display().to_string(),
+            "launch": layout.launch.display().to_string(),
+            // Compatibility aliases for older UI snapshots.
+            "real": layout.launch.display().to_string(),
+            "base": layout.content.display().to_string(),
+            "mount": layout.launch.display().to_string(),
+        }),
+        Some(LayoutRecord::Legacy(layout)) => serde_json::json!({
+            "supported": true,
+            "prepared": layout.base.is_dir(),
+            "legacy": true,
+            "content": layout.base.display().to_string(),
+            "launch": layout.real.display().to_string(),
             "real": layout.real.display().to_string(),
             "base": layout.base.display().to_string(),
             "mount": layout.mount.display().to_string(),
@@ -2769,7 +3126,25 @@ fn repair_game_root(root: &Path) -> Result<bool, String> {
     if !base.is_dir() {
         return Ok(false);
     }
-    retarget_junction(&real, &base)?;
+    if let Ok(metadata) = std::fs::symlink_metadata(&real) {
+        if is_reparse_point(&metadata) {
+            remove_junction(&real)?;
+        } else {
+            return Err(format!(
+                "the public game path is not a directory: {}",
+                real.display()
+            ));
+        }
+    }
+    std::fs::rename(&base, &real).map_err(|error| {
+        format!(
+            "could not move the game content back to {}: {error}",
+            real.display()
+        )
+    })?;
+    if let Some(base_parent) = base.parent() {
+        let _ = std::fs::remove_dir(base_parent);
+    }
     Ok(real.is_dir())
 }
 
@@ -2842,7 +3217,7 @@ fn real_path_status(_game: &steamtron_core::library::Game) -> serde_json::Value 
 #[cfg(windows)]
 fn real_path_has_content(game_id: &str) -> bool {
     real_path_layout(game_id).is_some_and(|layout| {
-        std::fs::read_dir(&layout.base)
+        std::fs::read_dir(&layout.content)
             .map(|mut entries| entries.next().is_some())
             .unwrap_or(false)
     })
@@ -2855,27 +3230,38 @@ fn real_path_has_content(_game_id: &str) -> bool {
 
 /// Make the installed path safe to rename during a backup restore.
 ///
-/// A real-path layout leaves a junction at the game root. `std::fs::rename`
-/// cannot move that reparse point to the restore staging folder (Windows
-/// returns access denied). Put a valid base back in place, or remove a stale
-/// junction and its record, before the restore commits.
+/// The two-root layout keeps content at the installed path, so the hidden
+/// launch junction must be removed before the content folder is renamed and
+/// recreated once the restore commits. A legacy record is converted first:
+/// its content is still in `.steamtron-base` and must move back before the
+/// restore can replace the public folder.
 #[cfg(windows)]
 fn prepare_target_for_restore(game_id: &str, root: &Path) -> Result<(), String> {
-    let record = real_path_record_path(game_id);
-    if let Ok(bytes) = std::fs::read(&record) {
-        if let Ok(layout) = serde_json::from_slice::<RealPathLayout>(&bytes) {
-            if paths_equivalent(&layout.real, root) {
-                if layout.base.is_dir() {
-                    restore_real_path_layout(game_id, &layout)?;
-                    return Ok(());
-                }
-                remove_real_path_record(game_id)?;
-            }
+    match read_layout_record(game_id) {
+        Some(LayoutRecord::Legacy(_)) => {
+            restore_real_path_layout(game_id)?;
+            return Ok(());
         }
+        Some(LayoutRecord::Current(layout)) => {
+            if paths_equivalent(&layout.content, root) {
+                // Removes an idle junction or a stale empty mount directory;
+                // refuses a live/non-empty mount instead of renaming content
+                // underneath a running game.
+                clear_mountpoint(&layout.launch)?;
+                return Ok(());
+            }
+            // A stale record for another folder must not block the restore.
+            if let Ok(metadata) = std::fs::symlink_metadata(&layout.launch) {
+                if is_reparse_point(&metadata) {
+                    let _ = remove_junction(&layout.launch);
+                }
+            }
+            remove_real_path_record(game_id)?;
+        }
+        None => {}
     }
-    use std::os::windows::fs::MetadataExt;
     if let Ok(metadata) = std::fs::symlink_metadata(root) {
-        if metadata.file_attributes() & 0x0000_0400 != 0 {
+        if is_reparse_point(&metadata) {
             remove_junction(root)?;
         }
     }
@@ -2896,13 +3282,43 @@ fn repair_real_path_junction(game_id: &str) {
     if running {
         return;
     }
-    let Some(layout) = real_path_layout(game_id) else {
-        return;
-    };
-    let target = std::fs::read_link(&layout.real).ok();
-    let points_at_mount = target.as_deref() == Some(layout.mount.as_path());
-    if points_at_mount || !layout.real.is_dir() {
-        let _ = retarget_junction(&layout.real, &layout.base);
+    match read_layout_record(game_id) {
+        Some(LayoutRecord::Current(layout)) => {
+            if !layout.content.is_dir() {
+                return;
+            }
+            match std::fs::symlink_metadata(&layout.launch) {
+                Err(_) => {
+                    let _ = ensure_junction_with_retry(
+                        &layout.launch,
+                        &layout.content,
+                        4,
+                        std::time::Duration::from_millis(100),
+                    );
+                }
+                Ok(metadata) if is_reparse_point(&metadata) => {
+                    let correct = std::fs::read_link(&layout.launch)
+                        .ok()
+                        .is_some_and(|existing| paths_equivalent(&existing, &layout.content));
+                    if !correct || !layout.launch.is_dir() {
+                        let _ = retarget_junction_with_retry(
+                            &layout.launch,
+                            &layout.content,
+                            4,
+                            std::time::Duration::from_millis(100),
+                        );
+                    }
+                }
+                Ok(_) => {
+                    // A live WinFsp mount or a plain folder. Do not delete it.
+                }
+            }
+        }
+        Some(LayoutRecord::Legacy(_)) => {
+            // 0.1.77 records are migrated by ensure_real_path at startup or
+            // Play. Repairing the old junction here would race that migration.
+        }
+        None => {}
     }
 }
 
@@ -2916,7 +3332,16 @@ fn save_real_path_layout(game_id: &str, layout: &RealPathLayout) -> Result<(), S
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     }
-    let bytes = serde_json::to_vec_pretty(layout).map_err(|error| error.to_string())?;
+    // New records store only `content`/`launch`. An older build cannot parse
+    // this shape, so it rebuilds its own `.steamtron-base` layout on startup
+    // instead of misreading the hidden launch path as the game folder.
+    let content = layout.content.display().to_string();
+    let launch = layout.launch.display().to_string();
+    let payload = serde_json::json!({
+        "content": content,
+        "launch": launch,
+    });
+    let bytes = serde_json::to_vec_pretty(&payload).map_err(|error| error.to_string())?;
     std::fs::write(&path, bytes)
         .map_err(|error| format!("could not write {}: {error}", path.display()))
 }
@@ -2926,125 +3351,168 @@ fn ensure_real_path(
     game: &steamtron_core::library::Game,
     force: bool,
 ) -> Result<Option<RealPathLayout>, String> {
-    use std::os::windows::fs::MetadataExt;
-
     if game.installation.mode != steamtron_core::library::InstallMode::Managed {
         return Ok(None);
     }
-    if let Some(layout) = real_path_layout(&game.id) {
-        // A crash or forced exit can leave the real path pointing at a mount
-        // that no longer exists. Put it back on the base before planning.
-        if !layout.real.is_dir() && layout.base.is_dir() {
-            retarget_junction(&layout.real, &layout.base).map_err(|error| {
+    match read_layout_record(&game.id) {
+        Some(LayoutRecord::Current(layout)) => {
+            if !layout.content.is_dir() {
+                // A sidecar can be written just before an interrupted move.
+                // If the legacy base still holds the content, move it back
+                // instead of reporting the game as missing.
+                let recovered = layout
+                    .content
+                    .file_name()
+                    .and_then(|name| {
+                        layout
+                            .content
+                            .parent()
+                            .map(|parent| parent.join(".steamtron-base").join(name))
+                    })
+                    .filter(|base| base.is_dir());
+                if let Some(base) = recovered {
+                    if let Ok(metadata) = std::fs::symlink_metadata(&layout.content) {
+                        if is_reparse_point(&metadata) {
+                            remove_junction(&layout.content)?;
+                        }
+                    }
+                    std::fs::rename(&base, &layout.content).map_err(|error| {
+                        format!(
+                            "could not recover the game content to {}: {error}",
+                            layout.content.display()
+                        )
+                    })?;
+                    if let Some(parent) = base.parent() {
+                        let _ = std::fs::remove_dir(parent);
+                    }
+                    layout_log(format!(
+                        "recovered content game={} path={}",
+                        game.id,
+                        layout.content.display()
+                    ));
+                } else {
+                    return Err(format!(
+                        "the game content folder is missing: {}",
+                        layout.content.display()
+                    ));
+                }
+            }
+            ensure_junction_with_retry(
+                &layout.launch,
+                &layout.content,
+                40,
+                std::time::Duration::from_millis(250),
+            )
+            .map_err(|error| {
                 format!(
-                    "could not repair the real-path junction {} -> {}: {error}",
-                    layout.real.display(),
-                    layout.base.display()
+                    "could not prepare the launch junction {} -> {}: {error}",
+                    layout.launch.display(),
+                    layout.content.display()
                 )
             })?;
+            return Ok(Some(layout));
         }
-        if !layout.real.is_dir() {
-            return Err(format!(
-                "the real-path game folder is missing: {} (base {})",
-                layout.real.display(),
-                layout.base.display()
-            ));
+        Some(LayoutRecord::Legacy(layout)) => {
+            return migrate_legacy_layout(&game.id, &layout).map(Some);
         }
-        return Ok(Some(layout));
+        None => {}
     }
     if !force && !needs_real_path(game) {
         return Ok(None);
     }
-    let real = normalized_windows_path(&game.installation.root);
-    if !real.is_dir() {
+    let content = normalized_windows_path(&game.installation.root);
+    if !content.is_dir() {
         return Ok(None);
     }
-    let parent = real
-        .parent()
-        .ok_or_else(|| format!("game has no parent folder: {}", real.display()))?;
-    let name = real
+    let name = content
         .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("game folder has no name: {}", real.display()))?;
-    let computed_base = parent.join(".steamtron-base").join(name);
-    let mount = parent.join(".steamtron-mount").join(name);
-    let metadata = std::fs::symlink_metadata(&real)
-        .map_err(|error| format!("could not inspect {}: {error}", real.display()))?;
-    let reparse = metadata.file_attributes() & 0x0000_0400 != 0;
-    let base = if reparse {
-        let target = std::fs::read_link(&real)
-            .map_err(|error| format!("could not read junction {}: {error}", real.display()))?;
-        if target.is_dir() && target != mount {
-            target
-        } else {
-            computed_base
+        .ok_or_else(|| format!("game folder has no name: {}", content.display()))?;
+    // A public junction without a sidecar is the 0.1.77 layout after a lost
+    // record. Migrate it instead of burying the junction target again.
+    if let Ok(metadata) = std::fs::symlink_metadata(&content) {
+        if is_reparse_point(&metadata) {
+            let target = std::fs::read_link(&content).map_err(|error| {
+                format!("could not read junction {}: {error}", content.display())
+            })?;
+            let legacy_base = content
+                .parent()
+                .map(|parent| parent.join(".steamtron-base").join(name));
+            if legacy_base
+                .as_ref()
+                .is_some_and(|base| paths_equivalent(base, &target))
+                && target.is_dir()
+            {
+                let mount = content
+                    .parent()
+                    .map(|parent| parent.join(".steamtron-mount").join(name))
+                    .unwrap_or_default();
+                let legacy = LegacyRealPathLayout {
+                    real: content,
+                    base: target,
+                    mount,
+                };
+                return migrate_legacy_layout(&game.id, &legacy).map(Some);
+            }
         }
-    } else {
-        if computed_base.exists() {
-            return Err(format!(
-                "real-path base already exists: {}",
-                computed_base.display()
-            ));
-        }
-        if let Some(base_parent) = computed_base.parent() {
-            std::fs::create_dir_all(base_parent)
-                .map_err(|error| format!("could not create {}: {error}", base_parent.display()))?;
-        }
-        std::fs::rename(&real, &computed_base).map_err(|error| {
-            format!(
-                "could not move the game to {}: {error}",
-                computed_base.display()
-            )
-        })?;
-        if let Err(error) = retarget_junction(&real, &computed_base) {
-            // The game content is already in the base folder; put it back
-            // rather than leaving the real path missing.
-            let _ = std::fs::rename(&computed_base, &real);
-            return Err(format!(
-                "could not prepare the real-path junction for {}: {error}",
-                real.display()
-            ));
-        }
-        computed_base
-    };
+    }
+    let launch = launch_root_for(&content)
+        .ok_or_else(|| format!("could not derive the launch root for {}", content.display()))?;
+    ensure_junction_with_retry(&launch, &content, 40, std::time::Duration::from_millis(250))?;
     let layout = RealPathLayout {
-        real,
-        base,
-        mount,
+        content: content.clone(),
+        launch: launch.clone(),
     };
     save_real_path_layout(&game.id, &layout)?;
+    layout_log(format!(
+        "prepared game={} content={} launch={}",
+        game.id,
+        content.display(),
+        launch.display()
+    ));
     Ok(Some(layout))
 }
 
-/// Give every managed game the same `.steamtron-base` real-path layout.
+/// Give every managed game the same two-root layout.
 ///
-/// This runs at startup and is idempotent: games already on a base are only
-/// repaired, linked games are left alone, and a failure is logged so Play can
-/// fall back to the drive-letter overlay for that game.
+/// Content stays in `common/<Game>`; the hidden launch root is created at
+/// `common/.steamtron-junction/<Game>`. This runs at startup and is
+/// idempotent: a legacy 0.1.77 layout is migrated once, an existing junction
+/// is left untouched, linked games are ignored, and a failure is logged so
+/// Play can fall back to the drive-letter overlay for that game.
 #[cfg(windows)]
 fn ensure_all_real_path_layouts() {
     let Ok(library) = steamtron_core::library::Library::load() else {
         return;
     };
+    let mut migrated = 0usize;
+    let mut failed = 0usize;
     let mut mount_parents: Vec<PathBuf> = Vec::new();
     for game in library.games() {
         if game.installation.mode != steamtron_core::library::InstallMode::Managed {
             continue;
         }
-        if !game.installation.root.is_dir() {
-            continue;
+        let was_legacy = matches!(read_layout_record(&game.id), Some(LayoutRecord::Legacy(_)));
+        match ensure_real_path(game, true) {
+            Ok(Some(_)) => {
+                if was_legacy {
+                    migrated += 1;
+                }
+                repair_real_path_junction(&game.id);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                failed += 1;
+                eprintln!(
+                    "SteamTron: could not prepare the two-root layout for {}: {error}",
+                    game.title
+                );
+                layout_log(format!(
+                    "failed game={} title={} error={error}",
+                    game.id, game.title
+                ));
+            }
         }
-        if real_path_layout(&game.id).is_some() {
-            repair_real_path_junction(&game.id);
-        } else if let Err(error) = ensure_real_path(game, true) {
-            eprintln!(
-                "SteamTron: could not prepare the real-path layout for {}: {error}",
-                game.title
-            );
-        } else {
-            repair_real_path_junction(&game.id);
-        }
-        if let Some(layout) = real_path_layout(&game.id) {
+        if let Some(LayoutRecord::Legacy(layout)) = read_layout_record(&game.id) {
             remove_empty_mount_dir(&layout.mount);
             if let Some(parent) = layout.mount.parent() {
                 mount_parents.push(parent.to_path_buf());
@@ -3053,6 +3521,12 @@ fn ensure_all_real_path_layouts() {
     }
     for parent in mount_parents {
         let _ = std::fs::remove_dir(parent);
+    }
+    if migrated > 0 || failed > 0 {
+        layout_log(format!(
+            "startup layout scan migrated={migrated} failed={failed} managed={}",
+            library.games().len()
+        ));
     }
 }
 
@@ -3094,16 +3568,16 @@ fn restore_managed_real_path(game_id: String) -> Result<serde_json::Value, Strin
             .map_err(|_| "Game state lock failed.".to_string())?
             .contains_key(&game_id)
         {
-            return Err("Stop the game before restoring its game folder.".into());
+            return Err("Stop the game before removing its overlay layout.".into());
         }
         let library = Library::load().map_err(|error| error.to_string())?;
         let game = library
             .game(&game_id)
             .ok_or_else(|| format!("unknown game {game_id}"))?;
-        let layout = real_path_layout(&game.id).ok_or_else(|| {
-            "No real-path overlay is prepared for this game.".to_string()
-        })?;
-        restore_real_path_layout(&game.id, &layout)
+        if read_layout_record(&game.id).is_none() {
+            return Err("No real-path overlay is prepared for this game.".to_string());
+        }
+        restore_real_path_layout(&game.id)
     }
 }
 
@@ -3249,13 +3723,17 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
     };
     #[cfg(windows)]
     if let Some(layout) = real_path.as_ref() {
-        path_diagnostic("play-layout-real", &layout.real, "");
-        path_diagnostic("play-layout-base", &layout.base, "");
-        path_diagnostic("play-layout-mount", &layout.mount, "");
-        retarget_junction(&layout.real, &layout.base)
-            .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?;
+        path_diagnostic("play-layout-content", &layout.content, "");
+        path_diagnostic("play-layout-launch", &layout.launch, "");
+        ensure_junction_with_retry(
+            &layout.launch,
+            &layout.content,
+            20,
+            std::time::Duration::from_millis(250),
+        )
+        .map_err(|error| format!("Could not prepare the real-path overlay: {error}"))?;
         path_diagnostic("play-after-retarget-root", &game.installation.root, "");
-        path_diagnostic("play-after-retarget-real", &layout.real, "");
+        path_diagnostic("play-after-retarget-launch", &layout.launch, "");
     }
     let steam_root = steam::steam_root().ok();
     #[cfg(target_os = "windows")]
@@ -3330,14 +3808,14 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
                 "real_path={:?}",
                 real_path
                     .as_ref()
-                    .map(|layout| layout.real.display().to_string())
+                    .map(|layout| layout.launch.display().to_string())
             ),
         );
         // The real-path record can be missing after an interrupted overlay.
-        // The base folder is still the authoritative content.
+        // The content folder is still the authoritative content.
         if !repair_game_root(&game.installation.root)? {
             return Err(format!(
-                "game content folder does not exist: {} (base folder is missing)",
+                "game content folder does not exist: {} (content folder is missing)",
                 game.installation.root.display()
             ));
         }
@@ -3374,8 +3852,8 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         #[cfg(windows)]
         let (overlay_common, overlay_cwd) = match real_path.as_ref() {
             Some(layout) => (
-                layout.base.display().to_string(),
-                layout.real.display().to_string(),
+                layout.content.display().to_string(),
+                layout.launch.display().to_string(),
             ),
             None => (common.clone(), common.clone()),
         };
@@ -3390,7 +3868,13 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
                 .parent()
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| overlay_cwd.clone());
-            text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+            let text = text.strip_prefix(r"\\?\").unwrap_or(&text).to_string();
+            #[cfg(windows)]
+            let text = match real_path.as_ref() {
+                Some(layout) => launch_arg(&text, layout),
+                None => text,
+            };
+            text
         };
         let fixes_display = fixes_path.display().to_string();
         let steam_root_display = client_root.display().to_string();
@@ -3417,11 +3901,11 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         if let Some(layout) = real_path.as_ref() {
             command
                 .arg("--mountpoint")
-                .arg(&layout.mount)
+                .arg(&layout.launch)
                 .arg("--junction")
-                .arg(&layout.real)
+                .arg(&layout.launch)
                 .arg("--base")
-                .arg(&layout.base);
+                .arg(&layout.content);
         }
         // Linux hands the merged executable to Proton; Windows runs the
         // merged executable directly, so it must not pass --proton-path.
@@ -3438,8 +3922,24 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
                 .strip_prefix(r"\\?\")
                 .unwrap_or(&target_text)
                 .to_string();
+            #[cfg(windows)]
+            let target_arg = match real_path.as_ref() {
+                Some(layout) => launch_arg(&target_arg, layout),
+                None => target_arg,
+            };
             command.arg("--").arg(target_arg);
-            command.args(&plan.arguments);
+            #[cfg(windows)]
+            let arguments = plan
+                .arguments
+                .iter()
+                .map(|value| match real_path.as_ref() {
+                    Some(layout) => launch_arg(value, layout),
+                    None => value.clone(),
+                })
+                .collect::<Vec<_>>();
+            #[cfg(not(windows))]
+            let arguments = plan.arguments.clone();
+            command.args(&arguments);
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -3754,23 +4254,32 @@ async fn stop_managed(game_id: String) -> Result<(), String> {
 }
 
 /// A forced Stop kills the overlay wrapper, so its junction guard cannot run.
-/// Put the real path back on the base after the process tree is gone.
+/// Put the launch junction back on the content folder after the process tree
+/// is gone, and migrate a legacy 0.1.77 layout once the game is idle.
 #[cfg(windows)]
 fn restore_real_path_after_run(game_id: &str) {
-    let Some(layout) = real_path_layout(game_id) else {
+    let Some(record) = read_layout_record(game_id) else {
         return;
     };
-    if !layout.base.is_dir() {
+    let (link, target, legacy_mount) = match &record {
+        LayoutRecord::Current(layout) => (layout.launch.clone(), layout.content.clone(), None),
+        LayoutRecord::Legacy(layout) => (
+            layout.real.clone(),
+            layout.base.clone(),
+            Some(layout.mount.clone()),
+        ),
+    };
+    if !target.is_dir() {
         return;
     }
-    // Stop kills the overlay wrapper, so the real path may still be a live
+    // Stop kills the overlay wrapper, so the launch path may still be a live
     // mount when this runs. WinFsp can take several seconds to release the
     // volume after the process is terminated. Retry long enough to survive
     // that, rather than leaving the game folder missing.
     let mut restored = false;
     let mut last_error = None;
     for _ in 0..80 {
-        match retarget_junction(&layout.real, &layout.base) {
+        match retarget_junction(&link, &target) {
             Ok(()) => {
                 restored = true;
                 break;
@@ -3781,11 +4290,12 @@ fn restore_real_path_after_run(game_id: &str) {
     }
     if !restored {
         let message = format!(
-            "could not restore the real path after Stop: {} ({})",
-            layout.real.display(),
+            "could not restore the game layout after Stop: {} ({})",
+            link.display(),
             last_error.unwrap_or_else(|| "no attempt".into())
         );
         eprintln!("SteamTron: {message}");
+        layout_log(format!("stop-restore failed game={game_id} {message}"));
         let path = steamtron_core::paths::layout()
             .diagnostics_for(game_id)
             .join("stop-restore.log");
@@ -3794,9 +4304,20 @@ fn restore_real_path_after_run(game_id: &str) {
         }
         let _ = std::fs::write(&path, message);
     }
-    let _ = std::fs::remove_dir(&layout.mount);
-    if let Some(parent) = layout.mount.parent() {
-        let _ = std::fs::remove_dir(parent);
+    if let Some(mount) = legacy_mount {
+        let _ = std::fs::remove_dir(&mount);
+        if let Some(parent) = mount.parent() {
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+    if restored {
+        if let LayoutRecord::Legacy(layout) = &record {
+            if let Err(error) = migrate_legacy_layout(game_id, layout) {
+                layout_log(format!(
+                    "stop-migration failed game={game_id} error={error}"
+                ));
+            }
+        }
     }
 }
 
@@ -4240,9 +4761,8 @@ fn library_json(library: &steamtron_core::library::Library) -> serde_json::Value
                 && std::fs::read_dir(root)
                     .map(|mut entries| entries.next().is_some())
                     .unwrap_or(false);
-            // During Play the real path is briefly moved between the base and
-            // the mounted union. A snapshot taken in that window must not make
-            // an installed game look like a download.
+            // During Play the hidden launch path is a mount; the content stays
+            // in the public game folder, so the installed snapshot is stable.
             let installed = game.installation.confirmed
                 && (root_has_content || real_path_has_content(&game.id));
             value["installed"] = serde_json::json!(installed);
@@ -6309,6 +6829,13 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
         steamtron_library::backup::import_backup_entry(&mut library, &drive.root, &folder)
             .map_err(|error| error.to_string())?
     };
+    if managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(&target_game.id))
+        .unwrap_or(true)
+    {
+        return Err("Stop the game before restoring its backup.".into());
+    }
     let target_root = target_game.installation.root.clone();
     target_game.fixes_enabled = manifest
         .get("fixes_enabled")
@@ -6554,6 +7081,15 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     // Save writes the local appmanifest from the live entry, so the restored
     // config contains the targets and settings actually selected here.
     library.save().map_err(|error| error.to_string())?;
+    // prepare_target_for_restore removes the hidden launch junction before the
+    // content folder is renamed; recreate it for the restored content.
+    #[cfg(windows)]
+    if let Err(error) = ensure_real_path(&game, true) {
+        eprintln!(
+            "SteamTron: could not prepare the overlay layout after restoring {}: {error}",
+            game.title
+        );
+    }
     let _ = std::fs::remove_dir_all(&staging_cleanup);
     emit_operation_at(&app, "restore", "", "done", "done", "Restore complete", 100.0);
     let library = Library::load().map_err(|error| error.to_string())?;
@@ -6570,9 +7106,25 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
 
     require_auth()?;
     let mut library = Library::load().map_err(|error| error.to_string())?;
-    let mut game = library.game(&game_id).cloned().ok_or_else(|| "unknown game".to_string())?;
-    let drive = library.drives().iter().find(|drive| drive.id == drive_id).cloned().ok_or_else(|| "unknown drive".to_string())?;
-    let layout = steamtron_core::library::game_layout(&drive.root, &game).map_err(|error| error.to_string())?;
+    let mut game = library
+        .game(&game_id)
+        .cloned()
+        .ok_or_else(|| "unknown game".to_string())?;
+    if managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(&game_id))
+        .unwrap_or(true)
+    {
+        return Err("Stop the game before moving its install folder.".into());
+    }
+    let drive = library
+        .drives()
+        .iter()
+        .find(|drive| drive.id == drive_id)
+        .cloned()
+        .ok_or_else(|| "unknown drive".to_string())?;
+    let layout = steamtron_core::library::game_layout(&drive.root, &game)
+        .map_err(|error| error.to_string())?;
     if paths_equivalent(&game.installation.root, &layout.content) {
         return Err("The game is already on that drive.".into());
     }
@@ -6580,10 +7132,8 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
         return Err("A game folder already exists on the target drive.".into());
     }
     #[cfg(windows)]
-    if let Some(real_path) = real_path_layout(&game.id) {
-        restore_real_path_layout(&game.id, &real_path)
-            .map_err(|error| format!("Could not restore the real-path overlay: {error}"))?;
-    }
+    restore_real_path_layout(&game.id)
+        .map_err(|error| format!("Could not remove the overlay layout: {error}"))?;
     if let Some(parent) = layout.content.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -6602,8 +7152,19 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
     game.installation.root = layout.content;
     game.installation.manifest = layout.manifest;
     game.installation.mode = steamtron_core::library::InstallMode::Managed;
-    library.upsert_game(game).map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    let updated = game.clone();
+    library
+        .upsert_game(game)
+        .map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    if let Err(error) = ensure_real_path(&updated, true) {
+        eprintln!(
+            "SteamTron: could not prepare the overlay layout after moving {}: {error}",
+            updated.title
+        );
+    }
     Ok(library_json(&library))
 }
 
@@ -6618,6 +7179,13 @@ fn uninstall_managed_game_at(
         .game(game_id)
         .cloned()
         .ok_or_else(|| "unknown game".to_string())?;
+    if managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(game_id))
+        .unwrap_or(true)
+    {
+        return Err("Stop the game before uninstalling it.".into());
+    }
     if !game_process_pids(&game).is_empty() {
         return Err("Stop the game before uninstalling it.".into());
     }
@@ -6629,10 +7197,8 @@ fn uninstall_managed_game_at(
         return Err("Refusing to delete an unsafe game folder.".into());
     }
     #[cfg(windows)]
-    if let Some(real_path) = real_path_layout(&game.id) {
-        restore_real_path_layout(&game.id, &real_path)
-            .map_err(|error| format!("Could not restore the real-path overlay: {error}"))?;
-    }
+    restore_real_path_layout(&game.id)
+        .map_err(|error| format!("Could not remove the overlay layout: {error}"))?;
     let existed = root.exists();
     if existed {
         std::fs::remove_dir_all(&root).map_err(|error| format!("{}: {error}", root.display()))?;
@@ -6643,7 +7209,9 @@ fn uninstall_managed_game_at(
     game.installation.confirmed = false;
     game.launch_targets.clear();
     game.setup_completed_at = None;
-    library.upsert_game(game.clone()).map_err(|error| error.to_string())?;
+    library
+        .upsert_game(game.clone())
+        .map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
     Ok((game.title, existed))
 }
@@ -7541,6 +8109,13 @@ async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, Strin
             }
         }
     }
+    #[cfg(windows)]
+    if let Err(error) = restore_real_path_layout(&game_id) {
+        eprintln!(
+            "SteamTron: could not remove the overlay layout for {}: {error}",
+            game.title
+        );
+    }
     library.remove_game(&game_id);
     library.save().map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
@@ -7548,7 +8123,6 @@ async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, Strin
         "unregistered": unregistered,
     }))
 }
-
 
 #[tauri::command]
 async fn unlink_managed_game(game_id: String) -> Result<serde_json::Value, String> {
@@ -8136,6 +8710,8 @@ fn main() {
                 let _ = window.maximize();
             }
             setup_tray(app)?;
+            #[cfg(windows)]
+            ensure_all_real_path_layouts();
             std::thread::spawn(|| {
                 let _ = download::resolve_smd();
             });
@@ -8144,8 +8720,6 @@ fn main() {
                 steamtron_library::managed::cleanup_legacy_lua_files();
                 steamtron_library::managed::organize_manifest_store();
                 steamtron_library::managed::populate_missing_appmanifests();
-                #[cfg(windows)]
-                ensure_all_real_path_layouts();
                 let _ = std::fs::remove_file(
                     steamtron_core::paths::layout()
                         .diagnostics()
