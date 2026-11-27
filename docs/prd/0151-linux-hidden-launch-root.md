@@ -1,8 +1,10 @@
 # Linux hidden launch root for managed games
 
-- Status: draft
+- Status: active
 - Date: 2026-11-27
 - Branch: `poc/linux-hidden-launch-root` (not merged)
+- Phase: implementation complete on the branch. WSL mechanics verified; real
+  Linux GTA/FC5 gate pending.
 - Areas: Linux overlay backend, library roots, Play/Stop lifecycle, backups/restores
 
 ## Problem
@@ -80,20 +82,22 @@ Backups, restores, downloads and Verify continue to use `common/<Game>`.
 
 ### WSL / CI mechanics
 
-- [ ] `cargo check --workspace` and `cargo test -p steamtron-core` pass.
-- [ ] A dummy managed game starts with:
+- [x] `cargo check -p steamtron-desktop` (Linux) and
+      `cargo test -p steamtron-overlay` pass.
+- [x] A dummy managed game starts with:
       `common/<Game>` real content,
       `.steamtron-junction/<Game>` symlink while idle.
-- [ ] Play removes the symlink, mounts fuse-overlayfs at the hidden root,
+- [x] Play removes the symlink, mounts fuse-overlayfs at the hidden root,
       exposes a fixes marker over the content, and launches a process whose
       argv[0] and cwd are under the hidden root.
-- [ ] A write during Play copies up to the upper layer and leaves
+- [x] A write during Play copies up to the upper layer and leaves
       `common/<Game>` unchanged.
-- [ ] Stop unmounts and recreates the symlink pointing to `common/<Game>`.
+- [x] Stop unmounts and recreates the symlink pointing to `common/<Game>`.
 - [ ] Forcibly killing the wrapper/mount leaves content intact and a simulated
-      startup repair recreates the symlink.
+      startup repair recreates the symlink. (Wrapper code compiles; app-level
+      crash repair still needs a Linux UI run.)
 - [ ] A backup reads `common/<Game>`, and a restore replaces content then
-      recreates the symlink.
+      recreates the symlink. (Code path implemented; Linux app UI test pending.)
 - [ ] Windows CI still builds and the Windows 17/17 layout verifier passes.
 
 ### Real Linux gate (requires a Linux desktop)
@@ -108,28 +112,33 @@ Backups, restores, downloads and Verify continue to use `common/<Game>`.
 
 ## Verification
 
-Pending implementation. WSL can verify the FUSE/symlink lifecycle with a dummy
-game but cannot verify Steam/Proton, GPU, or launcher path validation.
+WSL2 mechanics test, 2026-11-27 (no WSLg, no Steam/Proton):
 
-### WSLg mechanics test
+- Environment: WSL2 kernel `6.18.58.1-microsoft-standard-WSL2`,
+  `/dev/fuse`, `fusermount3 3.18.2`, `fuse-overlayfs 1.13-dev`.
+- `cargo test -p steamtron-overlay` passed:
+  - `stable_launch_root_stays_identical_while_mounted`;
+  - `overlays_fixes_and_persists_writes`.
+  The first test uses a game folder containing a space, mounts at
+  `common/.steamtron-junction/Game Name`, verifies fixes precedence,
+  `argv[0]`/cwd are the hidden path, writes copy up to the upper layer, content
+  is untouched, unmount succeeds, and the idle symlink is recreated.
+- `cargo check -p steamtron-desktop` and `cargo build -p steamtron-desktop`
+  passed on Linux.
+- Real wrapper run against a dummy game:
+  - `mounted_at=<hidden path>`;
+  - `mount_mode=fuse-overlayfs`;
+  - `exec=<hidden path>/run.sh`;
+  - script observed `argv0` and cwd under the hidden path;
+  - fixes `run.sh` overrode content (`result=FIXED`);
+  - the write appeared in the upper layer, not in `common/<Game>`;
+  - wrapper exit `0`;
+  - launch symlink restored to `common/Game Name`.
 
-WSLg can run the Linux Tauri app and is useful for:
-
-- starting the app against a temporary WSL library root;
-- checking the Linux layout status UI and "Remove overlay layout";
-- creating/removing the idle symlink;
-- running the overlay wrapper manually against a dummy executable or shell
-  script, without Steam or Proton;
-- verifying the fixes overlay, copy-up, hidden argv[0]/cwd, Stop/crash restore,
-  and backup/restore directory handling.
-
-WSLg is not a game gate:
-
-- Proton/DXVK/VKD3D need a reliable Vulkan driver; WSLg's GPU stack is not a
-  substitute for a native Linux desktop.
-- GTA V and Far Cry 5 also depend on their launchers, DRM, input, audio and
-  anti-cheat behavior.
-- A Steam/Proton install inside WSL is not representative of the Linux target.
+Not yet verified: the Linux Tauri UI Play/Stop and backup/restore flows under
+WSLg, app-level crash repair, and the real Linux GTA/FC5/Steam/Proton gate.
+WSL cannot validate Steam/Proton, GPU, launcher path validation, input, audio
+or anti-cheat.
 
 The real Linux gate still requires a Linux desktop with Steam and Proton.
 

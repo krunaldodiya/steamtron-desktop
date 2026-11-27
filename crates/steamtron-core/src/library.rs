@@ -1563,6 +1563,7 @@ mod tests {
 
     #[test]
     fn launch_root_is_a_hidden_sibling_of_content() {
+        #[cfg(windows)]
         assert_eq!(
             launch_root(Path::new(r"D:\Library\steamtronapps\common\Sample Game")),
             Some(PathBuf::from(

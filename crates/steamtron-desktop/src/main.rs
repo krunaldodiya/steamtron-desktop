@@ -2147,14 +2147,14 @@ fn try_overlay_wrapper() -> Option<i32> {
         }
         let game = OverlayGame::new(common.clone(), fixes, Some(appid.clone()))
             .map_err(|error| error.to_string())?;
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         let real_mount = match (junction.as_deref(), base.as_deref()) {
             (Some(link), Some(base)) if Path::new(base).is_dir() => {
                 Some((PathBuf::from(link), PathBuf::from(base)))
             }
             _ => None,
         };
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         let mut real_path_guard: Option<JunctionGuard> = real_mount
             .as_ref()
             .map(|(link, base)| {
@@ -2166,7 +2166,7 @@ fn try_overlay_wrapper() -> Option<i32> {
                 })
             })
             .transpose()?;
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         let mut overlay = {
             let overlay = PlatformOverlay::new(game);
             let selected = real_mount
@@ -2179,14 +2179,14 @@ fn try_overlay_wrapper() -> Option<i32> {
                 overlay
             }
         };
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         let mut overlay = PlatformOverlay::new(game);
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         let _ = (&mountpoint, &junction, &base);
         let merged = match overlay.mount() {
             Ok(path) => path.to_path_buf(),
             Err(error) => {
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "linux"))]
                 if let Some(mut guard) = real_path_guard.take() {
                     let _ = guard.restore();
                 }
@@ -2194,7 +2194,7 @@ fn try_overlay_wrapper() -> Option<i32> {
             }
         };
         overlay_log(format!("merged={}", merged.display()));
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         if real_mount.is_some() {
             overlay_log(format!("mounted_at={}", merged.display()));
         }
@@ -2207,6 +2207,8 @@ fn try_overlay_wrapper() -> Option<i32> {
                 "legacy"
             }
         ));
+        #[cfg(target_os = "linux")]
+        overlay_log("mount_mode=fuse-overlayfs");
         #[cfg(windows)]
         let mut junction_guard = if real_mount.is_some() {
             // The real path is the mount point for this run; it will be
@@ -2470,12 +2472,12 @@ fn try_overlay_wrapper() -> Option<i32> {
             }
             overlay_log("child processes finished");
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         if real_mount.is_some() {
             overlay.unmount().map_err(|error| error.to_string())?;
             if let Some(mut guard) = real_path_guard.take() {
                 if let Err(error) = guard.restore() {
-                    overlay_log(format!("junction restore failed: {error}"));
+                    overlay_log(format!("launch root restore failed: {error}"));
                 }
             }
             return Ok(code);
@@ -3064,6 +3066,7 @@ fn path_diagnostic(label: &str, path: &Path, extra: &str) {
     }
 }
 
+#[cfg(windows)]
 fn normalized_windows_path(path: &Path) -> PathBuf {
     let text = path.display().to_string();
     let text = text
@@ -3209,7 +3212,7 @@ fn needs_real_path(game: &steamtron_core::library::Game) -> bool {
     false
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn real_path_status(_game: &steamtron_core::library::Game) -> serde_json::Value {
     serde_json::json!({ "supported": false, "prepared": false })
 }
@@ -3223,7 +3226,7 @@ fn real_path_has_content(game_id: &str) -> bool {
     })
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn real_path_has_content(_game_id: &str) -> bool {
     false
 }
@@ -3268,7 +3271,7 @@ fn prepare_target_for_restore(game_id: &str, root: &Path) -> Result<(), String> 
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn prepare_target_for_restore(_game_id: &str, _root: &Path) -> Result<(), String> {
     Ok(())
 }
@@ -3322,7 +3325,7 @@ fn repair_real_path_junction(game_id: &str) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn repair_real_path_junction(_game_id: &str) {}
 
 #[cfg(windows)]
@@ -3551,14 +3554,644 @@ fn remove_empty_mount_dir(path: &Path) {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[derive(serde::Deserialize, serde::Serialize)]
+struct RealPathLayout {
+    content: PathBuf,
+    launch: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+enum LayoutRecord {
+    Current(RealPathLayout),
+}
+
+#[cfg(target_os = "linux")]
+fn real_path_record_path(game_id: &str) -> PathBuf {
+    steamtron_core::paths::layout()
+        .home()
+        .join("overlays")
+        .join(format!("{game_id}.json"))
+}
+
+#[cfg(target_os = "linux")]
+fn read_layout_record(game_id: &str) -> Option<LayoutRecord> {
+    let bytes = std::fs::read(real_path_record_path(game_id)).ok()?;
+    serde_json::from_slice::<RealPathLayout>(&bytes)
+        .ok()
+        .map(LayoutRecord::Current)
+}
+
+#[cfg(target_os = "linux")]
+fn real_path_layout(game_id: &str) -> Option<RealPathLayout> {
+    match read_layout_record(game_id)? {
+        LayoutRecord::Current(layout) => layout.content.is_dir().then_some(layout),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn launch_root_for(content: &Path) -> Option<PathBuf> {
+    steamtron_core::library::launch_root(content)
+}
+
+#[cfg(target_os = "linux")]
+fn remove_empty_launch_root(launch: &Path) {
+    if let Some(parent) = launch.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn layout_log(message: String) {
+    use std::io::Write;
+
+    let target = steamtron_core::paths::layout()
+        .diagnostics()
+        .join("overlay-layout.log");
+    if let Some(parent) = target.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&target)
+    {
+        let _ = writeln!(file, "{stamp} {message}");
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_mountpoint(path: &Path) -> bool {
+    let Ok(mountinfo) = std::fs::read_to_string("/proc/self/mountinfo") else {
+        return false;
+    };
+    let path = path.to_string_lossy();
+    mountinfo.lines().any(|line| {
+        line.split(" - ")
+            .next()
+            .and_then(|prefix| prefix.split_whitespace().nth(4))
+            .map(unescape_mountinfo)
+            .is_some_and(|value| value == path)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn unescape_mountinfo(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut result = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 3 < bytes.len() {
+            let digits = &value[index + 1..index + 4];
+            if digits.bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
+                if let Ok(decoded) = u8::from_str_radix(digits, 8) {
+                    result.push(decoded as char);
+                    index += 4;
+                    continue;
+                }
+            }
+        }
+        result.push(bytes[index] as char);
+        index += 1;
+    }
+    result
+}
+
+#[cfg(target_os = "linux")]
+fn unmount_launch_mount(path: &Path) -> Result<(), String> {
+    if !is_mountpoint(path) {
+        return Ok(());
+    }
+    let mut last_error = String::new();
+    for tool in ["fusermount3", "fusermount"] {
+        for flag in ["-u", "-uz"] {
+            match hidden_command(tool).args([flag]).arg(path).status() {
+                Ok(status) if status.success() => return Ok(()),
+                Ok(status) => last_error = format!("{tool} {flag} exited with {status}"),
+                Err(error) => last_error = format!("{tool}: {error}"),
+            }
+        }
+    }
+    Err(if last_error.is_empty() {
+        format!("could not unmount {}", path.display())
+    } else {
+        last_error
+    })
+}
+
+/// Remove an idle symlink or a leftover empty mount directory.
+#[cfg(target_os = "linux")]
+fn clear_launch_path(path: &Path) -> Result<(), String> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "could not inspect launch path {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return std::fs::remove_file(path)
+            .map_err(|error| format!("could not remove {}: {error}", path.display()));
+    }
+    if metadata.is_dir() {
+        if is_mountpoint(path) {
+            return Err(format!(
+                "{} is a live overlay mount; stop the game first",
+                path.display()
+            ));
+        }
+        let empty = std::fs::read_dir(path)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if empty {
+            return std::fs::remove_dir(path)
+                .map_err(|error| format!("could not remove {}: {error}", path.display()));
+        }
+        return Err(format!(
+            "{} is a non-empty launch folder; stop the game first",
+            path.display()
+        ));
+    }
+    Err(format!(
+        "{} is not a symlink or directory",
+        path.display()
+    ))
+}
+
+/// Point `link` at `target` with a relative-path-safe symlink.
+#[cfg(target_os = "linux")]
+fn retarget_symlink(link: &Path, target: &Path) -> Result<(), String> {
+    if !target.is_dir() {
+        return Err(format!(
+            "launch target is not a directory: {}",
+            target.display()
+        ));
+    }
+    clear_launch_path(link)?;
+    if let Some(parent) = link.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    }
+    std::os::unix::fs::symlink(target, link).map_err(|error| {
+        format!(
+            "could not point {} at {}: {error}",
+            link.display(),
+            target.display()
+        )
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_symlink(link: &Path, target: &Path) -> Result<(), String> {
+    if let Ok(metadata) = std::fs::symlink_metadata(link) {
+        if metadata.file_type().is_symlink() {
+            let correct = std::fs::read_link(link)
+                .ok()
+                .is_some_and(|existing| paths_equivalent(&existing, target));
+            if correct && link.is_dir() {
+                return Ok(());
+            }
+        } else if metadata.is_dir() {
+            if is_mountpoint(link) {
+                return Err(format!(
+                    "{} is a live overlay mount; stop the game first",
+                    link.display()
+                ));
+            }
+            let empty = std::fs::read_dir(link)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+            if !empty {
+                return Err(format!(
+                    "{} is a non-empty launch folder; stop the game first",
+                    link.display()
+                ));
+            }
+        }
+    }
+    retarget_symlink(link, target)
+}
+
+#[cfg(target_os = "linux")]
+fn retarget_symlink_with_retry(
+    link: &Path,
+    target: &Path,
+    attempts: usize,
+    delay: std::time::Duration,
+) -> Result<(), String> {
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        match retarget_symlink(link, target) {
+            Ok(()) => {
+                if attempt > 0 {
+                    layout_log(format!(
+                        "symlink recovered after {} attempts link={} target={}",
+                        attempt + 1,
+                        link.display(),
+                        target.display()
+                    ));
+                }
+                return Ok(());
+            }
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(delay);
+        }
+    }
+    Err(last_error.unwrap_or_else(|| format!("could not create symlink {}", link.display())))
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_symlink_with_retry(
+    link: &Path,
+    target: &Path,
+    attempts: usize,
+    delay: std::time::Duration,
+) -> Result<(), String> {
+    let mut last_error = None;
+    for attempt in 0..attempts {
+        match ensure_symlink(link, target) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(delay);
+        }
+    }
+    Err(last_error.unwrap_or_else(|| format!("could not create symlink {}", link.display())))
+}
+
+#[cfg(target_os = "linux")]
+fn clear_mountpoint(path: &Path) -> Result<(), String> {
+    clear_launch_path(path)
+}
+
+/// Rewrite a command argument from the content root to the launch root.
+#[cfg(target_os = "linux")]
+fn launch_arg(value: &str, layout: &RealPathLayout) -> String {
+    let content = layout.content.to_string_lossy();
+    let launch = layout.launch.to_string_lossy();
+    let content = content.trim_end_matches('/');
+    let launch = launch.trim_end_matches('/');
+    if value == content {
+        return launch.to_owned();
+    }
+    let prefix = format!("{content}/");
+    if let Some(rest) = value.strip_prefix(&prefix) {
+        return format!("{launch}/{rest}");
+    }
+    value.to_owned()
+}
+
+#[cfg(target_os = "linux")]
+fn remove_real_path_record(game_id: &str) -> Result<(), String> {
+    let path = real_path_record_path(game_id);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("could not remove {}: {error}", path.display())),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn save_real_path_layout(game_id: &str, layout: &RealPathLayout) -> Result<(), String> {
+    let path = real_path_record_path(game_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    }
+    let payload = serde_json::json!({
+        "content": layout.content.display().to_string(),
+        "launch": layout.launch.display().to_string(),
+    });
+    let bytes = serde_json::to_vec_pretty(&payload).map_err(|error| error.to_string())?;
+    std::fs::write(&path, bytes)
+        .map_err(|error| format!("could not write {}: {error}", path.display()))
+}
+
+#[cfg(target_os = "linux")]
+fn real_path_status(game: &steamtron_core::library::Game) -> serde_json::Value {
+    match read_layout_record(&game.id) {
+        Some(LayoutRecord::Current(layout)) => serde_json::json!({
+            "supported": true,
+            "prepared": layout.content.is_dir(),
+            "content": layout.content.display().to_string(),
+            "launch": layout.launch.display().to_string(),
+            "real": layout.launch.display().to_string(),
+            "base": layout.content.display().to_string(),
+            "mount": layout.launch.display().to_string(),
+        }),
+        None => serde_json::json!({ "supported": true, "prepared": false }),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn real_path_has_content(game_id: &str) -> bool {
+    real_path_layout(game_id).is_some_and(|layout| {
+        std::fs::read_dir(&layout.content)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_target_for_restore(game_id: &str, root: &Path) -> Result<(), String> {
+    match read_layout_record(game_id) {
+        Some(LayoutRecord::Current(layout)) => {
+            if paths_equivalent(&layout.content, root) {
+                clear_launch_path(&layout.launch)?;
+                return Ok(());
+            }
+            if let Ok(metadata) = std::fs::symlink_metadata(&layout.launch) {
+                if metadata.file_type().is_symlink() {
+                    let _ = std::fs::remove_file(&layout.launch);
+                }
+            }
+            remove_real_path_record(game_id)?;
+        }
+        None => {}
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(root) {
+        if metadata.file_type().is_symlink() {
+            std::fs::remove_file(root)
+                .map_err(|error| format!("could not remove {}: {error}", root.display()))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn repair_real_path_junction(game_id: &str) {
+    let running = managed_runs()
+        .lock()
+        .map(|runs| runs.contains_key(game_id))
+        .unwrap_or(true);
+    if running {
+        return;
+    }
+    let Some(layout) = real_path_layout(game_id) else {
+        return;
+    };
+    if is_mountpoint(&layout.launch) {
+        let _ = unmount_launch_mount(&layout.launch);
+    }
+    match std::fs::symlink_metadata(&layout.launch) {
+        Err(_) => {
+            let _ = ensure_symlink_with_retry(
+                &layout.launch,
+                &layout.content,
+                4,
+                std::time::Duration::from_millis(100),
+            );
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let correct = std::fs::read_link(&layout.launch)
+                .ok()
+                .is_some_and(|existing| paths_equivalent(&existing, &layout.content));
+            if !correct || !layout.launch.is_dir() {
+                let _ = retarget_symlink_with_retry(
+                    &layout.launch,
+                    &layout.content,
+                    4,
+                    std::time::Duration::from_millis(100),
+                );
+            }
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            let empty = std::fs::read_dir(&layout.launch)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+            if empty {
+                let _ = clear_launch_path(&layout.launch);
+                let _ = ensure_symlink_with_retry(
+                    &layout.launch,
+                    &layout.content,
+                    4,
+                    std::time::Duration::from_millis(100),
+                );
+            }
+        }
+        Ok(_) => {}
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_real_path(
+    game: &steamtron_core::library::Game,
+    force: bool,
+) -> Result<Option<RealPathLayout>, String> {
+    if game.installation.mode != steamtron_core::library::InstallMode::Managed {
+        return Ok(None);
+    }
+    match read_layout_record(&game.id) {
+        Some(LayoutRecord::Current(layout)) => {
+            if !layout.content.is_dir() {
+                return Err(format!(
+                    "the game content folder is missing: {}",
+                    layout.content.display()
+                ));
+            }
+            if is_mountpoint(&layout.launch) {
+                let running = managed_runs()
+                    .lock()
+                    .map(|runs| runs.contains_key(&game.id))
+                    .unwrap_or(true);
+                if running {
+                    return Err(format!(
+                        "{} is already a live overlay mount",
+                        layout.launch.display()
+                    ));
+                }
+                // A crashed wrapper can leave a stale mount behind. The game
+                // is not tracked as running, so release it before recreating
+                // the idle symlink.
+                unmount_launch_mount(&layout.launch)?;
+            }
+            ensure_symlink_with_retry(
+                &layout.launch,
+                &layout.content,
+                40,
+                std::time::Duration::from_millis(250),
+            )
+            .map_err(|error| {
+                format!(
+                    "could not prepare the launch symlink {} -> {}: {error}",
+                    layout.launch.display(),
+                    layout.content.display()
+                )
+            })?;
+            return Ok(Some(layout));
+        }
+        None => {}
+    }
+    if !force {
+        return Ok(None);
+    }
+    let content = game.installation.root.clone();
+    if !content.is_dir() {
+        return Ok(None);
+    }
+    let launch = launch_root_for(&content)
+        .ok_or_else(|| format!("could not derive the launch root for {}", content.display()))?;
+    ensure_symlink_with_retry(&launch, &content, 40, std::time::Duration::from_millis(250))?;
+    let layout = RealPathLayout {
+        content: content.clone(),
+        launch: launch.clone(),
+    };
+    save_real_path_layout(&game.id, &layout)?;
+    layout_log(format!(
+        "prepared game={} content={} launch={}",
+        game.id,
+        content.display(),
+        launch.display()
+    ));
+    Ok(Some(layout))
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_all_real_path_layouts() {
+    let Ok(library) = steamtron_core::library::Library::load() else {
+        return;
+    };
+    let mut prepared = 0usize;
+    let mut failed = 0usize;
+    for game in library.games() {
+        if game.installation.mode != steamtron_core::library::InstallMode::Managed {
+            continue;
+        }
+        match ensure_real_path(game, true) {
+            Ok(Some(_)) => prepared += 1,
+            Ok(None) => {}
+            Err(error) => {
+                failed += 1;
+                eprintln!(
+                    "SteamTron: could not prepare the Linux launch layout for {}: {error}",
+                    game.title
+                );
+                layout_log(format!(
+                    "failed game={} title={} error={error}",
+                    game.id, game.title
+                ));
+            }
+        }
+    }
+    if failed > 0 {
+        layout_log(format!(
+            "startup layout scan prepared={prepared} failed={failed} managed={}",
+            library.games().len()
+        ));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn restore_real_path_layout(game_id: &str) -> Result<serde_json::Value, String> {
+    let Some(record) = read_layout_record(game_id) else {
+        return Ok(serde_json::json!({ "restored": false }));
+    };
+    match record {
+        LayoutRecord::Current(layout) => {
+            clear_launch_path(&layout.launch)?;
+            remove_real_path_record(game_id)?;
+            remove_empty_launch_root(&layout.launch);
+            layout_log(format!(
+                "detached game={game_id} content={} launch={}",
+                layout.content.display(),
+                layout.launch.display()
+            ));
+            Ok(serde_json::json!({
+                "restored": true,
+                "content": layout.content.display().to_string(),
+                "launch": layout.launch.display().to_string(),
+            }))
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn restore_real_path_after_run(game_id: &str) {
+    let Some(layout) = real_path_layout(game_id) else {
+        return;
+    };
+    if !layout.content.is_dir() {
+        return;
+    }
+    let mut restored = false;
+    let mut last_error = None;
+    for _ in 0..80 {
+        if is_mountpoint(&layout.launch) {
+            let _ = unmount_launch_mount(&layout.launch);
+        }
+        match ensure_symlink(&layout.launch, &layout.content) {
+            Ok(()) => {
+                restored = true;
+                break;
+            }
+            Err(error) => last_error = Some(error),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if !restored {
+        let message = format!(
+            "could not restore the Linux launch symlink after Stop: {} ({})",
+            layout.launch.display(),
+            last_error.unwrap_or_else(|| "no attempt".into())
+        );
+        eprintln!("SteamTron: {message}");
+        layout_log(format!("stop-restore failed game={game_id} {message}"));
+        let path = steamtron_core::paths::layout()
+            .diagnostics_for(game_id)
+            .join("stop-restore.log");
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, message);
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct JunctionGuard {
+    link: PathBuf,
+    base: PathBuf,
+    active: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl JunctionGuard {
+    fn restore(&mut self) -> Result<(), String> {
+        if !self.active {
+            return Ok(());
+        }
+        ensure_symlink(&self.link, &self.base)?;
+        self.active = false;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for JunctionGuard {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = ensure_symlink(&self.link, &self.base);
+        }
+    }
+}
+
 #[tauri::command]
 fn restore_managed_real_path(game_id: String) -> Result<serde_json::Value, String> {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = game_id;
-        return Err("The real-path overlay is only available on Windows.".into());
+        return Err("The real-path overlay is only available on Windows and Linux.".into());
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         use steamtron_core::library::Library;
 
@@ -3735,6 +4368,17 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         path_diagnostic("play-after-retarget-root", &game.installation.root, "");
         path_diagnostic("play-after-retarget-launch", &layout.launch, "");
     }
+    #[cfg(target_os = "linux")]
+    let real_path = match ensure_real_path(&game, true) {
+        Ok(layout) => layout,
+        Err(error) => {
+            eprintln!(
+                "SteamTron: Linux launch layout unavailable for {}: {error}",
+                game.title
+            );
+            None
+        }
+    };
     let steam_root = steam::steam_root().ok();
     #[cfg(target_os = "windows")]
     let client_root = steam_root
@@ -3849,7 +4493,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .map(|id| id.to_string())
             .unwrap_or_else(|| game.id.clone());
         let common = game.installation.root.display().to_string();
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         let (overlay_common, overlay_cwd) = match real_path.as_ref() {
             Some(layout) => (
                 layout.content.display().to_string(),
@@ -3857,19 +4501,27 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             ),
             None => (common.clone(), common.clone()),
         };
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         let (overlay_common, overlay_cwd) = (common.clone(), common.clone());
         let target_cwd = {
-            // Use the resolved executable, not the stored target: imported
-            // games can hold an absolute path from another machine, and the
-            // plan rebases the exe but a stale cwd still breaks the launch.
-            let text = plan
-                .program
-                .parent()
+            // Windows plans the game executable directly; Linux plans Proton
+            // with the game executable as arguments[1]. Use the game's own
+            // directory, not the Proton directory.
+            #[cfg(windows)]
+            let source_path = plan.program.parent().map(Path::to_path_buf);
+            #[cfg(target_os = "linux")]
+            let source_path = plan
+                .arguments
+                .get(1)
+                .and_then(|value| Path::new(value).parent())
+                .map(Path::to_path_buf);
+            #[cfg(not(any(windows, target_os = "linux")))]
+            let source_path = plan.program.parent().map(Path::to_path_buf);
+            let text = source_path
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| overlay_cwd.clone());
             let text = text.strip_prefix(r"\\?\").unwrap_or(&text).to_string();
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             let text = match real_path.as_ref() {
                 Some(layout) => launch_arg(&text, layout),
                 None => text,
@@ -3897,7 +4549,7 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         if let Some(layout) = real_path.as_ref() {
             command
                 .arg("--mountpoint")
@@ -3943,8 +4595,30 @@ fn play_managed(game_id: String) -> Result<serde_json::Value, String> {
         }
         #[cfg(not(target_os = "windows"))]
         {
-            command.arg("--").arg(&plan.arguments[1]);
-            command.args(&plan.arguments[2..]);
+            let target_arg = plan
+                .arguments
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| plan.program.display().to_string());
+            #[cfg(target_os = "linux")]
+            let target_arg = match real_path.as_ref() {
+                Some(layout) => launch_arg(&target_arg, layout),
+                None => target_arg,
+            };
+            command.arg("--").arg(target_arg);
+            #[cfg(target_os = "linux")]
+            let arguments = plan
+                .arguments
+                .iter()
+                .skip(2)
+                .map(|value| match real_path.as_ref() {
+                    Some(layout) => launch_arg(value, layout),
+                    None => value.clone(),
+                })
+                .collect::<Vec<_>>();
+            #[cfg(not(target_os = "linux"))]
+            let arguments = plan.arguments[2..].to_vec();
+            command.args(&arguments);
         }
         // The overlay wrapper builds its own Proton command. Carry the game's
         // launch environment across, otherwise a GoldBerg fixes pack loses
@@ -4375,6 +5049,7 @@ fn stop_managed_blocking(game_id: String) -> Result<(), String> {
         if game.as_ref().is_some_and(|game| !game_process_pids(game).is_empty()) {
             return Err("The game processes did not stop.".into());
         }
+        restore_real_path_after_run(&game_id);
         return Ok(());
     }
     #[cfg(not(target_os = "linux"))]
@@ -7081,9 +7756,9 @@ async fn restore_game_backup(app: tauri::AppHandle) -> Result<Option<serde_json:
     // Save writes the local appmanifest from the live entry, so the restored
     // config contains the targets and settings actually selected here.
     library.save().map_err(|error| error.to_string())?;
-    // prepare_target_for_restore removes the hidden launch junction before the
+    // prepare_target_for_restore removes the hidden launch root before the
     // content folder is renamed; recreate it for the restored content.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     if let Err(error) = ensure_real_path(&game, true) {
         eprintln!(
             "SteamTron: could not prepare the overlay layout after restoring {}: {error}",
@@ -7131,7 +7806,7 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
     if layout.content.exists() {
         return Err("A game folder already exists on the target drive.".into());
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     restore_real_path_layout(&game.id)
         .map_err(|error| format!("Could not remove the overlay layout: {error}"))?;
     if let Some(parent) = layout.content.parent() {
@@ -7152,13 +7827,13 @@ fn move_managed_game(game_id: String, drive_id: String) -> Result<serde_json::Va
     game.installation.root = layout.content;
     game.installation.manifest = layout.manifest;
     game.installation.mode = steamtron_core::library::InstallMode::Managed;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     let updated = game.clone();
     library
         .upsert_game(game)
         .map_err(|error| error.to_string())?;
     library.save().map_err(|error| error.to_string())?;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     if let Err(error) = ensure_real_path(&updated, true) {
         eprintln!(
             "SteamTron: could not prepare the overlay layout after moving {}: {error}",
@@ -7196,7 +7871,7 @@ fn uninstall_managed_game_at(
     if root.as_os_str().is_empty() || root == std::path::Path::new("/") {
         return Err("Refusing to delete an unsafe game folder.".into());
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     restore_real_path_layout(&game.id)
         .map_err(|error| format!("Could not remove the overlay layout: {error}"))?;
     let existed = root.exists();
@@ -8109,7 +8784,7 @@ async fn remove_managed_game(game_id: String) -> Result<serde_json::Value, Strin
             }
         }
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     if let Err(error) = restore_real_path_layout(&game_id) {
         eprintln!(
             "SteamTron: could not remove the overlay layout for {}: {error}",
@@ -8582,7 +9257,7 @@ fn library_snapshot() -> Result<serde_json::Value, String> {
     use steamtron_core::library::Library;
 
     let library = Library::load().map_err(|error| error.to_string())?;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     for game in library.games() {
         repair_real_path_junction(&game.id);
     }
@@ -8710,7 +9385,7 @@ fn main() {
                 let _ = window.maximize();
             }
             setup_tray(app)?;
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             ensure_all_real_path_layouts();
             std::thread::spawn(|| {
                 let _ = download::resolve_smd();
