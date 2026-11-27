@@ -172,3 +172,4 @@ Start every file from [`TEMPLATE.md`](TEMPLATE.md).
 | [0148](0148-unified-base-layout.md) | Unified `.steamtron-base` layout for all managed games | done | 2026-11-24 |
 | [0149](0149-play-stop-pending-feedback.md) | Play and Stop pending feedback | done | 2026-11-24 |
 | [0150](0150-hidden-public-launch-root.md) | Hidden public launch root for managed games (POC) | done | 2026-11-26 |
+| [0151](0151-linux-hidden-launch-root.md) | Linux hidden launch root for managed games | draft | 2026-11-27 |
